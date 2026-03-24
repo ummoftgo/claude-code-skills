@@ -84,7 +84,11 @@ Each agent receives:
 - Explicit scope: which files to create/edit
 - Hard constraint: "Do NOT touch files outside your scope"
 
-After agents return, verify no file conflicts, then integrate.
+After agents return:
+1. **파일 충돌 확인**: 두 에이전트가 같은 파일을 수정하지 않았는지 확인.
+2. **명명 일관성 확인**: API 엔드포인트명, DB 컬럼명, 변수명이 백엔드·프론트엔드 간에 일치하는지 대조.
+3. **통합 테스트**: 애플리케이션을 실행하고 happy path를 end-to-end로 테스트.
+4. **컨텍스트 파일 정리**: 작업 완료 후 `.agent-works/` 의 해당 파일을 삭제하거나 별도 아카이브 폴더로 이동. (`.gitignore`에 `.agent-works/` 추가 권장)
 
 ---
 

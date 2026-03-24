@@ -81,3 +81,8 @@ After the user reads the report, offer to fix findings one at a time. Start with
 - Add a short comment: `// Security: [reason] per security review`
 - Run any configured tests after each fix
 - Do not bundle unrelated findings into one commit
+
+**After each fix, verify the patch was applied correctly:**
+1. Re-run the grep pattern from the reference file for that specific vulnerability (e.g., the SQL injection audit pattern).
+2. Confirm the vulnerable pattern no longer appears in the fixed file(s).
+3. If any instance remains, fix before moving to the next finding.

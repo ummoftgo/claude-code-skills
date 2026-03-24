@@ -31,7 +31,11 @@ Run all applicable tools. For each tool, check if it exists first — if not, in
 ### PHP stack
 ```bash
 # Static analysis
-phpstan analyse <src-dir> --level=5 --no-progress --error-format=raw
+# phpstan.neon 또는 phpstan.neon.dist가 있으면 --level 생략 (프로젝트 설정 우선)
+# 설정 파일이 없을 때만 --level=5 사용
+[ -f phpstan.neon ] || [ -f phpstan.neon.dist ] \
+  && phpstan analyse <src-dir> --no-progress --error-format=raw \
+  || phpstan analyse <src-dir> --level=5 --no-progress --error-format=raw
 
 # Style/convention
 phpcs --standard=PSR12 --report=full <src-dir>

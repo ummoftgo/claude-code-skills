@@ -30,11 +30,11 @@
 스킬 파일을 로컬에 복사합니다.
 
 ```bash
-# 팀 저장소에서 클론하는 경우
-git clone <팀-저장소-URL> ~/work/skills
+# 팀 저장소에서 클론하는 경우 (원하는 디렉토리 이름으로 지정)
+git clone <팀-저장소-URL> ~/work/claude-code-skills
 
 # 또는 공유 폴더에서 복사하는 경우
-cp -r /경로/to/skills ~/work/skills
+cp -r /경로/to/claude-code-skills ~/work/claude-code-skills
 ```
 
 ---
@@ -48,13 +48,16 @@ Claude Code는 `~/.claude/skills/` 디렉토리에서 스킬을 로드합니다.
 # ~/.claude/skills/ 디렉토리 생성 (없는 경우)
 mkdir -p ~/.claude/skills
 
+# SKILLS_DIR을 클론한 실제 경로로 변경하세요
+SKILLS_DIR=~/work/claude-code-skills
+
 # 6개 스킬 모두 심볼릭 링크 등록
-ln -s ~/work/skills/use-context7        ~/.claude/skills/use-context7
-ln -s ~/work/skills/web-security-review ~/.claude/skills/web-security-review
-ln -s ~/work/skills/web-parallel-dispatch ~/.claude/skills/web-parallel-dispatch
-ln -s ~/work/skills/web-browser-preview ~/.claude/skills/web-browser-preview
-ln -s ~/work/skills/codex-delegate      ~/.claude/skills/codex-delegate
-ln -s ~/work/skills/code-quality-review ~/.claude/skills/code-quality-review
+ln -s $SKILLS_DIR/use-context7        ~/.claude/skills/use-context7
+ln -s $SKILLS_DIR/web-security-review ~/.claude/skills/web-security-review
+ln -s $SKILLS_DIR/web-parallel-dispatch ~/.claude/skills/web-parallel-dispatch
+ln -s $SKILLS_DIR/web-browser-preview ~/.claude/skills/web-browser-preview
+ln -s $SKILLS_DIR/codex-delegate      ~/.claude/skills/codex-delegate
+ln -s $SKILLS_DIR/code-quality-review ~/.claude/skills/code-quality-review
 ```
 
 > **팁**: 심볼릭 링크 대신 복사하려면 `ln -s` 대신 `cp -r`을 사용하세요.
@@ -125,40 +128,43 @@ Chrome 바로가기에 다음 옵션을 추가하거나, PowerShell에서 실행
 PHP 코드베이스를 검토할 경우 PHP CLI 도구를 설치합니다.
 
 ```bash
+# sudo 없이 설치 — ~/.local/bin/ 사용
+mkdir -p ~/.local/bin
+
 # PHPStan — 정적 분석
 if ! command -v phpstan &>/dev/null; then
-  wget -q -O /usr/local/bin/phpstan \
+  wget -q -O ~/.local/bin/phpstan \
     https://github.com/phpstan/phpstan/releases/latest/download/phpstan.phar
-  chmod +x /usr/local/bin/phpstan
+  chmod +x ~/.local/bin/phpstan
 fi
 
 # phpcs / phpcbf — 코딩 스타일 검사 및 자동 수정
 if ! command -v phpcs &>/dev/null; then
-  curl -qsL https://phars.phpcodesniffer.com/phpcs.phar -o /usr/local/bin/phpcs
-  curl -qsL https://phars.phpcodesniffer.com/phpcbf.phar -o /usr/local/bin/phpcbf
-  chmod +x /usr/local/bin/phpcs /usr/local/bin/phpcbf
+  curl -qsL https://phars.phpcodesniffer.com/phpcs.phar -o ~/.local/bin/phpcs
+  curl -qsL https://phars.phpcodesniffer.com/phpcbf.phar -o ~/.local/bin/phpcbf
+  chmod +x ~/.local/bin/phpcs ~/.local/bin/phpcbf
 fi
 
 # phpmd — 복잡도 및 코드 냄새 감지
 if ! command -v phpmd &>/dev/null; then
-  wget -q -O /usr/local/bin/phpmd \
+  wget -q -O ~/.local/bin/phpmd \
     https://static.phpmd.org/php/latest/phpmd.phar
-  chmod +x /usr/local/bin/phpmd
+  chmod +x ~/.local/bin/phpmd
 fi
 
 # phpcpd — 중복 코드 감지
 if ! command -v phpcpd &>/dev/null; then
-  wget -q -O /usr/local/bin/phpcpd \
+  wget -q -O ~/.local/bin/phpcpd \
     https://phar.phpunit.de/phpcpd.phar
-  chmod +x /usr/local/bin/phpcpd
+  chmod +x ~/.local/bin/phpcpd
 fi
 ```
 
-> `/usr/local/bin`에 쓰기 권한이 없으면 `sudo`를 앞에 붙이거나, `~/bin/`에 설치하고 `PATH`에 추가하세요:
+> `~/.local/bin`이 PATH에 없으면 아래를 `~/.bashrc` 또는 `~/.zshrc`에 추가하세요:
 > ```bash
-> mkdir -p ~/bin
-> export PATH="$HOME/bin:$PATH"  # ~/.bashrc 또는 ~/.zshrc에도 추가
+> export PATH="$HOME/.local/bin:$PATH"
 > ```
+> `install.sh`를 사용하면 PATH 설정까지 자동으로 처리됩니다.
 
 JS 도구(ESLint, Biome, knip 등)는 프로젝트 디렉토리에서 스킬이 자동으로 설치합니다.
 

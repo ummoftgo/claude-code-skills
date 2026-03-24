@@ -28,8 +28,10 @@ Inspect the project to decide whether the URL can be auto-derived or must be req
 | Local dev server | `php -S` process running, or `npm run dev` / Vite port | Detect port, build URL |
 
 **Auto-derive rule**: map CWD to web root relative path.
-- `/var/www/html/myapp/` → `http://localhost/myapp/`
-- `/var/www/html/myapp/pages/users.php` → `http://localhost/myapp/pages/users.php`
+- `/var/www/html/myapp/` → `http://<host>/myapp/`
+- `/var/www/html/myapp/pages/users.php` → `http://<host>/myapp/pages/users.php`
+
+`<host>` 값은 아래 Step 2에서 구한 `WINDOWS_HOST`로 대체합니다. WSL에서 실행 중인 웹 서버(Apache/nginx/php -S)는 Windows Chrome 입장에서 `localhost`가 아닌 WSL IP로 접근해야 합니다.
 
 If a routing framework is detected (e.g., Laravel, Slim in `composer.json`), stop and ask:
 > "라우팅 앱이 감지되었습니다. 브라우저에서 확인할 URL을 알려주세요."
@@ -50,10 +52,13 @@ If both return empty, ask the user to provide the Windows host IP directly.
 
 ## Step 3: Connect and Open
 
-With the host IP resolved, follow the agent-browser skill to:
+With the host IP resolved:
 
-1. Connect to CDP: `agent-browser connect http://${WINDOWS_HOST}:9333`
-2. Open the URL: `agent-browser open <url>`
+1. **URL에 WINDOWS_HOST 적용**: Step 1에서 auto-derive한 URL의 `<host>` 자리를 `${WINDOWS_HOST}`로 대체합니다.
+   - 예: `http://${WINDOWS_HOST}/myapp/pages/users.php`
+2. **CDP 연결 및 페이지 열기** — agent-browser skill에 따라 실행합니다:
+   - Connect: `agent-browser connect http://${WINDOWS_HOST}:9333`
+   - Open: `agent-browser open http://${WINDOWS_HOST}/<path>`
 3. Take a snapshot or screenshot to report the current state
 
 ## Error Handling
