@@ -358,6 +358,29 @@ install_agent_browser() {
     else
         warn "npx를 찾을 수 없습니다. Node.js를 먼저 설치하세요."
     fi
+
+    # npm 패키지 설치 여부 확인
+    echo
+    if command -v npm &>/dev/null; then
+        if npm list -g --depth=0 agent-browser 2>/dev/null | grep -q "agent-browser"; then
+            ok "agent-browser npm 패키지 이미 설치됨"
+        else
+            if ask_yn "agent-browser npm 패키지를 전역으로 설치하시겠습니까?"; then
+                ensure_npm_global_in_path
+                info "agent-browser npm 패키지 전역 설치 중..."
+                if npm install -g agent-browser; then
+                    ok "agent-browser npm 패키지 설치 완료"
+                else
+                    warn "agent-browser npm 패키지 설치에 실패했습니다."
+                    info "수동으로 설치하려면: npm install -g agent-browser"
+                fi
+            else
+                skip "agent-browser npm 패키지 건너뜀"
+            fi
+        fi
+    else
+        warn "npm을 찾을 수 없습니다. Node.js를 먼저 설치하세요."
+    fi
 }
 
 # =============================================================================
@@ -493,11 +516,6 @@ print_path_instructions() {
     local unique_paths
     mapfile -t unique_paths < <(printf '%s\n' "${NEED_PATH_SETUP[@]}" | sort -u)
 
-    echo
-    section "PATH 설정 필요"
-    warn "아래 경로가 현재 PATH에 없습니다. 쉘 설정 파일에 추가해야 설치된 도구를 사용할 수 있습니다."
-    echo
-
     # 쉘 감지
     local rc_file
     if [[ "${SHELL:-}" == */zsh ]]; then
@@ -506,8 +524,27 @@ print_path_instructions() {
         rc_file="$HOME/.bashrc"
     fi
 
-    echo -e "  ${CYAN}# 아래 내용을 ${rc_file} 에 추가하세요:${NC}"
+    # rc 파일에 이미 등록된 경로 필터링
+    local missing_paths=()
     for p in "${unique_paths[@]}"; do
+        if grep -qF "\"${p}:" "$rc_file" 2>/dev/null || grep -qF "=${p}:" "$rc_file" 2>/dev/null; then
+            ok "PATH 이미 등록됨: $p ($rc_file)"
+        else
+            missing_paths+=("$p")
+        fi
+    done
+
+    if [[ ${#missing_paths[@]} -eq 0 ]]; then
+        return
+    fi
+
+    echo
+    section "PATH 설정 필요"
+    warn "아래 경로가 현재 PATH에 없습니다. 쉘 설정 파일에 추가해야 설치된 도구를 사용할 수 있습니다."
+    echo
+
+    echo -e "  ${CYAN}# 아래 내용을 ${rc_file} 에 추가하세요:${NC}"
+    for p in "${missing_paths[@]}"; do
         echo -e "  ${CYAN}export PATH=\"${p}:\$PATH\"${NC}"
     done
 
@@ -516,17 +553,13 @@ print_path_instructions() {
     echo
 
     if ask_yn "${rc_file}에 PATH를 지금 자동으로 추가할까요?"; then
-        for p in "${unique_paths[@]}"; do
-            if ! grep -qF "$p" "$rc_file" 2>/dev/null; then
-                echo "export PATH=\"${p}:\$PATH\"" >> "$rc_file"
-                ok "PATH 추가됨: $p → $rc_file"
-            else
-                ok "이미 등록됨: $p"
-            fi
+        for p in "${missing_paths[@]}"; do
+            echo "export PATH=\"${p}:\$PATH\"" >> "$rc_file"
+            ok "PATH 추가됨: $p → $rc_file"
         done
         echo
         info "현재 세션에 즉시 적용하려면 다음을 실행하세요:"
-        for p in "${unique_paths[@]}"; do
+        for p in "${missing_paths[@]}"; do
             echo -e "  ${CYAN}export PATH=\"${p}:\$PATH\"${NC}"
         done
     fi
