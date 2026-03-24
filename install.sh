@@ -75,7 +75,15 @@ ensure_local_bin_in_path() {
 }
 
 # ~/.npm-global/bin이 PATH에 있는지 확인
+# npm prefix가 이미 $HOME 하위에 있으면 (nvm/fnm/volta 등) 별도 설정 불필요
 ensure_npm_global_in_path() {
+    local current_prefix
+    current_prefix="$(npm config get prefix 2>/dev/null)" || true
+
+    if [[ -n "$current_prefix" && "$current_prefix" == "$HOME"* ]]; then
+        return
+    fi
+
     if [[ ":$PATH:" != *":$NPM_GLOBAL/bin:"* ]]; then
         NEED_PATH_SETUP+=("$NPM_GLOBAL/bin")
     fi
