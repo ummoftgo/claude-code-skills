@@ -220,7 +220,7 @@ install_ctx7() {
     fi
 
     if ask_install_mode "ctx7" \
-        "npm install -g ctx7 (~/.npm-global/bin)" \
+        "npm install -g ctx7 (전역 설치)" \
         "npx ctx7 로 실행 (설치 없음, 매번 다운로드)"; then
         ensure_npm_global_in_path
         info "ctx7 전역 설치 중..."
@@ -254,7 +254,7 @@ install_codex() {
         if ! ask_yn "Codex CLI를 설치하시겠습니까?"; then
             skip "Codex CLI 건너뜀"
         elif ask_install_mode "Codex CLI" \
-            "npm install -g @openai/codex (~/.npm-global/bin)" \
+            "npm install -g @openai/codex (전역 설치)" \
             "npx @openai/codex 로 실행 (설치 없음)"; then
             ensure_npm_global_in_path
             info "Codex CLI 전역 설치 중..."
