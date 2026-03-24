@@ -445,8 +445,16 @@ copy_cdp_script_to_desktop() {
     fi
 
     local win_desktop
+    # Method 1: GetFolderPath (OneDrive 리다이렉션까지 처리)
     win_desktop="$(powershell.exe -NoProfile -Command \
         "[Environment]::GetFolderPath('Desktop')" 2>/dev/null | tr -d '\r')"
+
+    # Method 2 (fallback): Shell.Application COM 오브젝트
+    if [[ -z "$win_desktop" ]]; then
+        win_desktop="$(powershell.exe -NoProfile -Command \
+            "(New-Object -ComObject Shell.Application).NameSpace('Desktop').Self.Path" \
+            2>/dev/null | tr -d '\r')"
+    fi
 
     if [[ -z "$win_desktop" ]]; then
         warn "Windows 바탕화면 경로를 가져오지 못했습니다."
@@ -456,6 +464,11 @@ copy_cdp_script_to_desktop() {
     # Windows 경로 → WSL 경로로 변환
     local wsl_desktop
     wsl_desktop="$(wslpath "$win_desktop" 2>/dev/null)"
+
+    # wslpath 실패 시 수동 변환: C:\path → /mnt/c/path
+    if [[ -z "$wsl_desktop" ]]; then
+        wsl_desktop="$(printf '%s' "$win_desktop" | sed 's|\\|/|g; s|^\([A-Za-z]\):|/mnt/\L\1|')"
+    fi
 
     if [[ -z "$wsl_desktop" || ! -d "$wsl_desktop" ]]; then
         warn "바탕화면 경로 변환 실패: $win_desktop"
