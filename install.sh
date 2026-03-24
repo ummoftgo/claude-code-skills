@@ -340,26 +340,26 @@ install_agent_browser() {
     section "agent-browser 스킬 (web-browser-preview 스킬용)"
     info "WSL에서 Windows Chrome으로 브라우저 미리보기 시 필요합니다."
 
+    # --- 스킬 설치 ---
     if [[ -d "$SKILLS_INSTALL_DIR/agent-browser" ]]; then
         ok "agent-browser 스킬이 이미 설치되어 있습니다."
-        return
-    fi
-
-    echo
-    if ! ask_yn "agent-browser 스킬을 설치하시겠습니까?"; then
-        skip "agent-browser 건너뜀 (web-browser-preview 스킬 미동작)"
-        return
-    fi
-
-    if command -v npx &>/dev/null; then
-        info "agent-browser 스킬 설치 중..."
-        npx skills add vercel-labs/agent-browser --skill agent-browser
-        ok "agent-browser 스킬 설치 완료"
     else
-        warn "npx를 찾을 수 없습니다. Node.js를 먼저 설치하세요."
+        echo
+        if ! ask_yn "agent-browser 스킬을 설치하시겠습니까?"; then
+            skip "agent-browser 건너뜀 (web-browser-preview 스킬 미동작)"
+            return
+        fi
+
+        if command -v npx &>/dev/null; then
+            info "agent-browser 스킬 설치 중..."
+            npx skills add vercel-labs/agent-browser --skill agent-browser
+            ok "agent-browser 스킬 설치 완료"
+        else
+            warn "npx를 찾을 수 없습니다. Node.js를 먼저 설치하세요."
+        fi
     fi
 
-    # npm 패키지 설치 여부 확인
+    # --- npm 패키지 설치 (스킬 설치 여부와 무관하게 항상 확인) ---
     echo
     if command -v npm &>/dev/null; then
         if npm list -g --depth=0 agent-browser 2>/dev/null | grep -q "agent-browser"; then
