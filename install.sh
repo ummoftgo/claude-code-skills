@@ -27,6 +27,9 @@ NEED_PATH_SETUP=()
 # codex 사용 여부 (create_skill_links에서 참조)
 USE_CODEX=true
 
+# 스킬 설치 방식: "symlink" 또는 "copy"
+SKILL_INSTALL_MODE="symlink"
+
 # =============================================================================
 # 유틸 함수
 # =============================================================================
@@ -390,11 +393,92 @@ install_agent_browser() {
 }
 
 # =============================================================================
-# 섹션 6: 스킬 심볼릭 링크 생성
+# 섹션 6: 스킬 설치 방식 선택 + 공용 헬퍼
+# =============================================================================
+
+ask_skill_install_mode() {
+    section "스킬 설치 방식 선택"
+    echo -e "  ${BOLD}1)${NC} 심볼릭 링크 — 저장소 파일을 직접 참조 (저장소 수정이 자동 반영)"
+    echo -e "  ${BOLD}2)${NC} 파일 복사   — 스킬 파일을 독립적으로 복사 (저장소 없이도 동작)"
+    echo
+    while true; do
+        read -rp "  선택 (1/2): " choice
+        case "$choice" in
+            1) SKILL_INSTALL_MODE="symlink"; ok "심볼릭 링크 방식 선택"; return ;;
+            2) SKILL_INSTALL_MODE="copy";    ok "파일 복사 방식 선택";   return ;;
+            *) warn "1 또는 2를 입력하세요." ;;
+        esac
+    done
+}
+
+# install_skill <skill_name> <dst_dir>
+# SKILL_INSTALL_MODE 에 따라 심볼릭 링크 또는 복사로 스킬을 설치한다.
+install_skill() {
+    local skill="$1"
+    local dst_dir="$2"
+    local src="$SCRIPT_DIR/$skill"
+    local dst="$dst_dir/$skill"
+
+    if [[ ! -d "$src" ]]; then
+        warn "소스 디렉토리 없음: $src — 건너뜀"
+        return
+    fi
+
+    if [[ "$SKILL_INSTALL_MODE" == "copy" ]]; then
+        if [[ -L "$dst" ]]; then
+            warn "${skill} 위치에 심볼릭 링크가 있습니다: $dst"
+            if ask_yn "  링크를 제거하고 파일로 복사하시겠습니까?"; then
+                rm "$dst"
+                cp -r "$src" "$dst"
+                ok "${skill} → ${dst} (복사, 링크 대체)"
+            else
+                skip "${skill} 건너뜀"
+            fi
+        elif [[ -d "$dst" ]]; then
+            warn "${skill} 디렉토리가 이미 존재합니다: $dst"
+            if ask_yn "  덮어쓰시겠습니까?"; then
+                rm -rf "$dst"
+                cp -r "$src" "$dst"
+                ok "${skill} → ${dst} (복사, 덮어씀)"
+            else
+                skip "${skill} 건너뜀"
+            fi
+        else
+            cp -r "$src" "$dst"
+            ok "${skill} → ${dst} (복사)"
+        fi
+    else
+        # symlink mode
+        if [[ -L "$dst" ]]; then
+            local current_target
+            current_target="$(readlink "$dst")"
+            if [[ "$current_target" == "$src" ]]; then
+                ok "${skill} 링크 이미 존재 (최신)"
+            else
+                warn "${skill} 링크가 다른 경로를 가리킵니다: $current_target"
+                if ask_yn "  링크를 현재 경로(${src})로 업데이트할까요?"; then
+                    ln -sfn "$src" "$dst"
+                    ok "${skill} → ${dst} (링크 업데이트)"
+                else
+                    skip "${skill} 링크 업데이트 건너뜀"
+                fi
+            fi
+        elif [[ -d "$dst" ]]; then
+            warn "${skill} 위치에 실제 디렉토리가 있습니다: $dst"
+            skip "${skill} 건너뜀 (수동 처리 필요)"
+        else
+            ln -s "$src" "$dst"
+            ok "${skill} → ${dst} (링크)"
+        fi
+    fi
+}
+
+# =============================================================================
+# 섹션 7: Claude Code 스킬 설치
 # =============================================================================
 
 create_skill_links() {
-    section "스킬 심볼릭 링크 생성 → ${SKILLS_INSTALL_DIR}"
+    section "Claude Code 스킬 설치 → ${SKILLS_INSTALL_DIR}"
 
     mkdir -p "$SKILLS_INSTALL_DIR"
 
@@ -414,41 +498,12 @@ create_skill_links() {
     fi
 
     for skill in "${skills[@]}"; do
-        local src="$SCRIPT_DIR/$skill"
-        local dst="$SKILLS_INSTALL_DIR/$skill"
-
-        if [[ ! -d "$src" ]]; then
-            warn "소스 디렉토리 없음: $src — 건너뜀"
-            continue
-        fi
-
-        if [[ -L "$dst" ]]; then
-            # 기존 링크가 있으면 대상이 올바른지 확인
-            local current_target
-            current_target="$(readlink "$dst")"
-            if [[ "$current_target" == "$src" ]]; then
-                ok "${skill} 링크 이미 존재 (최신)"
-            else
-                warn "${skill} 링크가 다른 경로를 가리킵니다: $current_target"
-                if ask_yn "  링크를 현재 경로(${src})로 업데이트할까요?"; then
-                    ln -sfn "$src" "$dst"
-                    ok "${skill} 링크 업데이트 완료"
-                else
-                    skip "${skill} 링크 업데이트 건너뜀"
-                fi
-            fi
-        elif [[ -d "$dst" ]]; then
-            warn "${skill} 위치에 실제 디렉토리가 있습니다: $dst"
-            skip "${skill} 건너뜀 (수동 처리 필요)"
-        else
-            ln -s "$src" "$dst"
-            ok "${skill} → ${dst}"
-        fi
+        install_skill "$skill" "$SKILLS_INSTALL_DIR"
     done
 }
 
 # =============================================================================
-# 섹션 7: Codex 스킬 설치 (선택)
+# 섹션 8: Codex 스킬 설치 (선택)
 # =============================================================================
 
 install_codex_skills() {
@@ -502,40 +557,12 @@ install_codex_skills() {
 
     echo
     for skill in "${selected_skills[@]}"; do
-        local src="$SCRIPT_DIR/$skill"
-        local dst="$codex_skills_dir/$skill"
-
-        if [[ ! -d "$src" ]]; then
-            warn "소스 디렉토리 없음: $src — 건너뜀"
-            continue
-        fi
-
-        if [[ -L "$dst" ]]; then
-            local current_target
-            current_target="$(readlink "$dst")"
-            if [[ "$current_target" == "$src" ]]; then
-                ok "${skill} 링크 이미 존재 (최신)"
-            else
-                warn "${skill} 링크가 다른 경로를 가리킵니다: $current_target"
-                if ask_yn "  링크를 현재 경로(${src})로 업데이트할까요?"; then
-                    ln -sfn "$src" "$dst"
-                    ok "${skill} 링크 업데이트 완료"
-                else
-                    skip "${skill} 링크 업데이트 건너뜀"
-                fi
-            fi
-        elif [[ -d "$dst" ]]; then
-            warn "${skill} 위치에 실제 디렉토리가 있습니다: $dst"
-            skip "${skill} 건너뜀 (수동 처리 필요)"
-        else
-            ln -s "$src" "$dst"
-            ok "${skill} → ${dst}"
-        fi
+        install_skill "$skill" "$codex_skills_dir"
     done
 }
 
 # =============================================================================
-# 섹션 8: Chrome DevTool Protocol 스크립트 → Windows 바탕화면 복사
+# 섹션 9: Chrome DevTool Protocol 스크립트 → Windows 바탕화면 복사
 # =============================================================================
 
 copy_cdp_script_to_desktop() {
@@ -599,7 +626,7 @@ copy_cdp_script_to_desktop() {
 }
 
 # =============================================================================
-# 섹션 9: PATH 설정 안내
+# 섹션 10: PATH 설정 안내
 # =============================================================================
 
 print_path_instructions() {
@@ -679,6 +706,7 @@ main() {
     install_codex
     setup_context7_mcp
     install_agent_browser
+    ask_skill_install_mode
     create_skill_links
     install_codex_skills
     copy_cdp_script_to_desktop
