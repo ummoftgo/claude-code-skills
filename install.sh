@@ -220,7 +220,7 @@ install_ctx7() {
     fi
 
     if ask_install_mode "ctx7" \
-        "npm install -g ctx7 (~/.npm-global/bin)" \
+        "npm install -g ctx7 (전역 설치)" \
         "npx ctx7 로 실행 (설치 없음, 매번 다운로드)"; then
         ensure_npm_global_in_path
         info "ctx7 전역 설치 중..."
@@ -254,7 +254,7 @@ install_codex() {
         if ! ask_yn "Codex CLI를 설치하시겠습니까?"; then
             skip "Codex CLI 건너뜀"
         elif ask_install_mode "Codex CLI" \
-            "npm install -g @openai/codex (~/.npm-global/bin)" \
+            "npm install -g @openai/codex (전역 설치)" \
             "npx @openai/codex 로 실행 (설치 없음)"; then
             ensure_npm_global_in_path
             info "Codex CLI 전역 설치 중..."
@@ -265,14 +265,18 @@ install_codex() {
         fi
     fi
 
-    # --- OPENAI_API_KEY 확인 (Codex 설치 여부와 무관하게 항상 확인) ---
-    if [[ -z "${OPENAI_API_KEY:-}" ]]; then
-        echo
-        warn "OPENAI_API_KEY 환경변수가 설정되어 있지 않습니다."
-        info "~/.bashrc 또는 ~/.zshrc에 다음을 추가하세요:"
-        echo -e "  ${CYAN}export OPENAI_API_KEY=\"sk-...\"${NC}"
-    else
+    # --- 인증 확인 (Codex 사용 시 필수) ---
+    if [[ -n "${OPENAI_API_KEY:-}" ]]; then
         ok "OPENAI_API_KEY 환경변수 확인됨"
+    elif command -v codex &>/dev/null && codex auth status &>/dev/null; then
+        ok "codex 로그인 상태 확인됨"
+    else
+        echo
+        warn "Codex 인증이 설정되어 있지 않습니다."
+        info "다음 중 하나로 인증을 설정하세요:"
+        echo -e "  ${CYAN}1) codex auth login${NC}  (브라우저 로그인)"
+        echo -e "  ${CYAN}2) ~/.bashrc 또는 ~/.zshrc에 추가:${NC}"
+        echo -e "     ${CYAN}export OPENAI_API_KEY=\"sk-...\"${NC}"
     fi
 }
 
