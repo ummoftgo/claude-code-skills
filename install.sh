@@ -448,7 +448,94 @@ create_skill_links() {
 }
 
 # =============================================================================
-# 섹션 7: Chrome DevTool Protocol 스크립트 → Windows 바탕화면 복사
+# 섹션 7: Codex 스킬 설치 (선택)
+# =============================================================================
+
+install_codex_skills() {
+    section "Codex 스킬 설치 (선택)"
+
+    if ! $USE_CODEX; then
+        skip "Codex 미사용 — Codex 스킬 설치 건너뜀"
+        return
+    fi
+
+    local codex_skills_dir="$HOME/.codex/skills/local"
+
+    if [[ ! -d "$HOME/.codex/skills" ]]; then
+        warn "~/.codex/skills 디렉토리가 없습니다. Codex가 설치되어 있는지 확인하세요."
+        return
+    fi
+
+    info "Claude Code 스킬을 Codex에도 설치할 수 있습니다."
+    info "설치 경로: ${codex_skills_dir}"
+    echo
+
+    if ! ask_yn "Codex에도 스킬을 설치하시겠습니까?"; then
+        skip "Codex 스킬 설치 건너뜀"
+        return
+    fi
+
+    mkdir -p "$codex_skills_dir"
+
+    # codex-delegate는 "Claude → Codex 위임" 스킬이므로 Codex 자신에게는 제외
+    local available_skills=(
+        "use-context7"
+        "web-security-review"
+        "web-parallel-dispatch"
+        "web-browser-preview"
+        "code-quality-review"
+    )
+
+    echo
+    info "설치할 스킬을 선택하세요:"
+    local selected_skills=()
+    for skill in "${available_skills[@]}"; do
+        if ask_yn "  ${skill}"; then
+            selected_skills+=("$skill")
+        fi
+    done
+
+    if [[ ${#selected_skills[@]} -eq 0 ]]; then
+        skip "선택된 스킬 없음"
+        return
+    fi
+
+    echo
+    for skill in "${selected_skills[@]}"; do
+        local src="$SCRIPT_DIR/$skill"
+        local dst="$codex_skills_dir/$skill"
+
+        if [[ ! -d "$src" ]]; then
+            warn "소스 디렉토리 없음: $src — 건너뜀"
+            continue
+        fi
+
+        if [[ -L "$dst" ]]; then
+            local current_target
+            current_target="$(readlink "$dst")"
+            if [[ "$current_target" == "$src" ]]; then
+                ok "${skill} 링크 이미 존재 (최신)"
+            else
+                warn "${skill} 링크가 다른 경로를 가리킵니다: $current_target"
+                if ask_yn "  링크를 현재 경로(${src})로 업데이트할까요?"; then
+                    ln -sfn "$src" "$dst"
+                    ok "${skill} 링크 업데이트 완료"
+                else
+                    skip "${skill} 링크 업데이트 건너뜀"
+                fi
+            fi
+        elif [[ -d "$dst" ]]; then
+            warn "${skill} 위치에 실제 디렉토리가 있습니다: $dst"
+            skip "${skill} 건너뜀 (수동 처리 필요)"
+        else
+            ln -s "$src" "$dst"
+            ok "${skill} → ${dst}"
+        fi
+    done
+}
+
+# =============================================================================
+# 섹션 8: Chrome DevTool Protocol 스크립트 → Windows 바탕화면 복사
 # =============================================================================
 
 copy_cdp_script_to_desktop() {
@@ -512,7 +599,7 @@ copy_cdp_script_to_desktop() {
 }
 
 # =============================================================================
-# 섹션 8: PATH 설정 안내
+# 섹션 9: PATH 설정 안내
 # =============================================================================
 
 print_path_instructions() {
@@ -593,6 +680,7 @@ main() {
     setup_context7_mcp
     install_agent_browser
     create_skill_links
+    install_codex_skills
     copy_cdp_script_to_desktop
     print_path_instructions
 
@@ -603,6 +691,9 @@ main() {
     echo
     info "Claude Code를 재시작하면 스킬이 활성화됩니다."
     info "스킬 확인: Claude Code에서 /skills list 실행"
+    if $USE_CODEX; then
+        info "Codex 스킬 확인: ~/.codex/skills/local/ 디렉토리"
+    fi
 }
 
 main

@@ -185,6 +185,28 @@ export OPENAI_API_KEY="sk-..."
 
 ---
 
+### Codex 스킬 설치 (선택)
+
+`install.sh` 실행 시 Codex에도 스킬을 설치할지 묻는 단계가 있습니다. 설치하면 Claude Code와 동일한 스킬을 Codex에서도 사용할 수 있습니다.
+
+- 설치 경로: `~/.codex/skills/local/{스킬명}/`
+- `codex-delegate`는 "Claude → Codex 위임" 스킬이므로 Codex 자신에게는 설치되지 않습니다.
+
+수동으로 설치하려면:
+
+```bash
+SKILLS_DIR=~/work/claude-code-skills
+mkdir -p ~/.codex/skills/local
+
+ln -s $SKILLS_DIR/use-context7        ~/.codex/skills/local/use-context7
+ln -s $SKILLS_DIR/web-security-review ~/.codex/skills/local/web-security-review
+ln -s $SKILLS_DIR/web-parallel-dispatch ~/.codex/skills/local/web-parallel-dispatch
+ln -s $SKILLS_DIR/web-browser-preview ~/.codex/skills/local/web-browser-preview
+ln -s $SKILLS_DIR/code-quality-review ~/.codex/skills/local/code-quality-review
+```
+
+---
+
 ## 4단계: 동작 확인
 
 Claude Code를 열고 각 스킬이 정상 인식되는지 확인합니다.
