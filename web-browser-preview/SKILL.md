@@ -1,11 +1,13 @@
 ---
 name: web-browser-preview
-description: "Open the current working file or project in a Windows browser for visual review, using agent-browser connected to Windows Chrome CDP (WSL environment). Trigger when user says '브라우저에서 확인해', '브라우저로 열어줘', 'browser로 확인해', 'check in browser', or similar requests. Automatically derives the URL from the current working path when possible; asks the user for the URL when the project uses routing."
+description: "Open the current working file or project in a Windows browser for visual review, using agent-browser connected to Windows Chrome CDP (WSL environment). Trigger when user says '브라우저에서 확인해', '브라우저로 열어줘', 'browser로 확인해', 'check in browser', or similar requests. Automatically derives the URL from the current working path when possible; asks the user for the URL when the project uses routing. IMPORTANT: In WSL environments, always use this skill instead of invoking agent-browser directly. This skill supersedes agent-browser for all browser preview tasks in WSL — it resolves the Windows Host IP and derives the correct URL before delegating browser commands to agent-browser."
 ---
 
 # Web Browser Preview
 
 Open the current project in a Windows browser from WSL for visual review. This skill handles URL resolution and WSL→Windows CDP connection. Actual browser commands follow the **agent-browser skill**.
+
+> **Priority over agent-browser**: Even if the `agent-browser` skill is installed, always invoke this skill first for any browser preview request in a WSL environment. This skill resolves the WSL→Windows IP and derives the correct URL, then delegates the actual browser interaction to `agent-browser`.
 
 ## Prerequisites (Step 0)
 
