@@ -268,13 +268,13 @@ install_codex() {
     # --- 인증 확인 (Codex 사용 시 필수) ---
     if [[ -n "${OPENAI_API_KEY:-}" ]]; then
         ok "OPENAI_API_KEY 환경변수 확인됨"
-    elif command -v codex &>/dev/null && codex auth status &>/dev/null; then
+    elif command -v codex &>/dev/null && codex login status &>/dev/null; then
         ok "codex 로그인 상태 확인됨"
     else
         echo
         warn "Codex 인증이 설정되어 있지 않습니다."
         info "다음 중 하나로 인증을 설정하세요:"
-        echo -e "  ${CYAN}1) codex auth login${NC}  (브라우저 로그인)"
+        echo -e "  ${CYAN}1) codex login${NC}  (브라우저 로그인)"
         echo -e "  ${CYAN}2) ~/.bashrc 또는 ~/.zshrc에 추가:${NC}"
         echo -e "     ${CYAN}export OPENAI_API_KEY=\"sk-...\"${NC}"
     fi
