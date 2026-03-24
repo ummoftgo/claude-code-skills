@@ -361,8 +361,11 @@ install_agent_browser() {
             skip "agent-browser 스킬 건너뜀 (web-browser-preview 스킬 미동작)"
         elif command -v npx &>/dev/null; then
             info "agent-browser 스킬 설치 중..."
-            npx skills add vercel-labs/agent-browser --skill agent-browser
-            ok "agent-browser 스킬 설치 완료"
+            if npx skills add vercel-labs/agent-browser --skill agent-browser; then
+                ok "agent-browser 스킬 설치 완료"
+            else
+                warn "agent-browser 스킬 설치 실패. 수동으로 설치하세요: npx skills add vercel-labs/agent-browser --skill agent-browser"
+            fi
         else
             warn "npx를 찾을 수 없습니다. Node.js를 먼저 설치하세요."
         fi
@@ -425,6 +428,13 @@ install_skill() {
     fi
 
     if [[ "$SKILL_INSTALL_MODE" == "copy" ]]; then
+        # 안전 검사: dst가 dst_dir 자체이거나 HOME 외부이면 거부
+        if [[ -z "$skill" || "$dst" == "$dst_dir" || "$dst" == "$dst_dir/" || \
+              "$dst/" != "$HOME/"* ]]; then
+            warn "안전 검사 실패: 예상치 못한 경로 — 건너뜀 (${dst})"
+            return
+        fi
+
         if [[ -L "$dst" ]]; then
             warn "${skill} 위치에 심볼릭 링크가 있습니다: $dst"
             if ask_yn "  링크를 제거하고 파일로 복사하시겠습니까?"; then
@@ -649,7 +659,7 @@ print_path_instructions() {
     # rc 파일에 이미 등록된 경로 필터링
     local missing_paths=()
     for p in "${unique_paths[@]}"; do
-        if grep -qF "\"${p}:" "$rc_file" 2>/dev/null || grep -qF "=${p}:" "$rc_file" 2>/dev/null; then
+        if grep -qF "${p}" "$rc_file" 2>/dev/null; then
             ok "PATH 이미 등록됨: $p ($rc_file)"
         else
             missing_paths+=("$p")
