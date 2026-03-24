@@ -239,28 +239,25 @@ install_codex() {
         return
     fi
 
+    # --- Codex CLI 설치 ---
     if command -v codex &>/dev/null; then
         ok "codex 이미 설치됨"
-        return
-    fi
-
-    if ! ask_yn "Codex CLI를 설치하시겠습니까?"; then
-        skip "Codex CLI 건너뜀"
-        return
-    fi
-
-    if ask_install_mode "Codex CLI" \
-        "npm install -g @openai/codex (~/.npm-global/bin)" \
-        "npx @openai/codex 로 실행 (설치 없음)"; then
-        ensure_npm_global_in_path
-        info "Codex CLI 전역 설치 중..."
-        npm install -g @openai/codex
-        ok "Codex CLI 설치 완료"
     else
-        ok "npx @openai/codex 방식 사용"
+        if ! ask_yn "Codex CLI를 설치하시겠습니까?"; then
+            skip "Codex CLI 건너뜀"
+        elif ask_install_mode "Codex CLI" \
+            "npm install -g @openai/codex (~/.npm-global/bin)" \
+            "npx @openai/codex 로 실행 (설치 없음)"; then
+            ensure_npm_global_in_path
+            info "Codex CLI 전역 설치 중..."
+            npm install -g @openai/codex
+            ok "Codex CLI 설치 완료"
+        else
+            ok "npx @openai/codex 방식 사용"
+        fi
     fi
 
-    # OPENAI_API_KEY 확인
+    # --- OPENAI_API_KEY 확인 (Codex 설치 여부와 무관하게 항상 확인) ---
     if [[ -z "${OPENAI_API_KEY:-}" ]]; then
         echo
         warn "OPENAI_API_KEY 환경변수가 설정되어 있지 않습니다."
@@ -346,11 +343,8 @@ install_agent_browser() {
     else
         echo
         if ! ask_yn "agent-browser 스킬을 설치하시겠습니까?"; then
-            skip "agent-browser 건너뜀 (web-browser-preview 스킬 미동작)"
-            return
-        fi
-
-        if command -v npx &>/dev/null; then
+            skip "agent-browser 스킬 건너뜀 (web-browser-preview 스킬 미동작)"
+        elif command -v npx &>/dev/null; then
             info "agent-browser 스킬 설치 중..."
             npx skills add vercel-labs/agent-browser --skill agent-browser
             ok "agent-browser 스킬 설치 완료"
