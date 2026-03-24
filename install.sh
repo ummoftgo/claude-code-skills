@@ -469,13 +469,15 @@ copy_cdp_script_to_desktop() {
 
     local win_desktop
     # Method 1: GetFolderPath (OneDrive 리다이렉션까지 처리)
+    # [Console]::OutputEncoding = UTF8 로 한글/특수문자 포함 경로의 인코딩 깨짐 방지
     win_desktop="$(powershell.exe -NoProfile -Command \
-        "[Environment]::GetFolderPath('Desktop')" 2>/dev/null | tr -d '\r')"
+        "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; [Environment]::GetFolderPath('Desktop')" \
+        2>/dev/null | tr -d '\r')"
 
     # Method 2 (fallback): Shell.Application COM 오브젝트
     if [[ -z "$win_desktop" ]]; then
         win_desktop="$(powershell.exe -NoProfile -Command \
-            "(New-Object -ComObject Shell.Application).NameSpace('Desktop').Self.Path" \
+            "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; (New-Object -ComObject Shell.Application).NameSpace('Desktop').Self.Path" \
             2>/dev/null | tr -d '\r')"
     fi
 
@@ -484,9 +486,9 @@ copy_cdp_script_to_desktop() {
         return
     fi
 
-    # Windows 경로 → WSL 경로로 변환
+    # Windows 경로 → WSL 경로로 변환 (-u: Windows → Unix 방향 명시, 공백·한글 포함 경로 대응)
     local wsl_desktop
-    wsl_desktop="$(wslpath "$win_desktop" 2>/dev/null)"
+    wsl_desktop="$(wslpath -u "$win_desktop" 2>/dev/null)"
 
     # wslpath 실패 시 수동 변환: C:\path → /mnt/c/path
     if [[ -z "$wsl_desktop" ]]; then
