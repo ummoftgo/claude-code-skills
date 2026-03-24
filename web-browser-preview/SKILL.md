@@ -39,11 +39,11 @@ If a routing framework is detected (e.g., Laravel, Slim in `composer.json`), sto
 Windows host IP is not fixed — resolve it at runtime:
 
 ```bash
-# Method 1 (preferred): nameserver from /etc/resolv.conf
-WINDOWS_HOST=$(grep nameserver /etc/resolv.conf | awk '{print $2}' | head -1)
-
-# Method 2 (fallback): default gateway
+# Method 1 (preferred): default gateway
 WINDOWS_HOST=$(ip route show | grep -i default | awk '{print $3}' | head -1)
+
+# Method 2 (fallback): nameserver from /etc/resolv.conf
+WINDOWS_HOST=$(grep nameserver /etc/resolv.conf | awk '{print $2}' | head -1)
 ```
 
 If both return empty, ask the user to provide the Windows host IP directly.
