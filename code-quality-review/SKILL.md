@@ -1,6 +1,6 @@
 ---
 name: code-quality-review
-description: "Review code for quality and performance issues. Trigger when user asks for code quality review, refactoring advice, or code cleanup. Covers: (1) unnecessary or misleading comments, (2) style inconsistencies vs project conventions, (3) duplicated/redundant code, (4) performance inefficiencies — especially evaluation order (cheap checks before expensive ones). Runs CLI tools automatically (PHPStan/phpcs/phpmd/phpcpd for PHP; ESLint/Biome/svelte-check/knip for JS). Adapts per detected language and framework."
+description: "Review code for quality and performance issues. Trigger when user asks for code quality review, refactoring advice, or code cleanup. Covers: (1) unnecessary or misleading comments, (2) style inconsistencies vs project conventions, (3) duplicated/redundant code, (4) performance inefficiencies — especially evaluation order (cheap checks before expensive ones). Runs CLI tools automatically (PHPStan/phpcs/phpmd/phpcpd for PHP; ESLint/Biome/svelte-check/knip for JS; Stylelint for CSS/SCSS). Adapts per detected language and framework."
 ---
 
 # Code Quality Review
@@ -12,14 +12,16 @@ Runs CLI analysis tools first, then supplements with pattern-based review. Adapt
 Load before scanning:
 - `references/php-quality.md` — PHP tool setup, execution, and manual patterns
 - `references/js-quality.md` — JS/Svelte/HTMX tool setup, execution, and manual patterns
+- `references/css-quality.md` — CSS/SCSS tool setup, execution, and manual patterns
 
-Load both for full-stack review.
+Load all applicable files for full-stack review.
 
 ## Step 1: Detect Stack and Infer Conventions
 
 Inspect the project root to determine languages and frameworks:
 - PHP: `composer.json`, `*.php` files → load `references/php-quality.md`
 - JS/Svelte/HTMX: `package.json`, `*.svelte`, `*.js` → load `references/js-quality.md`
+- CSS/SCSS: `*.css`, `*.scss`, `*.sass` files → load `references/css-quality.md`
 
 Infer project conventions from **existing code majority** (not assumed standards):
 - Naming style, indentation, quote style, comment format, component structure
@@ -59,6 +61,12 @@ npx svelte-check --output machine
 
 # Unused exports / dead dependencies
 npx knip
+```
+
+### CSS / SCSS stack
+```bash
+# Stylelint (use if .css or .scss files exist)
+npx stylelint "**/*.css" "**/*.scss" --formatter=compact
 ```
 
 See reference files for installation instructions when tools are missing.
@@ -107,13 +115,15 @@ Merge tool output and manual findings into `code_quality_report.md`.
 [2–3 sentences: overall quality level, most critical findings]
 
 ## Tool Findings
-[Summarised output from PHPStan / phpcs / phpmd / phpcpd / ESLint / knip etc.]
+[Summarised output from PHPStan / phpcs / phpmd / phpcpd / ESLint / knip / Stylelint etc.]
 [Group by tool, strip noise, keep actionable items with file:line references]
 
 ## Style & Convention Issues    [S-N]
 ## Comment Quality Issues       [C-N]
 ## Duplication Issues           [D-N]
 ## Performance Issues           [P-N]
+## CSS / SCSS Issues            [CSS-N]
+  - Location, Issue (specificity / magic number / nesting / dead code), Impact, Suggestion
   - Location, Issue, Impact (low/medium/high), Suggestion
 
 ## Passed Checks
@@ -122,5 +132,5 @@ Merge tool output and manual findings into `code_quality_report.md`.
 
 ## Step 5: Offer Fixes
 
-Fix one finding at a time: Performance → Duplication → Style → Comments.
+Fix one finding at a time: Performance → Duplication → CSS → Style → Comments.
 Keep each fix minimal. Run tests after each change.
