@@ -498,6 +498,7 @@ create_skill_links() {
         "web-parallel-dispatch"
         "web-browser-preview"
         "code-quality-review"
+        "branch-merge-review"
     )
 
     # codex 사용 여부에 따라 codex-delegate 포함
@@ -549,6 +550,7 @@ install_codex_skills() {
         "web-parallel-dispatch"
         "web-browser-preview"
         "code-quality-review"
+        "branch-merge-review"
     )
 
     echo
