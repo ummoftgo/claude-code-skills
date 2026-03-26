@@ -31,21 +31,27 @@ Infer project conventions from **existing code majority** (not assumed standards
 Run all applicable tools. For each tool, check if it exists first — if not, install per the reference file instructions. Capture output for integration into the report.
 
 ### PHP stack
-```bash
-# Static analysis
-# phpstan.neon 또는 phpstan.neon.dist가 있으면 --level 생략 (프로젝트 설정 우선)
-# 설정 파일이 없을 때만 --level=5 사용
-[ -f phpstan.neon ] || [ -f phpstan.neon.dist ] \
-  && phpstan analyse <src-dir> --no-progress --error-format=raw \
-  || phpstan analyse <src-dir> --level=5 --no-progress --error-format=raw
 
-# Style/convention
+**Before running any PHP tool**, resolve the PHP binary version per `references/php-quality.md` Section 0:
+1. Extract required version from `composer.json` (`require.php`)
+2. Compare with `php --version`
+3. If mismatch → try `php{major}.{minor}` CLI (e.g. `php8.3`); if not found → ask the user
+4. Set `PHP_CMD` accordingly; use it for PHPStan (version-sensitive); other tools use default `php`
+
+```bash
+# Static analysis — run under resolved PHP_CMD
+# phpstan.neon / phpstan.neon.dist 존재 시 --level 생략 (프로젝트 설정 우선)
+[ -f phpstan.neon ] || [ -f phpstan.neon.dist ] \
+  && $PHP_CMD $(command -v phpstan) analyse <src-dir> --no-progress --error-format=raw \
+  || $PHP_CMD $(command -v phpstan) analyse <src-dir> --level=5 --no-progress --error-format=raw
+
+# Style/convention (version-agnostic)
 phpcs --standard=PSR12 --report=full <src-dir>
 
-# Complexity, duplication, dead code
+# Complexity, duplication, dead code (version-agnostic)
 phpmd <src-dir> text cleancode,codesize,naming,unusedcode
 
-# Copy-paste detection
+# Copy-paste detection (version-agnostic)
 phpcpd <src-dir>
 ```
 

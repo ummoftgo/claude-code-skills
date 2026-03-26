@@ -3,6 +3,7 @@
 CLI tools and manual patterns for PHP quality review.
 
 ## Table of Contents
+0. [PHP Version Resolution](#0-php-version-resolution)
 1. [CLI Tool Setup](#1-cli-tool-setup)
 2. [Running the Tools](#2-running-the-tools)
 3. [Comment Quality](#3-comment-quality)
@@ -12,41 +13,105 @@ CLI tools and manual patterns for PHP quality review.
 
 ---
 
+## 0. PHP Version Resolution
+
+Before running any PHP tool, verify that the CLI version matches the project's required version.
+A mismatch causes PHPStan to report false positives for syntax and type features introduced in newer PHP versions.
+
+### Detect project PHP version
+
+```bash
+# Extract required PHP version from composer.json (handles ^8.1, >=8.2, ~8.3, 8.3.* etc.)
+PROJECT_PHP_VER=""
+if [ -f composer.json ]; then
+  PHP_CONSTRAINT=$(grep -oP '"php"\s*:\s*"\K[^"]+' composer.json 2>/dev/null | head -1)
+  PROJECT_PHP_VER=$(echo "$PHP_CONSTRAINT" | grep -oP '\d+\.\d+' | head -1)
+fi
+
+# Current CLI version
+CLI_PHP_VER=$(php -r 'echo PHP_MAJOR_VERSION . "." . PHP_MINOR_VERSION;' 2>/dev/null)
+```
+
+### Resolve PHP_CMD
+
+```bash
+PHP_CMD="php"   # default
+
+if [ -n "$PROJECT_PHP_VER" ] && [ "$PROJECT_PHP_VER" != "$CLI_PHP_VER" ]; then
+  echo "⚠ PHP version mismatch — project requires $PROJECT_PHP_VER, system php is $CLI_PHP_VER"
+
+  # 1) Try versioned CLI first (php8.3, php8.4, ...)
+  ALT_PHP="php${PROJECT_PHP_VER}"
+  if command -v "$ALT_PHP" &>/dev/null; then
+    PHP_CMD="$ALT_PHP"
+    echo "✓ Using $ALT_PHP"
+  else
+    # 2) Ask the user
+    echo "  Versioned CLI '$ALT_PHP' not found on PATH."
+    echo "  Options:"
+    echo "    a) Proceed with system php $CLI_PHP_VER (PHPStan may report false positives)"
+    echo "    b) Provide the path to a php$PROJECT_PHP_VER binary"
+    # Wait for user response; if they provide a path, set PHP_CMD accordingly:
+    # PHP_CMD="/usr/local/bin/php8.3"
+  fi
+fi
+
+echo "PHP_CMD=$PHP_CMD ($(${PHP_CMD} -r 'echo PHP_VERSION;' 2>/dev/null))"
+```
+
+### Using PHP_CMD with tools
+
+Only **PHPStan** uses the PHP binary for type analysis — the others are version-agnostic style checkers.
+
+```bash
+# PHPStan — run under the correct PHP binary
+$PHP_CMD $(command -v phpstan) analyse <src> --no-progress --error-format=raw
+
+# phpcs / phpmd / phpcpd — version-agnostic; default php is fine
+phpcs --report=full <src>
+phpmd <src> text cleancode,codesize,naming,unusedcode
+phpcpd <src>
+```
+
+---
+
 ## 1. CLI Tool Setup
 
 Install all tools as global PHAR binaries. Check existence before installing.
 
 ```bash
+mkdir -p ~/.local/bin
+
 # PHPStan — static analysis (types, bugs, dead code)
 if ! command -v phpstan &>/dev/null; then
-  wget -q -O /usr/local/bin/phpstan \
+  wget -q -O ~/.local/bin/phpstan \
     https://github.com/phpstan/phpstan/releases/latest/download/phpstan.phar
-  chmod +x /usr/local/bin/phpstan
+  chmod +x ~/.local/bin/phpstan
 fi
 
 # phpcs — coding style / PSR compliance
 if ! command -v phpcs &>/dev/null; then
-  curl -qsL https://phars.phpcodesniffer.com/phpcs.phar -o /usr/local/bin/phpcs
-  curl -qsL https://phars.phpcodesniffer.com/phpcbf.phar -o /usr/local/bin/phpcbf
-  chmod +x /usr/local/bin/phpcs /usr/local/bin/phpcbf
+  curl -qsL https://phars.phpcodesniffer.com/phpcs.phar -o ~/.local/bin/phpcs
+  curl -qsL https://phars.phpcodesniffer.com/phpcbf.phar -o ~/.local/bin/phpcbf
+  chmod +x ~/.local/bin/phpcs ~/.local/bin/phpcbf
 fi
 
 # phpmd — complexity, dead code, code smells
 if ! command -v phpmd &>/dev/null; then
-  wget -q -O /usr/local/bin/phpmd \
+  wget -q -O ~/.local/bin/phpmd \
     https://static.phpmd.org/php/latest/phpmd.phar
-  chmod +x /usr/local/bin/phpmd
+  chmod +x ~/.local/bin/phpmd
 fi
 
 # phpcpd — copy-paste / duplication detection
 if ! command -v phpcpd &>/dev/null; then
-  wget -q -O /usr/local/bin/phpcpd \
+  wget -q -O ~/.local/bin/phpcpd \
     https://phar.phpunit.de/phpcpd.phar
-  chmod +x /usr/local/bin/phpcpd
+  chmod +x ~/.local/bin/phpcpd
 fi
 ```
 
-> If `sudo` is unavailable, install to `~/bin/` and ensure it is in `$PATH`.
+> Install path is `~/.local/bin` (no sudo required). Ensure it is in `$PATH`; `install.sh` handles this automatically.
 
 ---
 
