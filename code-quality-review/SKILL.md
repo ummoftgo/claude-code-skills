@@ -84,6 +84,8 @@ Flag deviations from the inferred project majority only — not from external st
 Tools cover most of this; focus manual review on semantic inconsistencies tools can't detect
 (e.g., same concept named differently in different files).
 
+**Svelte lifecycle review rule**: Before flagging any store subscription or lifecycle issue in a `.svelte` file, read the entire component. The `$store` reactive syntax auto-unsubscribes — never flag it as a leak. Only flag manual `.subscribe()` calls that lack an `onDestroy` cleanup. See `references/js-quality.md` Section 7 for the full decision tree.
+
 ### Category 3 — Duplicated / Redundant Code
 Tools (phpcpd, knip) cover structural duplication. Also flag:
 - Near-identical SQL queries differing only in one parameter

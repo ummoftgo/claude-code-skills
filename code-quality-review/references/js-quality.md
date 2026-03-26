@@ -13,6 +13,7 @@ CLI tools and manual patterns for frontend quality review.
    - [jQuery](#62-jquery)
    - [Svelte](#63-svelte)
    - [HTMX](#64-htmx)
+7. [Svelte Lifecycle & Store Subscription](#7-svelte-lifecycle--store-subscription)
 
 ---
 
@@ -378,4 +379,116 @@ grep -rn "\.filter\|\.sort\|\.map" --include="*.svelte"        # heavy ops in te
 ```bash
 grep -rn "every [0-9]" --include="*.html" --include="*.php"        # polling intervals
 grep -rn 'hx-target.*["\x27]body["\x27]' --include="*.html" --include="*.php"  # full-page swap
+```
+
+---
+
+## 7. Svelte Lifecycle & Store Subscription
+
+> **Review principle**: Always read the full component before flagging a lifecycle or subscription issue.
+> Isolated pattern matching produces false positives — the same code is correct or incorrect
+> depending on how the store/subscription is actually used in context.
+
+### 7.1 Auto-subscription vs. manual subscription
+
+Svelte's `$store` reactive syntax **automatically unsubscribes** when the component is destroyed.
+Never flag this pattern as a leak — it is safe by design:
+
+```svelte
+<script>
+  import { userStore } from './stores.js';
+  // SAFE — Svelte handles unsubscription on component destroy
+</script>
+<p>{$userStore.name}</p>
+```
+
+```svelte
+<script>
+  import { writable } from 'svelte/store';
+  // SAFE — local store used with $ syntax; auto-cleaned up with the component
+  const count = writable(0);
+</script>
+<p>{$count}</p>
+```
+
+Manual `.subscribe()` calls, however, **do require explicit cleanup**:
+
+```svelte
+<script>
+  import { onDestroy } from 'svelte';
+  import { userStore } from './stores.js';
+
+  // BAD — subscription never released; runs after component is destroyed
+  userStore.subscribe(user => { ... });
+
+  // GOOD — explicit cleanup
+  const unsub = userStore.subscribe(user => { ... });
+  onDestroy(unsub);
+
+  // ALSO GOOD — return unsub from onDestroy directly
+  onDestroy(userStore.subscribe(user => { ... }));
+</script>
+```
+
+**Before flagging a subscription as a leak, confirm**:
+1. Is it using `.subscribe()` directly (not `$store` syntax)?
+2. Is there no `onDestroy` that returns or calls the unsubscribe function anywhere in the component?
+3. Is the store not a derived or readable that auto-completes?
+
+Only flag if all three are true.
+
+### 7.2 Svelte 5 — `$effect` cleanup
+
+In Svelte 5, `$effect` runs setup code and optionally returns a cleanup function.
+A missing cleanup is only a problem when the effect sets up an external resource (event listener, timer, WebSocket).
+
+```svelte
+<script>
+  // BAD — event listener leaks after component unmounts
+  $effect(() => {
+    window.addEventListener('resize', handleResize);
+    // missing: return () => window.removeEventListener('resize', handleResize);
+  });
+
+  // GOOD
+  $effect(() => {
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  });
+
+  // FINE — no external resource, no cleanup needed
+  $effect(() => {
+    console.log('count changed:', count);
+  });
+</script>
+```
+
+**Only flag `$effect` without a return when it registers an external listener or resource.**
+Pure side effects (logging, updating local state, calling an API) do not need cleanup.
+
+### 7.3 Module-scope stores (`<script context="module">`)
+
+Stores declared in `<script context="module">` are shared across **all instances** of the component.
+They are intentionally persistent — do not flag them as missing cleanup.
+Do flag if mutable module-scope state causes cross-instance contamination:
+
+```svelte
+<script context="module">
+  // POTENTIALLY PROBLEMATIC — if multiple instances share and mutate this
+  export const sharedSelection = writable(null);
+  // Flag only if the intent is per-instance state (should be in <script> instead)
+</script>
+```
+
+### 7.4 Audit grep
+
+```bash
+# Manual subscribe calls — check each for onDestroy cleanup
+grep -rn "\.subscribe(" --include="*.svelte" -n
+
+# $effect without return (check if external resource is registered inside)
+grep -rn "\$effect(" --include="*.svelte" -A 10 | grep -v "return () =>"
+
+# onDestroy usage — confirm it's paired with a subscribe or addEventListener
+grep -rn "onDestroy" --include="*.svelte" -n
 ```
