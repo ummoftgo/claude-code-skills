@@ -35,10 +35,14 @@ Four patterns cover most PHP + JS/Svelte/HTMX scenarios. See `references/dispatc
 ## Core Dispatch Steps
 
 1. **Define the shared contract** — Write API spec, DB schema, or component interface before dispatching.
-2. **Verify independence** — Confirm agents will not write to the same files.
-3. **Write focused agent prompts** — Each prompt: scope, shared context, deliverable, constraints.
-4. **Dispatch in parallel** using the Agent tool (multiple calls in a single message).
-5. **Integrate** — Read each agent's summary, check for conflicts, test the integration.
+2. **Query library docs first** — If the `use-context7` skill is installed, invoke it now.
+   Query the relevant framework docs for each layer about to be implemented
+   (e.g., Svelte runes for a frontend agent, PDO for a PHP backend agent).
+   Use the exact skill name: `use-context7`.
+3. **Verify independence** — Confirm agents will not write to the same files.
+4. **Write focused agent prompts** — Each prompt: scope, shared context, deliverable, constraints.
+5. **Dispatch in parallel** using the Agent tool (multiple calls in a single message).
+6. **Integrate** — Read each agent's summary, check for conflicts, test the integration.
 
 ## Integration Checklist
 

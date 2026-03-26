@@ -1,6 +1,6 @@
 ---
 name: use-context7
-description: "Query up-to-date library and framework documentation before writing code. Use when working with PHP, Svelte, HTMX, jQuery, or any third-party library/framework to ensure correct API usage, avoid deprecated patterns, and get version-specific guidance. Trigger before writing non-trivial code that depends on external library APIs."
+description: "INVOKE THIS SKILL BY NAME ('use-context7') before writing any non-trivial code that depends on an external library or framework — PHP extensions, Svelte runes/lifecycle, HTMX attributes, jQuery plugins, or any third-party API. Do not rely on training knowledge for library APIs; documentation drifts and versions change. Querying first prevents deprecated patterns, wrong signatures, and version-specific mistakes. When another skill instructs 'invoke use-context7 if installed', this is the skill to call."
 ---
 
 # Use Context7

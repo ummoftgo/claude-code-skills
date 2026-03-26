@@ -22,6 +22,8 @@ Full agent prompt templates and guidance for each dispatch pattern.
 
 ### Agent A Prompt Template (PHP Backend)
 
+> Before writing this prompt, if the `use-context7` skill is installed, invoke it to query relevant PHP/PDO docs.
+
 ```
 Implement the PHP backend API endpoints described below.
 
@@ -49,6 +51,8 @@ Return a summary listing:
 ```
 
 ### Agent B Prompt Template (Frontend)
+
+> Before writing this prompt, if the `use-context7` skill is installed, invoke it to query the relevant frontend framework docs (Svelte runes, HTMX attributes, jQuery patterns — whichever applies).
 
 ```
 Implement the frontend UI for the feature below. The PHP backend API is being built in parallel — code against the spec, do not wait for it.
@@ -82,6 +86,8 @@ Return a summary listing:
 **When**: A single page has substantial work in both HTML/CSS layout and JS behavior, and the two are clearly separable.
 
 **Agents**: Agent A (layout) + Agent B (logic) — dispatch in parallel.
+
+> Before writing Agent B's prompt, if the `use-context7` skill is installed, invoke it to query the frontend framework docs.
 
 ### Agent A Prompt Template (Layout)
 
@@ -139,6 +145,8 @@ Return: file created, event handlers implemented, API calls made
 
 **Rule**: One agent per page. Keep parallel agent count to 4–5 maximum.
 
+> Before dispatching, if the `use-context7` skill is installed, invoke it once for each distinct framework used across the pages (e.g., once for Svelte if multiple pages use Svelte components).
+
 ### Shared Context Block (include in every agent prompt)
 
 ```
@@ -179,6 +187,8 @@ Summary of files created and any schema assumptions made.
 ## 4. Full-Stack 3-Way Pattern
 
 **When**: Building a brand-new feature from scratch where the DB schema is not yet finalized.
+
+> Before Phase 2, if the `use-context7` skill is installed, invoke it to query both backend (PDO/PHP) and frontend framework docs — Phase 2 agents implement against these APIs.
 
 **Structure**:
 ```

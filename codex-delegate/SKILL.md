@@ -71,6 +71,8 @@ After all agents return, aggregate findings into a single review summary for the
 
 ## Mode 2: Implement (구현)
 
+Before dispatching implementation agents: if the `use-context7` skill is installed, invoke it by name (`use-context7`) to query the relevant library/framework docs for each layer being implemented. Do this before writing agent prompts — the queried docs should inform the prompt's requirements and constraints.
+
 Analyze the task scope and choose a split strategy:
 
 | Split | When | Agents |
