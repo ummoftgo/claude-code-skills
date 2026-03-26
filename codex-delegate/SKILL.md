@@ -95,11 +95,34 @@ After agents return:
 ## Codex CLI Invocation
 
 ```bash
-# Non-interactive, auto-approve — suitable for sub-agent dispatch
-codex --approval-mode full-auto "task description. Context: .agent-works/FILENAME.md"
+# Non-interactive, read-only sandbox — for review / analysis tasks
+# -a (--ask-for-approval) must come BEFORE the exec subcommand
+codex -a never exec -s read-only "task description. Context: .agent-works/FILENAME.md"
 
-# Interactive — suitable for review where output needs inspection
+# Non-interactive, workspace-write sandbox — for implementation tasks
+codex -a never exec -s workspace-write "task description. Context: .agent-works/FILENAME.md"
+
+# Capture last message to file (useful for parallel background execution)
+codex -a never exec -s read-only -o /tmp/out.txt "task description. Context: .agent-works/FILENAME.md"
+
+# Interactive — when you want to inspect output step by step
 codex "task description. Context: .agent-works/FILENAME.md"
 ```
+
+**Parallel execution pattern** — run agents in background and poll for completion:
+```bash
+codex -a never exec -s read-only "task 1. Context: .agent-works/FILE1.md" > /tmp/r1.txt 2>&1 &
+codex -a never exec -s read-only "task 2. Context: .agent-works/FILE2.md" > /tmp/r2.txt 2>&1 &
+
+# Poll until all output files contain the completion marker
+for f in /tmp/r1.txt /tmp/r2.txt; do
+  while ! grep -q "tokens used" "$f" 2>/dev/null; do sleep 5; done
+done
+```
+
+> **Key rules**:
+> - `-a never` is a top-level flag — place it **before** `exec`, not after
+> - Use `-s read-only` for review tasks; `-s workspace-write` for tasks that write files
+> - Do **not** use `--dangerously-bypass-approvals-and-sandbox` — it disables all sandboxing
 
 Pass the context filename explicitly in the prompt so Codex reads it at the start of its session.
