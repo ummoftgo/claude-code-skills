@@ -29,37 +29,53 @@ if [ -z "$BASE" ]; then
 fi
 
 CURRENT=$(git rev-parse --abbrev-ref HEAD)
-
-# Pin the exact divergence point as a commit hash.
-# Using a hash (not a branch name) prevents drift: if $BASE advances after this
-# point (e.g., a teammate pushes to main), the diff scope stays fixed to what
-# this branch actually changed.
 MERGE_BASE=$(git merge-base "$BASE" HEAD)
 echo "Base: $BASE  →  Current: $CURRENT"
-echo "Merge base (divergence point): $MERGE_BASE"
+echo "Merge base: $MERGE_BASE"
 
-# Changed files for quality reviewers (exclude deleted — no point reviewing removed code)
-CHANGED_QA=$(git diff --name-only --diff-filter=ACMR "$MERGE_BASE" HEAD)
-# Changed files for security reviewer (include deleted — removed guards/checks are findings too)
-CHANGED_SEC=$(git diff --name-only --diff-filter=ACMRD "$MERGE_BASE" HEAD)
+# Collect only files touched by non-merge commits on this branch.
+#
+# Why not "git diff MERGE_BASE HEAD"?
+# - If the developer merged main into the branch mid-work (e.g., to resolve conflicts),
+#   git diff would include all files that changed in main as well.
+# - If merge-base is recomputed after that mid-work merge, commits before the merge
+#   would drop out of scope.
+#
+# Using --no-merges on git log ensures we see only the developer's own commits,
+# regardless of mid-branch merges from main.
+ALL_TOUCHED=$(git log "$BASE"..HEAD --no-merges --name-only --format="" | sort -u | grep -v '^$')
+
+# Quality reviewers: exclude deleted files
+CHANGED_QA=$(echo "$ALL_TOUCHED" | while read -r f; do
+  git diff --name-only --diff-filter=ACMR "$MERGE_BASE" HEAD -- "$f" 2>/dev/null
+done | sort -u)
+
+# Security reviewer: include deleted files
+CHANGED_SEC=$(echo "$ALL_TOUCHED" | while read -r f; do
+  git diff --name-only --diff-filter=ACMRD "$MERGE_BASE" HEAD -- "$f" 2>/dev/null
+done | sort -u)
 
 echo ""
-echo "Changed files (quality scope):"
-echo "$CHANGED_QA"
+echo "Files touched by this branch (excluding merge commits):"
+echo "$ALL_TOUCHED"
 echo ""
-echo "Changed files (security scope):"
-echo "$CHANGED_SEC"
+echo "Quality scope (non-deleted): $CHANGED_QA"
+echo "Security scope (incl. deleted): $CHANGED_SEC"
 
 # Early exit if nothing to review
-if [ -z "$CHANGED_SEC" ]; then
-  echo "No changed files detected. Nothing to review."
+if [ -z "$ALL_TOUCHED" ]; then
+  echo "No commits from this branch detected. Nothing to review."
   exit 0
 fi
 ```
 
-- `MERGE_BASE`는 이 브랜치가 `$BASE`에서 분기된 정확한 커밋 해시입니다. `$BASE` 브랜치가 이후에 진행하더라도 리뷰 범위는 변하지 않습니다.
-- Quality reviewers (A/C) receive `CHANGED_QA` — excludes deleted files.
-- Security reviewer (B) receives `CHANGED_SEC` — includes deleted (`D`): a removed CSRF check, auth guard, or sanitizer is itself a security finding.
+**파일 목록 결정 방식**:
+- `git log "$BASE"..HEAD --no-merges` — 이 브랜치에서 직접 커밋한 내역만 추출 (main 머지 커밋 제외)
+- 중간에 main을 머지했어도 개발자가 직접 손댄 파일만 정확히 수집됨
+- `MERGE_BASE`는 diff 내용 생성 시 기준점으로만 사용 (현재 파일 상태 vs 분기 시점)
+
+- Quality reviewers (A/C): `CHANGED_QA` — deleted 제외
+- Security reviewer (B): `CHANGED_SEC` — deleted 포함 (제거된 보안 코드도 발견 대상)
 
 Categorize the file list:
 
