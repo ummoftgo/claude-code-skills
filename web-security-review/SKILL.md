@@ -35,8 +35,8 @@ When the user asks for a security review, scan, or audit:
 2. **Read references**: Load `references/php-backend-security.md` and/or `references/web-frontend-security.md`.
 3. **Scan codebase**: Search for patterns listed in the reference files. Use Grep for sinks, dangerous functions, and missing protections.
 4. **Classify findings**: Assign severity (Critical / High / Medium / Low) per the reference file guidance.
-5. **Write report**: Save to `security_review_report.md` (or user-specified location).
-6. **Summarize**: Report findings to the user inline, offer to fix.
+5. **Write report**: Save to `security_review_report.md` (or user-specified location). Write in the same language the user used when requesting the review.
+6. **Summarize**: Report findings to the user inline in the same language, offer to fix.
 
 ## Report Format
 

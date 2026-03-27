@@ -110,6 +110,8 @@ See reference files for language-specific examples.
 
 ## Step 4: Produce Report
 
+**Language**: Write the report in the same language the user used when requesting the review. If the user wrote in Korean, write the report in Korean. If in English, write in English.
+
 Merge tool output and manual findings into `code_quality_report.md`.
 
 ```

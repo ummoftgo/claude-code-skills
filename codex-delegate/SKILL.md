@@ -65,7 +65,7 @@ Dispatch 4 Codex CLI sub-agents in parallel — 2 for code quality, 2 for securi
 | Security-1 | PHP backend security | `"PHP 백엔드 보안 검토 (SQL injection·CSRF·세션·파일업로드): .agent-works/[file] 참조"` |
 | Security-2 | Frontend JS/DOM security | `"프론트엔드 보안 검토 (XSS·DOM·토큰 노출): .agent-works/[file] 참조"` |
 
-After all agents return, aggregate findings into a single review summary for the user. Group by severity: Critical → High → Medium → Low.
+After all agents return, aggregate findings into a single review summary for the user. Group by severity: Critical → High → Medium → Low. Write the summary in the same language the user used when requesting the review.
 
 ---
 

@@ -329,6 +329,8 @@ grep -rn "!important" --include="*.css" --include="*.scss" <implicated_files>
 
 ## Step 5: Produce Consolidated Report
 
+**Language**: Write the report in the same language the user used when requesting the review. Apply this to all sections including findings, recommendations, and the executive summary.
+
 Save the report to: `branch_review_<branch-name>_<YYYYMMDD>.md`
 
 ```
