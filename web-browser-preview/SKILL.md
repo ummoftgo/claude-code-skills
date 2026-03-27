@@ -33,10 +33,10 @@ Inspect the project to decide whether the URL can be auto-derived or must be req
 - `/var/www/html/myapp/` → `http://<host>/myapp/`
 - `/var/www/html/myapp/pages/users.php` → `http://<host>/myapp/pages/users.php`
 
-`<host>` 값은 아래 Step 2에서 구한 `WINDOWS_HOST`로 대체합니다. WSL에서 실행 중인 웹 서버(Apache/nginx/php -S)는 Windows Chrome 입장에서 `localhost`가 아닌 WSL IP로 접근해야 합니다.
+Replace `<host>` with the `WINDOWS_HOST` resolved in Step 2. A web server running in WSL (Apache/nginx/php -S) is not reachable via `localhost` from Windows Chrome — the WSL IP must be used.
 
-If a routing framework is detected (e.g., Laravel, Slim in `composer.json`), stop and ask:
-> "라우팅 앱이 감지되었습니다. 브라우저에서 확인할 URL을 알려주세요."
+If a routing framework is detected (e.g., Laravel, Slim in `composer.json`), stop and ask the user for the URL:
+> "A routing framework was detected. Please provide the URL you want to open in the browser."
 
 ## Step 2: Resolve Windows Host IP (WSL)
 
@@ -56,9 +56,9 @@ If both return empty, ask the user to provide the Windows host IP directly.
 
 With the host IP resolved:
 
-1. **URL에 WINDOWS_HOST 적용**: Step 1에서 auto-derive한 URL의 `<host>` 자리를 `${WINDOWS_HOST}`로 대체합니다.
-   - 예: `http://${WINDOWS_HOST}/myapp/pages/users.php`
-2. **CDP 연결 및 페이지 열기** — agent-browser skill에 따라 실행합니다:
+1. **Apply WINDOWS_HOST to the URL**: Replace the `<host>` placeholder from Step 1 with `${WINDOWS_HOST}`.
+   - Example: `http://${WINDOWS_HOST}/myapp/pages/users.php`
+2. **Connect CDP and open the page** — follow the agent-browser skill:
    - Connect: `agent-browser connect http://${WINDOWS_HOST}:9333`
    - Open: `agent-browser open http://${WINDOWS_HOST}/<path>`
 3. Take a snapshot or screenshot to report the current state
@@ -68,7 +68,7 @@ With the host IP resolved:
 **CDP connection fails**:
 Windows Chrome must be running with remote debugging enabled. Inform the user:
 ```
-Chrome를 원격 디버깅 모드로 실행해주세요:
+Please launch Chrome with remote debugging enabled:
   chrome.exe --remote-debugging-port=9333
 ```
 

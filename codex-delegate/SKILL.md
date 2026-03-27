@@ -26,7 +26,7 @@ Use unique names to avoid conflicts when multiple tasks run concurrently or file
 ```markdown
 # Task: [review|implement] — [feature name]
 **Date**: [YYYY-MM-DD HH:MM]
-**Type**: [검토 / 구현]
+**Type**: [review / implement]
 
 ## Project Overview
 [Project description and tech stack: PHP + JS/Svelte/HTMX/jQuery, DB type, auth approach]
@@ -54,7 +54,7 @@ Create one file per agent when dispatching parallel sub-agents.
 
 ---
 
-## Mode 1: Review (검토)
+## Mode 1: Review
 
 Dispatch 4 Codex CLI sub-agents in parallel — 2 for code quality, 2 for security.
 
@@ -69,7 +69,7 @@ After all agents return, aggregate findings into a single review summary for the
 
 ---
 
-## Mode 2: Implement (구현)
+## Mode 2: Implement
 
 Before dispatching implementation agents: if the `use-context7` skill is installed, invoke it by name (`use-context7`) to query the relevant library/framework docs for each layer being implemented. Do this before writing agent prompts — the queried docs should inform the prompt's requirements and constraints.
 
@@ -87,10 +87,10 @@ Each agent receives:
 - Hard constraint: "Do NOT touch files outside your scope"
 
 After agents return:
-1. **파일 충돌 확인**: 두 에이전트가 같은 파일을 수정하지 않았는지 확인.
-2. **명명 일관성 확인**: API 엔드포인트명, DB 컬럼명, 변수명이 백엔드·프론트엔드 간에 일치하는지 대조.
-3. **통합 테스트**: 애플리케이션을 실행하고 happy path를 end-to-end로 테스트.
-4. **컨텍스트 파일 정리**: 작업 완료 후 `.agent-works/` 의 해당 파일을 삭제하거나 별도 아카이브 폴더로 이동. (`.gitignore`에 `.agent-works/` 추가 권장)
+1. **Conflict check**: Confirm no two agents modified the same file.
+2. **Naming consistency**: Verify API endpoint names, DB column names, and variable names align across backend and frontend.
+3. **Integration test**: Run the application and test the happy path end-to-end.
+4. **Context file cleanup**: Delete or archive the `.agent-works/` files for this task. (Adding `.agent-works/` to `.gitignore` is recommended.)
 
 ---
 

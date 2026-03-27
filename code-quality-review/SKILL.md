@@ -40,7 +40,7 @@ Run all applicable tools. For each tool, check if it exists first — if not, in
 
 ```bash
 # Static analysis — run under resolved PHP_CMD
-# phpstan.neon / phpstan.neon.dist 존재 시 --level 생략 (프로젝트 설정 우선)
+# If phpstan.neon / phpstan.neon.dist exists, omit --level (project config takes precedence)
 [ -f phpstan.neon ] || [ -f phpstan.neon.dist ] \
   && $PHP_CMD $(command -v phpstan) analyse <src-dir> --no-progress --error-format=raw \
   || $PHP_CMD $(command -v phpstan) analyse <src-dir> --level=5 --no-progress --error-format=raw

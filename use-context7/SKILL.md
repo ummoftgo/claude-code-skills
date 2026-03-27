@@ -80,13 +80,13 @@ Do not batch into a single query — separate queries yield more focused results
 If Context7 MCP tools are not available, use the `ctx7` CLI:
 
 ```bash
-# 라이브러리 ID 조회
+# Resolve library ID
 npx ctx7 library htmx
 
-# 문서 조회 (라이브러리 ID + 쿼리)
+# Query docs (library ID + topic)
 npx ctx7 docs /bigskysoftware/htmx "hx-swap hx-trigger"
 npx ctx7 docs /sveltejs/svelte "$state $derived runes"
 npx ctx7 docs /php/php-src "PDO prepared statements"
 ```
 
-`ctx7`도 없으면 WebSearch/WebFetch로 공식 문서를 직접 조회한다.
+If `ctx7` is also unavailable, fall back to WebSearch/WebFetch against the official documentation site.
