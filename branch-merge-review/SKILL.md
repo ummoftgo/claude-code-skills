@@ -29,16 +29,26 @@ if [ -z "$BASE" ]; then
 fi
 
 CURRENT=$(git rev-parse --abbrev-ref HEAD)
+
+# Pin the exact divergence point as a commit hash.
+# Using a hash (not a branch name) prevents drift: if $BASE advances after this
+# point (e.g., a teammate pushes to main), the diff scope stays fixed to what
+# this branch actually changed.
+MERGE_BASE=$(git merge-base "$BASE" HEAD)
 echo "Base: $BASE  →  Current: $CURRENT"
+echo "Merge base (divergence point): $MERGE_BASE"
 
 # Changed files for quality reviewers (exclude deleted — no point reviewing removed code)
-CHANGED_QA=$(git diff --name-only --diff-filter=ACMR "$BASE"...HEAD)
+CHANGED_QA=$(git diff --name-only --diff-filter=ACMR "$MERGE_BASE" HEAD)
 # Changed files for security reviewer (include deleted — removed guards/checks are findings too)
-CHANGED_SEC=$(git diff --name-only --diff-filter=ACMRD "$BASE"...HEAD)
+CHANGED_SEC=$(git diff --name-only --diff-filter=ACMRD "$MERGE_BASE" HEAD)
 
 echo ""
-echo "Changed files (quality scope): $CHANGED_QA"
-echo "Changed files (security scope): $CHANGED_SEC"
+echo "Changed files (quality scope):"
+echo "$CHANGED_QA"
+echo ""
+echo "Changed files (security scope):"
+echo "$CHANGED_SEC"
 
 # Early exit if nothing to review
 if [ -z "$CHANGED_SEC" ]; then
@@ -47,7 +57,8 @@ if [ -z "$CHANGED_SEC" ]; then
 fi
 ```
 
-- Quality reviewers (A/C) receive `CHANGED_QA` — excludes deleted files (nothing to check in removed code).
+- `MERGE_BASE`는 이 브랜치가 `$BASE`에서 분기된 정확한 커밋 해시입니다. `$BASE` 브랜치가 이후에 진행하더라도 리뷰 범위는 변하지 않습니다.
+- Quality reviewers (A/C) receive `CHANGED_QA` — excludes deleted files.
 - Security reviewer (B) receives `CHANGED_SEC` — includes deleted (`D`): a removed CSRF check, auth guard, or sanitizer is itself a security finding.
 
 Categorize the file list:
@@ -104,7 +115,7 @@ You are a senior PHP backend developer (10 years experience) conducting a backen
 [Paste Common Instructions above]
 
 Workspace root: [absolute path to project root]
-Base branch: [BASE]  Current branch: [CURRENT]
+Base branch: [BASE]  Merge base: [MERGE_BASE]  Current branch: [CURRENT]
 
 Load and follow: ~/.claude/skills/code-quality-review/SKILL.md (php-quality.md reference).
 Use only Steps 1–4 (detect stack → run CLI tools → manual review → report).
@@ -117,8 +128,8 @@ If only composer.json/composer.lock changed: review for newly added/upgraded dep
 with known vulnerabilities or major version jumps. Run CLI tools on the full project but
 report only findings that overlap with the scoped files.
 
-Git diff for your scope:
-[git diff "$BASE"...HEAD -- <backend files>]
+Git diff for your scope (only changes made on this branch since it diverged from [BASE]):
+[git diff "$MERGE_BASE" HEAD -- <backend files>]
 
 Pay special attention to:
 - N+1 query patterns across the request lifecycle
@@ -147,7 +158,7 @@ You are a web application security expert (OWASP Top 10 specialist) conducting a
 [Paste Common Instructions above]
 
 Workspace root: [absolute path to project root]
-Base branch: [BASE]  Current branch: [CURRENT]
+Base branch: [BASE]  Merge base: [MERGE_BASE]  Current branch: [CURRENT]
 
 Load and follow: ~/.claude/skills/web-security-review/SKILL.md (both reference files).
 Use only the audit/review steps. Skip the "Offer to Fix" step — this is a read-only review.
@@ -155,8 +166,9 @@ Use only the audit/review steps. Skip the "Offer to Fix" step — this is a read
 Your scope — review ALL of these changed files (including deleted):
 [complete list from CHANGED_SEC]
 
-Git diff for your scope (includes deleted file context):
-[git diff "$BASE"...HEAD -- <all changed files including deleted>]
+Git diff for your scope — only changes made on this branch since it diverged from [BASE]
+(includes deleted file context):
+[git diff "$MERGE_BASE" HEAD -- <all changed files including deleted>]
 
 Pay special attention to:
 - Deleted files: a removed CSRF check, auth guard, input sanitizer, or CSP header is itself a finding
@@ -189,7 +201,7 @@ You are a senior frontend developer (Svelte / jQuery / HTMX specialist, 8 years 
 [Paste Common Instructions above]
 
 Workspace root: [absolute path to project root]
-Base branch: [BASE]  Current branch: [CURRENT]
+Base branch: [BASE]  Merge base: [MERGE_BASE]  Current branch: [CURRENT]
 
 Load and follow: ~/.claude/skills/code-quality-review/SKILL.md (js-quality.md and css-quality.md references).
 Use only Steps 1–4 (detect stack → run CLI tools → manual review → report).
@@ -198,8 +210,8 @@ Skip Step 5 (Offer Fixes) — this is a read-only review.
 Your scope — report findings only for these files:
 [list of frontend and style files]
 
-Git diff for your scope:
-[git diff "$BASE"...HEAD -- <frontend/style files>]
+Git diff for your scope (only changes made on this branch since it diverged from [BASE]):
+[git diff "$MERGE_BASE" HEAD -- <frontend/style files>]
 
 Pay special attention to:
 - Svelte reactive declarations vs manual subscriptions (js-quality.md Section 7)
