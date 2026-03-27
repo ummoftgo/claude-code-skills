@@ -69,13 +69,11 @@ if [ -z "$ALL_TOUCHED" ]; then
 fi
 ```
 
-**파일 목록 결정 방식**:
-- `git log "$BASE"..HEAD --no-merges` — 이 브랜치에서 직접 커밋한 내역만 추출 (main 머지 커밋 제외)
-- 중간에 main을 머지했어도 개발자가 직접 손댄 파일만 정확히 수집됨
-- `MERGE_BASE`는 diff 내용 생성 시 기준점으로만 사용 (현재 파일 상태 vs 분기 시점)
-
-- Quality reviewers (A/C): `CHANGED_QA` — deleted 제외
-- Security reviewer (B): `CHANGED_SEC` — deleted 포함 (제거된 보안 코드도 발견 대상)
+**How the file list is determined**:
+- `git log "$BASE"..HEAD --no-merges` collects only the developer's own commits — mid-branch merges from main are excluded, so files that changed only due to an upstream merge never enter the review scope.
+- `MERGE_BASE` is used solely as the diff base when generating patch content (current state vs. divergence point).
+- Quality reviewers (A/C) receive `CHANGED_QA` — deleted files excluded.
+- Security reviewer (B) receives `CHANGED_SEC` — deleted files included (a removed security guard is itself a finding).
 
 Categorize the file list:
 
