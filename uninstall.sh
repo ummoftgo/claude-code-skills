@@ -17,6 +17,12 @@ NC='\033[0m'
 
 # --- 경로 설정 ---
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# 제거 범위 (ask_uninstall_scope에서 결정)
+UNINSTALL_SCOPE="global"    # "global" | "project"
+INSTALL_BASE_DIR="$HOME"    # 안전 검사 기준 경로
+
+# 제거 대상 경로 (ask_uninstall_scope에서 재설정)
 CLAUDE_SKILLS_DIR="$HOME/.claude/skills"
 CLAUDE_AGENTS_DIR="$HOME/.claude/agents"
 CODEX_SKILLS_DIR="$HOME/.codex/skills/local"
@@ -59,6 +65,55 @@ ask_yn() {
     [[ "$reply" =~ ^[Yy]$ ]]
 }
 
+# =============================================================================
+# 제거 범위 선택
+# =============================================================================
+
+ask_uninstall_scope() {
+    section "제거 범위 선택"
+    echo -e "  ${BOLD}1)${NC} 전역 제거  — 홈 디렉토리에서 제거 (~/.claude/, ~/.codex/)"
+    echo -e "  ${BOLD}2)${NC} 프로젝트  — 특정 프로젝트 디렉토리에서만 제거"
+    echo
+    local choice
+    while true; do
+        read -rp "  선택 (1/2): " choice
+        case "$choice" in
+            1)
+                UNINSTALL_SCOPE="global"
+                INSTALL_BASE_DIR="$HOME"
+                CLAUDE_SKILLS_DIR="$HOME/.claude/skills"
+                CLAUDE_AGENTS_DIR="$HOME/.claude/agents"
+                CODEX_SKILLS_DIR="$HOME/.codex/skills/local"
+                CODEX_AGENTS_DIR="$HOME/.codex/agents"
+                ok "전역 제거 선택"
+                return
+                ;;
+            2)
+                UNINSTALL_SCOPE="project"
+                echo
+                local default_dir
+                default_dir="$(pwd)"
+                read -rp "  프로젝트 경로 [${default_dir}]: " input_dir
+                local project_dir="${input_dir:-$default_dir}"
+
+                project_dir="$(cd "$project_dir" 2>/dev/null && pwd)" || {
+                    warn "디렉토리를 찾을 수 없습니다: ${input_dir:-$default_dir}"
+                    continue
+                }
+
+                INSTALL_BASE_DIR="$project_dir"
+                CLAUDE_SKILLS_DIR="$project_dir/.claude/skills"
+                CLAUDE_AGENTS_DIR="$project_dir/.claude/agents"
+                CODEX_SKILLS_DIR="$project_dir/.codex/skills"
+                CODEX_AGENTS_DIR="$project_dir/.codex/agents"
+                ok "프로젝트 제거 선택: ${project_dir}"
+                return
+                ;;
+            *) warn "1 또는 2를 입력하세요." ;;
+        esac
+    done
+}
+
 # 스킬 하나를 제거 (심볼릭 링크 또는 복사된 디렉토리 모두 처리)
 remove_skill() {
     local skill="$1"
@@ -77,7 +132,7 @@ remove_skill() {
 
         # 안전 검사: target이 base_dir 자체이거나 HOME 외부이면 거부
         if [[ -z "$skill" || "$target" == "$base_dir" || "$target" == "$base_dir/" || \
-              "$target/" != "$HOME/"* ]]; then
+              "$target/" != "$INSTALL_BASE_DIR/"* ]]; then
             warn "안전 검사 실패: 예상치 못한 경로 — 건너뜀 (${target})"
             return
         fi
@@ -216,6 +271,11 @@ remove_codex_skills() {
 remove_context7_mcp() {
     section "context7 MCP 설정 제거"
 
+    if [[ "$UNINSTALL_SCOPE" == "project" ]]; then
+        skip "프로젝트 제거 모드 — context7 MCP는 전역 설정입니다. 건너뜁니다."
+        return
+    fi
+
     local settings_file="$HOME/.claude/settings.json"
 
     if [[ ! -f "$settings_file" ]] || ! grep -q "context7" "$settings_file" 2>/dev/null; then
@@ -279,7 +339,7 @@ remove_agents() {
             for agent in "${claude_installed[@]}"; do
                 local f="$CLAUDE_AGENTS_DIR/${agent}.md"
                 # 안전 검사
-                if [[ "${f}/" != "$HOME/"* ]]; then
+                if [[ "${f}/" != "$INSTALL_BASE_DIR/"* ]]; then
                     warn "안전 검사 실패: $f — 건너뜀"
                     continue
                 fi
@@ -317,7 +377,7 @@ remove_agents() {
         if ask_yn "위 Codex 에이전트를 모두 제거하시겠습니까?"; then
             for agent in "${codex_installed[@]}"; do
                 local f="$CODEX_AGENTS_DIR/${agent}.toml"
-                if [[ "${f}/" != "$HOME/"* ]]; then
+                if [[ "${f}/" != "$INSTALL_BASE_DIR/"* ]]; then
                     warn "안전 검사 실패: $f — 건너뜀"
                     continue
                 fi
@@ -345,6 +405,7 @@ main() {
     info "프로그램·패키지(phpstan, codex 등)는 제거하지 않습니다."
     info "스킬/에이전트 링크·파일과 MCP 설정만 제거합니다."
 
+    ask_uninstall_scope
     remove_claude_skills
     remove_codex_skills
     remove_agents

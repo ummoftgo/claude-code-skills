@@ -19,15 +19,19 @@ NC='\033[0m'
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SKILLS_DIR="$SCRIPT_DIR/skills"
 AGENTS_DIR="$SCRIPT_DIR/agents"
+
+# 설치 범위 (ask_install_scope에서 결정)
+INSTALL_SCOPE="global"      # "global" | "project"
+INSTALL_BASE_DIR="$HOME"    # 안전 검사 기준 경로 (global=HOME, project=PROJECT_DIR)
+
+# 설치 대상 경로 (ask_install_scope에서 재설정)
 CLAUDE_SKILLS_DIR="$HOME/.claude/skills"
 CLAUDE_AGENTS_DIR="$HOME/.claude/agents"
 CODEX_SKILLS_DIR="$HOME/.codex/skills/local"
 CODEX_AGENTS_DIR="$HOME/.codex/agents"
+
 LOCAL_BIN="$HOME/.local/bin"
 NPM_GLOBAL="$HOME/.npm-global"
-
-# 하위 호환성 (install_skill 함수 내부에서 참조)
-SKILLS_INSTALL_DIR="$CLAUDE_SKILLS_DIR"
 
 # PATH에 추가가 필요한 디렉토리를 추적
 NEED_PATH_SETUP=()
@@ -299,6 +303,11 @@ setup_context7_mcp() {
     section "context7 MCP 설정 (선택)"
     info "MCP를 설정하면 ctx7 CLI 없이도 Claude Code에서 자동으로 문서를 조회합니다."
 
+    if [[ "$INSTALL_SCOPE" == "project" ]]; then
+        skip "프로젝트 설치 모드 — context7 MCP는 전역 설정입니다. 필요 시 별도로 추가하세요."
+        return
+    fi
+
     local settings_file="$HOME/.claude/settings.json"
 
     # 이미 설정되어 있는지 확인
@@ -360,8 +369,13 @@ install_agent_browser() {
     section "agent-browser 스킬 (web-browser-preview 스킬용)"
     info "WSL에서 Windows Chrome으로 브라우저 미리보기 시 필요합니다."
 
+    if [[ "$INSTALL_SCOPE" == "project" ]]; then
+        skip "프로젝트 설치 모드 — agent-browser는 전역 스킬입니다. 필요 시 별도로 설치하세요."
+        return
+    fi
+
     # --- 스킬 설치 ---
-    if [[ -d "$SKILLS_INSTALL_DIR/agent-browser" ]]; then
+    if [[ -d "$HOME/.claude/skills/agent-browser" ]]; then
         ok "agent-browser 스킬이 이미 설치되어 있습니다."
     else
         echo
@@ -404,8 +418,54 @@ install_agent_browser() {
 }
 
 # =============================================================================
-# 섹션 6: 스킬 설치 방식 선택 + 공용 헬퍼
+# 섹션 6: 설치 범위 + 방식 선택
 # =============================================================================
+
+ask_install_scope() {
+    section "설치 범위 선택"
+    echo -e "  ${BOLD}1)${NC} 전역 설치  — 모든 프로젝트에서 사용 (~/.claude/, ~/.codex/)"
+    echo -e "  ${BOLD}2)${NC} 프로젝트  — 특정 프로젝트 디렉토리에만 설치"
+    echo
+    local choice
+    while true; do
+        read -rp "  선택 (1/2): " choice
+        case "$choice" in
+            1)
+                INSTALL_SCOPE="global"
+                INSTALL_BASE_DIR="$HOME"
+                CLAUDE_SKILLS_DIR="$HOME/.claude/skills"
+                CLAUDE_AGENTS_DIR="$HOME/.claude/agents"
+                CODEX_SKILLS_DIR="$HOME/.codex/skills/local"
+                CODEX_AGENTS_DIR="$HOME/.codex/agents"
+                ok "전역 설치 선택"
+                return
+                ;;
+            2)
+                INSTALL_SCOPE="project"
+                echo
+                local default_dir
+                default_dir="$(pwd)"
+                read -rp "  프로젝트 경로 [${default_dir}]: " input_dir
+                local project_dir="${input_dir:-$default_dir}"
+
+                # 절대 경로로 정규화
+                project_dir="$(cd "$project_dir" 2>/dev/null && pwd)" || {
+                    warn "디렉토리를 찾을 수 없습니다: ${input_dir:-$default_dir}"
+                    continue
+                }
+
+                INSTALL_BASE_DIR="$project_dir"
+                CLAUDE_SKILLS_DIR="$project_dir/.claude/skills"
+                CLAUDE_AGENTS_DIR="$project_dir/.claude/agents"
+                CODEX_SKILLS_DIR="$project_dir/.codex/skills"
+                CODEX_AGENTS_DIR="$project_dir/.codex/agents"
+                ok "프로젝트 설치 선택: ${project_dir}"
+                return
+                ;;
+            *) warn "1 또는 2를 입력하세요." ;;
+        esac
+    done
+}
 
 ask_skill_install_mode() {
     section "스킬 설치 방식 선택"
@@ -436,9 +496,9 @@ install_skill() {
     fi
 
     if [[ "$SKILL_INSTALL_MODE" == "copy" ]]; then
-        # 안전 검사: dst가 dst_dir 자체이거나 HOME 외부이면 거부
+        # 안전 검사: dst가 dst_dir 자체이거나 INSTALL_BASE_DIR 외부이면 거부
         if [[ -z "$skill" || "$dst" == "$dst_dir" || "$dst" == "$dst_dir/" || \
-              "$dst/" != "$HOME/"* ]]; then
+              "$dst/" != "$INSTALL_BASE_DIR/"* ]]; then
             warn "안전 검사 실패: 예상치 못한 경로 — 건너뜀 (${dst})"
             return
         fi
@@ -626,7 +686,7 @@ install_agents() {
                         continue
                     fi
 
-                    if [[ -z "$agent" || "${dst}/" != "$HOME/"* ]]; then
+                    if [[ -z "$agent" || "${dst}/" != "$INSTALL_BASE_DIR/"* ]]; then
                         warn "안전 검사 실패: $dst — 건너뜀"
                         continue
                     fi
@@ -794,6 +854,7 @@ main() {
     install_php_tools
     install_ctx7
     install_codex
+    ask_install_scope
     setup_context7_mcp
     install_agent_browser
     ask_skill_install_mode
@@ -809,10 +870,20 @@ main() {
     echo -e "${GREEN}══════════════════════════════════════════════════${NC}"
     echo
     info "Claude Code를 재시작하면 스킬과 에이전트가 활성화됩니다."
-    info "스킬 확인: Claude Code에서 /skills list 실행"
-    if $USE_CODEX; then
-        info "Codex 스킬: ~/.codex/skills/local/"
-        info "Codex 에이전트: ~/.codex/agents/"
+    if [[ "$INSTALL_SCOPE" == "global" ]]; then
+        info "스킬 확인: Claude Code에서 /skills list 실행"
+        if $USE_CODEX; then
+            info "Codex 스킬: $CODEX_SKILLS_DIR"
+            info "Codex 에이전트: $CODEX_AGENTS_DIR"
+        fi
+    else
+        info "설치된 프로젝트 경로: $INSTALL_BASE_DIR"
+        info "Claude 스킬: $CLAUDE_SKILLS_DIR"
+        info "Claude 에이전트: $CLAUDE_AGENTS_DIR"
+        if $USE_CODEX; then
+            info "Codex 스킬: $CODEX_SKILLS_DIR"
+            info "Codex 에이전트: $CODEX_AGENTS_DIR"
+        fi
     fi
 }
 
