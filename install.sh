@@ -17,9 +17,17 @@ NC='\033[0m'
 
 # --- 경로 설정 ---
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-SKILLS_INSTALL_DIR="$HOME/.claude/skills"
+SKILLS_DIR="$SCRIPT_DIR/skills"
+AGENTS_DIR="$SCRIPT_DIR/agents"
+CLAUDE_SKILLS_DIR="$HOME/.claude/skills"
+CLAUDE_AGENTS_DIR="$HOME/.claude/agents"
+CODEX_SKILLS_DIR="$HOME/.codex/skills/local"
+CODEX_AGENTS_DIR="$HOME/.codex/agents"
 LOCAL_BIN="$HOME/.local/bin"
 NPM_GLOBAL="$HOME/.npm-global"
+
+# 하위 호환성 (install_skill 함수 내부에서 참조)
+SKILLS_INSTALL_DIR="$CLAUDE_SKILLS_DIR"
 
 # PATH에 추가가 필요한 디렉토리를 추적
 NEED_PATH_SETUP=()
@@ -419,7 +427,7 @@ ask_skill_install_mode() {
 install_skill() {
     local skill="$1"
     local dst_dir="$2"
-    local src="$SCRIPT_DIR/$skill"
+    local src="$SKILLS_DIR/$skill"
     local dst="$dst_dir/$skill"
 
     if [[ ! -d "$src" ]]; then
@@ -488,28 +496,32 @@ install_skill() {
 # =============================================================================
 
 create_skill_links() {
-    section "Claude Code 스킬 설치 → ${SKILLS_INSTALL_DIR}"
+    section "Claude Code 스킬 설치 → ${CLAUDE_SKILLS_DIR}"
 
-    mkdir -p "$SKILLS_INSTALL_DIR"
+    mkdir -p "$CLAUDE_SKILLS_DIR"
 
-    local skills=(
+    # Claude + Codex 공용 스킬
+    local shared_skills=(
         "use-context7"
         "web-security-review"
         "web-parallel-dispatch"
-        "web-browser-preview"
         "code-quality-review"
         "branch-merge-review"
     )
 
-    # codex 사용 여부에 따라 codex-delegate 포함
+    # Claude 전용 스킬
+    local claude_only_skills=(
+        "web-browser-preview"
+    )
+
     if $USE_CODEX; then
-        skills+=("codex-delegate")
+        claude_only_skills+=("codex-delegate")
     else
         skip "codex-delegate 스킬 건너뜀 (Codex 미사용)"
     fi
 
-    for skill in "${skills[@]}"; do
-        install_skill "$skill" "$SKILLS_INSTALL_DIR"
+    for skill in "${shared_skills[@]}" "${claude_only_skills[@]}"; do
+        install_skill "$skill" "$CLAUDE_SKILLS_DIR"
     done
 }
 
@@ -525,56 +537,122 @@ install_codex_skills() {
         return
     fi
 
-    local codex_skills_dir="$HOME/.codex/skills/local"
-
-    if [[ ! -d "$HOME/.codex/skills" ]]; then
-        warn "~/.codex/skills 디렉토리가 없습니다. Codex가 설치되어 있는지 확인하세요."
+    if [[ ! -d "$HOME/.codex" ]]; then
+        warn "~/.codex 디렉토리가 없습니다. Codex가 설치되어 있는지 확인하세요."
         return
     fi
 
-    info "Claude Code 스킬을 Codex에도 설치할 수 있습니다."
-    info "설치 경로: ${codex_skills_dir}"
     echo
-
     if ! ask_yn "Codex에도 스킬을 설치하시겠습니까?"; then
         skip "Codex 스킬 설치 건너뜀"
         return
     fi
 
-    mkdir -p "$codex_skills_dir"
+    mkdir -p "$CODEX_SKILLS_DIR"
 
-    # codex-delegate는 "Claude → Codex 위임" 스킬이므로 Codex 자신에게는 제외
-    local available_skills=(
+    # Codex에는 공용 스킬만 설치 (web-browser-preview, codex-delegate 제외)
+    local codex_skills=(
         "use-context7"
         "web-security-review"
         "web-parallel-dispatch"
-        "web-browser-preview"
         "code-quality-review"
         "branch-merge-review"
     )
 
     echo
-    info "설치할 스킬을 선택하세요:"
-    local selected_skills=()
-    for skill in "${available_skills[@]}"; do
-        if ask_yn "  ${skill}"; then
-            selected_skills+=("$skill")
-        fi
-    done
-
-    if [[ ${#selected_skills[@]} -eq 0 ]]; then
-        skip "선택된 스킬 없음"
-        return
-    fi
-
-    echo
-    for skill in "${selected_skills[@]}"; do
-        install_skill "$skill" "$codex_skills_dir"
+    for skill in "${codex_skills[@]}"; do
+        install_skill "$skill" "$CODEX_SKILLS_DIR"
     done
 }
 
 # =============================================================================
-# 섹션 9: Chrome DevTool Protocol 스크립트 → Windows 바탕화면 복사
+# 섹션 9: 에이전트 설치 (Claude + Codex)
+# =============================================================================
+
+install_agents() {
+    section "에이전트 설치 (php-backend-developer / frontend-developer / security-auditor)"
+    info "역할별 페르소나 에이전트를 Claude와 Codex에 설치합니다."
+
+    local agent_names=("php-backend-developer" "frontend-developer" "security-auditor")
+    local any_installed=false
+
+    echo
+
+    # Claude 에이전트 설치
+    if ask_yn "Claude 에이전트를 설치하시겠습니까? (~/.claude/agents/)"; then
+        mkdir -p "$CLAUDE_AGENTS_DIR"
+        for agent in "${agent_names[@]}"; do
+            local src="$AGENTS_DIR/$agent/claude.md"
+            local dst="$CLAUDE_AGENTS_DIR/${agent}.md"
+
+            if [[ ! -f "$src" ]]; then
+                warn "파일 없음: $src — 건너뜀"
+                continue
+            fi
+
+            # 안전 검사
+            if [[ -z "$agent" || "${dst}/" != "$HOME/"* ]]; then
+                warn "안전 검사 실패: $dst — 건너뜀"
+                continue
+            fi
+
+            if [[ "$SKILL_INSTALL_MODE" == "symlink" ]]; then
+                ln -sfn "$src" "$dst"
+                ok "${agent} → ~/.claude/agents/${agent}.md (링크)"
+            else
+                cp "$src" "$dst"
+                ok "${agent} → ~/.claude/agents/${agent}.md (복사)"
+            fi
+        done
+        any_installed=true
+    else
+        skip "Claude 에이전트 건너뜀"
+    fi
+
+    # Codex 에이전트 설치
+    if $USE_CODEX; then
+        echo
+        if ask_yn "Codex 에이전트를 설치하시겠습니까? (~/.codex/agents/)"; then
+            if [[ ! -d "$HOME/.codex" ]]; then
+                warn "~/.codex 디렉토리가 없습니다. Codex가 설치되어 있는지 확인하세요."
+            else
+                mkdir -p "$CODEX_AGENTS_DIR"
+                for agent in "${agent_names[@]}"; do
+                    local src="$AGENTS_DIR/$agent/codex.toml"
+                    local dst="$CODEX_AGENTS_DIR/${agent}.toml"
+
+                    if [[ ! -f "$src" ]]; then
+                        warn "파일 없음: $src — 건너뜀"
+                        continue
+                    fi
+
+                    if [[ -z "$agent" || "${dst}/" != "$HOME/"* ]]; then
+                        warn "안전 검사 실패: $dst — 건너뜀"
+                        continue
+                    fi
+
+                    if [[ "$SKILL_INSTALL_MODE" == "symlink" ]]; then
+                        ln -sfn "$src" "$dst"
+                        ok "${agent} → ~/.codex/agents/${agent}.toml (링크)"
+                    else
+                        cp "$src" "$dst"
+                        ok "${agent} → ~/.codex/agents/${agent}.toml (복사)"
+                    fi
+                done
+                any_installed=true
+            fi
+        else
+            skip "Codex 에이전트 건너뜀"
+        fi
+    fi
+
+    if $any_installed; then
+        info "에이전트는 Claude/Codex 재시작 후 활성화됩니다."
+    fi
+}
+
+# =============================================================================
+# 섹션 10: Chrome DevTool Protocol 스크립트 → Windows 바탕화면 복사
 # =============================================================================
 
 copy_cdp_script_to_desktop() {
@@ -638,7 +716,7 @@ copy_cdp_script_to_desktop() {
 }
 
 # =============================================================================
-# 섹션 10: PATH 설정 안내
+# 섹션 11: PATH 설정 안내
 # =============================================================================
 
 print_path_instructions() {
@@ -706,11 +784,11 @@ print_path_instructions() {
 main() {
     echo -e "${BOLD}"
     echo "╔══════════════════════════════════════════════════╗"
-    echo "║     팀 Claude Code 스킬 설치 스크립트           ║"
+    echo "║       팀 AI 스킬 & 에이전트 설치 스크립트       ║"
     echo "╚══════════════════════════════════════════════════╝"
     echo -e "${NC}"
-    info "스킬 소스 경로: $SCRIPT_DIR"
-    info "스킬 설치 경로: $SKILLS_INSTALL_DIR"
+    info "소스 경로: $SCRIPT_DIR"
+    info "스킬: skills/  에이전트: agents/"
     echo
 
     install_php_tools
@@ -721,6 +799,7 @@ main() {
     ask_skill_install_mode
     create_skill_links
     install_codex_skills
+    install_agents
     copy_cdp_script_to_desktop
     print_path_instructions
 
@@ -729,10 +808,11 @@ main() {
     ok "설치 완료!"
     echo -e "${GREEN}══════════════════════════════════════════════════${NC}"
     echo
-    info "Claude Code를 재시작하면 스킬이 활성화됩니다."
+    info "Claude Code를 재시작하면 스킬과 에이전트가 활성화됩니다."
     info "스킬 확인: Claude Code에서 /skills list 실행"
     if $USE_CODEX; then
-        info "Codex 스킬 확인: ~/.codex/skills/local/ 디렉토리"
+        info "Codex 스킬: ~/.codex/skills/local/"
+        info "Codex 에이전트: ~/.codex/agents/"
     fi
 }
 

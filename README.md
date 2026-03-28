@@ -1,98 +1,67 @@
-# 팀 Claude Code 스킬 모음
+# 팀 AI 스킬 & 에이전트 모음
 
-PHP 백엔드 + 바닐라 JS / jQuery / Svelte / HTMX 프론트엔드 개발팀을 위한 Claude Code 스킬 모음입니다.
+PHP 백엔드 + 바닐라 JS / jQuery / Svelte / HTMX 프론트엔드 개발팀을 위한 Claude Code / Codex 스킬 및 에이전트 모음입니다.
 
 > **지원 환경**: 현재 **WSL (Windows Subsystem for Linux)** 환경을 기준으로 작성되었습니다.
 > macOS / 네이티브 Linux에서는 `web-browser-preview` 스킬 및 `chrome-devtool-protocol.ps1`이 동작하지 않습니다. 나머지 스킬은 정상 사용 가능합니다.
 
-## 스킬 목록
+---
 
-### 1. `use-context7` — 최신 공식 문서 조회
+## 구조
 
-프레임워크·라이브러리 코드를 작성하기 전에 context7 MCP(또는 ctx7 CLI)로 최신 공식 문서를 자동 조회합니다. 오래된 API, 잘못된 시그니처, deprecated 패턴 사용을 예방합니다.
-
-**트리거**: Svelte, HTMX, jQuery, PDO 등 외부 라이브러리 코드 작성 시 자동 동작
+```
+.
+├── skills/       Claude + Codex 공용 스킬
+├── agents/       역할별 에이전트 (Claude .md + Codex .toml)
+├── install.sh    자동 설치 스크립트
+├── uninstall.sh  자동 제거 스크립트
+└── chrome-devtool-protocol.ps1   Windows Chrome CDP 실행 스크립트
+```
 
 ---
 
-### 2. `web-security-review` — 웹 보안 검토
+## Skills
 
-PHP 백엔드와 프론트엔드 전반의 보안 취약점을 탐지합니다. 심각도별(Critical / High / Medium / Low)로 분류된 리포트를 생성합니다.
+| 스킬 | Claude | Codex | 역할 |
+|------|:------:|:-----:|------|
+| `use-context7` | ✅ | ✅ | 프레임워크 코드 작성 전 최신 공식 문서 조회 |
+| `web-security-review` | ✅ | ✅ | PHP 백엔드 + 프론트엔드 보안 취약점 검토 |
+| `web-parallel-dispatch` | ✅ | ✅ | 에이전트 병렬 디스패치로 개발 속도 향상 |
+| `code-quality-review` | ✅ | ✅ | PHP/JS CLI 도구 기반 품질 종합 검토 |
+| `branch-merge-review` | ✅ | ✅ | 머지 전 3인 병렬 리뷰어 팀 실행 |
+| `web-browser-preview` | ✅ | — | WSL → Windows Chrome CDP 미리보기 |
+| `codex-delegate` | ✅ | — | Codex CLI 서브에이전트 검토/구현 위임 |
 
-**검토 항목 (PHP)**: SQL Injection, XSS 출력 인코딩, CSRF, 세션 보안, 파일 업로드, 인증, 입력 검증, 디렉토리 순회, 에러 노출
+### 트리거 예시
 
-**검토 항목 (프론트엔드)**: DOM XSS, jQuery `.html()` 위험, Svelte `{@html}`, HTMX CSRF 설정, localStorage 인증 토큰, AJAX CSRF 헤더
-
-**트리거**: "보안 검토해줘", "security review", 신규 기능 완료 후 보안 점검
-
----
-
-### 3. `web-parallel-dispatch` — 병렬 에이전트 디스패치
-
-독립적으로 작업 가능한 파트를 여러 서브에이전트에 동시에 맡겨 개발 속도를 높입니다.
-
-| 패턴 | 언제 사용 |
-|------|-----------|
-| API First | API 스펙 확정 후 PHP 백엔드 + 프론트엔드 동시 구현 |
-| Frontend Split | 레이아웃(HTML/CSS)과 JS 로직을 동시에 작성 |
-| Multi-Page | 2개 이상의 독립 페이지를 동시에 구현 |
-| Full-Stack 3-Way | DB 스키마 설계 → API + 프론트엔드 병렬 구현 |
-
-**트리거**: "백/프론트 동시에 만들어줘", "여러 페이지 병렬로 작업해줘"
-
----
-
-### 4. `web-browser-preview` — WSL → Windows 브라우저 미리보기
-
-WSL 개발 환경에서 작업 결과를 Windows Chrome CDP로 즉시 확인합니다. Windows 호스트 IP를 동적으로 조회하므로 IP가 바뀌어도 자동으로 대응합니다.
-
-**의존**: `agent-browser` 스킬 + Windows Chrome (`--remote-debugging-port=9333`)
-
-**트리거**: "브라우저에서 확인해", "브라우저로 열어줘", "check in browser"
+| 말하면 | 실행 |
+|--------|------|
+| "Svelte 5 컴포넌트 만들어줘" | `use-context7` |
+| "보안 검토해줘" | `web-security-review` |
+| "백/프론트 동시에 만들어줘" | `web-parallel-dispatch` |
+| "코드 품질 검토해줘" | `code-quality-review` |
+| "머지 전에 리뷰해줘" | `branch-merge-review` |
+| "브라우저에서 확인해" | `web-browser-preview` |
+| "코덱스에게 검토해" | `codex-delegate` |
 
 ---
 
-### 5. `codex-delegate` — Codex CLI 위임
+## Agents
 
-Codex CLI 서브에이전트에게 검토 또는 구현을 위임합니다. `.agent-works/` 디렉토리에 컨텍스트 파일을 생성하여 프로젝트 맥락을 전달합니다.
+역할별 에이전트 페르소나입니다. Claude (`claude.md`)와 Codex (`codex.toml`) 형식으로 각각 제공됩니다.
 
-- **검토 모드**: 코드 품질(가독성·구조·중복) + 코드 품질(성능·유지보수) + 보안(PHP 백엔드) + 보안(프론트엔드) — 4개 에이전트 병렬 실행
-- **구현 모드**: 작업 범위를 분석하여 백엔드/프론트엔드 또는 레이아웃/로직으로 분할 후 병렬 구현
+| 에이전트 | Claude | Codex | 역할 |
+|----------|:------:|:-----:|------|
+| `php-backend-developer` | ✅ | ✅ | PHP/PDO 백엔드 개발 전문가 |
+| `frontend-developer` | ✅ | ✅ | Vanilla JS / jQuery / Svelte 5 / HTMX 프론트엔드 전문가 |
+| `security-auditor` | ✅ | ✅ | PHP + 프론트엔드 보안 감사 전문가 (읽기 전용) |
 
-**트리거**: "코덱스에게 검토해", "코덱스에게 구현시켜"
+### 설치 위치
 
----
-
-### 6. `code-quality-review` — 코드 품질 검토
-
-CLI 도구를 자동 실행한 뒤 도구가 잡지 못하는 패턴을 추가로 수동 검토합니다.
-
-**PHP 도구**: PHPStan(정적 분석) · phpcs(스타일) · phpmd(복잡도) · phpcpd(중복)
-
-**JS 도구**: ESLint / Biome / Oxlint(프로젝트 설정에 따라 선택) · svelte-check · knip
-
-**검토 카테고리**:
-1. 불필요한 주석 (코드 재서술, 주석 처리된 데드 코드)
-2. 스타일 불일치 (프로젝트 다수결 기준 이탈)
-3. 중복 코드 (copy-paste 패턴, 유사 쿼리)
-4. 성능·평가 순서 (값싼 검사를 비싼 연산보다 앞에)
-
-**트리거**: "코드 품질 검토해줘", "리팩토링 포인트 찾아줘"
-
----
-
-### 7. `branch-merge-review` — 브랜치 통합 리뷰
-
-main/master 브랜치와의 차이를 분석하여 머지 전 품질·보안을 병렬로 검토합니다. 3인 리뷰어 팀(백엔드 품질, 보안, 프론트 품질)이 동시에 검토하고, 팀장이 Critical/High 발견을 교차 검증한 뒤 통합 보고서를 생성합니다.
-
-**리뷰어 구성**:
-- 백엔드 품질 리뷰어 — PHP 전문, `code-quality-review` 스킬 사용
-- 보안 리뷰어 — OWASP Top10 전문, `web-security-review` 스킬 사용 (전체 파일 담당)
-- 프론트 품질 리뷰어 — Svelte/jQuery/HTMX 전문, `code-quality-review` 스킬 사용
-
-**특징**: 리뷰어는 코드를 절대 수정하지 않고 보고만 함. 팀장이 grep 패턴으로 교차 검증 후 최종 확정.
-
-**트리거**: "브랜치 리뷰해줘", "머지 전에 리뷰해줘", "PR 리뷰해줘", "branch review"
+| | Claude | Codex |
+|---|---|---|
+| 스킬 | `~/.claude/skills/` | `~/.codex/skills/local/` |
+| 에이전트 | `~/.claude/agents/*.md` | `~/.codex/agents/*.toml` |
 
 ---
 
@@ -103,6 +72,8 @@ bash install.sh
 ```
 
 상세 내용은 [INSTALL.md](./INSTALL.md)를 참고하세요.
+
+---
 
 ## 부록: Chrome CDP 스크립트 (Windows)
 
@@ -115,35 +86,38 @@ bash install.sh
 `install.sh` 실행 시 Windows 바탕화면으로 자동 복사할 수 있습니다.
 Windows에서 우클릭 → **PowerShell로 실행** (관리자 권한 자동 요청).
 
+---
+
 ## 파일 구조
 
 ```
 .
 ├── README.md
-├── INSTALL.md                        # 상세 설치 가이드
-├── install.sh                        # 자동 설치 스크립트
-├── chrome-devtool-protocol.ps1       # Windows Chrome CDP 실행 스크립트
-├── use-context7/
-│   └── SKILL.md
-├── web-security-review/
-│   ├── SKILL.md
-│   └── references/
-│       ├── php-backend-security.md
-│       └── web-frontend-security.md
-├── web-parallel-dispatch/
-│   ├── SKILL.md
-│   └── references/
-│       └── dispatch-patterns.md
-├── web-browser-preview/
-│   └── SKILL.md
-├── codex-delegate/
-│   └── SKILL.md
-├── code-quality-review/
-│   ├── SKILL.md
-│   └── references/
-│       ├── php-quality.md
-│       ├── js-quality.md
-│       └── css-quality.md
-└── branch-merge-review/
-    └── SKILL.md
+├── INSTALL.md
+├── install.sh
+├── uninstall.sh
+├── chrome-devtool-protocol.ps1
+│
+├── skills/
+│   ├── use-context7/
+│   ├── web-security-review/
+│   │   └── references/
+│   ├── web-parallel-dispatch/
+│   │   └── references/
+│   ├── web-browser-preview/
+│   ├── codex-delegate/
+│   ├── code-quality-review/
+│   │   └── references/
+│   └── branch-merge-review/
+│
+└── agents/
+    ├── php-backend-developer/
+    │   ├── claude.md
+    │   └── codex.toml
+    ├── frontend-developer/
+    │   ├── claude.md
+    │   └── codex.toml
+    └── security-auditor/
+        ├── claude.md
+        └── codex.toml
 ```

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # =============================================================================
-# 팀 Claude Code 스킬 제거 스크립트
-# 설치된 스킬 링크/파일만 제거합니다. 프로그램·패키지는 건드리지 않습니다.
+# 팀 AI 스킬 & 에이전트 제거 스크립트
+# 설치된 스킬/에이전트 링크/파일만 제거합니다. 프로그램·패키지는 건드리지 않습니다.
 # =============================================================================
 
 set -euo pipefail
@@ -18,7 +18,9 @@ NC='\033[0m'
 # --- 경로 설정 ---
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CLAUDE_SKILLS_DIR="$HOME/.claude/skills"
+CLAUDE_AGENTS_DIR="$HOME/.claude/agents"
 CODEX_SKILLS_DIR="$HOME/.codex/skills/local"
+CODEX_AGENTS_DIR="$HOME/.codex/agents"
 
 # 제거 대상 스킬 목록
 ALL_SKILLS=(
@@ -28,6 +30,14 @@ ALL_SKILLS=(
     "web-browser-preview"
     "codex-delegate"
     "code-quality-review"
+    "branch-merge-review"
+)
+
+# 제거 대상 에이전트 목록
+ALL_AGENTS=(
+    "php-backend-developer"
+    "frontend-developer"
+    "security-auditor"
 )
 
 # =============================================================================
@@ -243,20 +253,101 @@ PYEOF
 }
 
 # =============================================================================
+# 섹션 4: 에이전트 제거 (Claude + Codex)
+# =============================================================================
+
+remove_agents() {
+    section "에이전트 제거 (Claude + Codex)"
+
+    # --- Claude 에이전트 ---
+    local claude_installed=()
+    for agent in "${ALL_AGENTS[@]}"; do
+        local f="$CLAUDE_AGENTS_DIR/${agent}.md"
+        [[ -L "$f" || -f "$f" ]] && claude_installed+=("$agent")
+    done
+
+    if [[ ${#claude_installed[@]} -gt 0 ]]; then
+        echo
+        info "Claude 에이전트 (${CLAUDE_AGENTS_DIR}):"
+        for agent in "${claude_installed[@]}"; do
+            local f="$CLAUDE_AGENTS_DIR/${agent}.md"
+            [[ -L "$f" ]] && echo -e "    ${CYAN}[링크]${NC} ${agent}.md" \
+                          || echo -e "    ${CYAN}[파일]${NC} ${agent}.md"
+        done
+        echo
+        if ask_yn "위 Claude 에이전트를 모두 제거하시겠습니까?"; then
+            for agent in "${claude_installed[@]}"; do
+                local f="$CLAUDE_AGENTS_DIR/${agent}.md"
+                # 안전 검사
+                if [[ "${f}/" != "$HOME/"* ]]; then
+                    warn "안전 검사 실패: $f — 건너뜀"
+                    continue
+                fi
+                rm "$f"
+                removed "${agent}.md 제거"
+            done
+        else
+            skip "Claude 에이전트 유지"
+        fi
+    else
+        skip "Claude 에이전트 — 설치된 항목 없음"
+    fi
+
+    # --- Codex 에이전트 ---
+    if [[ ! -d "$CODEX_AGENTS_DIR" ]]; then
+        skip "Codex 에이전트 — ~/.codex/agents 없음"
+        return
+    fi
+
+    local codex_installed=()
+    for agent in "${ALL_AGENTS[@]}"; do
+        local f="$CODEX_AGENTS_DIR/${agent}.toml"
+        [[ -L "$f" || -f "$f" ]] && codex_installed+=("$agent")
+    done
+
+    if [[ ${#codex_installed[@]} -gt 0 ]]; then
+        echo
+        info "Codex 에이전트 (${CODEX_AGENTS_DIR}):"
+        for agent in "${codex_installed[@]}"; do
+            local f="$CODEX_AGENTS_DIR/${agent}.toml"
+            [[ -L "$f" ]] && echo -e "    ${CYAN}[링크]${NC} ${agent}.toml" \
+                          || echo -e "    ${CYAN}[파일]${NC} ${agent}.toml"
+        done
+        echo
+        if ask_yn "위 Codex 에이전트를 모두 제거하시겠습니까?"; then
+            for agent in "${codex_installed[@]}"; do
+                local f="$CODEX_AGENTS_DIR/${agent}.toml"
+                if [[ "${f}/" != "$HOME/"* ]]; then
+                    warn "안전 검사 실패: $f — 건너뜀"
+                    continue
+                fi
+                rm "$f"
+                removed "${agent}.toml 제거"
+            done
+        else
+            skip "Codex 에이전트 유지"
+        fi
+    else
+        skip "Codex 에이전트 — 설치된 항목 없음"
+    fi
+}
+
+# =============================================================================
 # 메인
 # =============================================================================
 
 main() {
     echo -e "${BOLD}"
     echo "╔══════════════════════════════════════════════════╗"
-    echo "║     팀 Claude Code 스킬 제거 스크립트           ║"
+    echo "║     팀 AI 스킬 & 에이전트 제거 스크립트         ║"
     echo "╚══════════════════════════════════════════════════╝"
     echo -e "${NC}"
     info "프로그램·패키지(phpstan, codex 등)는 제거하지 않습니다."
-    info "스킬 파일 링크/복사본과 MCP 설정만 제거합니다."
+    info "스킬/에이전트 링크·파일과 MCP 설정만 제거합니다."
 
     remove_claude_skills
     remove_codex_skills
+    remove_agents
     remove_context7_mcp
 
     echo
@@ -264,7 +355,7 @@ main() {
     ok "제거 완료!"
     echo -e "${GREEN}══════════════════════════════════════════════════${NC}"
     echo
-    info "Claude Code를 재시작하면 스킬이 비활성화됩니다."
+    info "Claude Code / Codex를 재시작하면 비활성화됩니다."
 }
 
 main
