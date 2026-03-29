@@ -112,11 +112,11 @@ install_phar() {
     local url="$2"
     local dest="$LOCAL_BIN/$name"
 
-    info "${name} 다운로드 중..."
+    info "${name} 다운로드 중... (최대 120초)"
     if command -v wget &>/dev/null; then
-        wget -q -O "$dest" "$url"
+        wget -q --timeout=120 --tries=2 -O "$dest" "$url"
     elif command -v curl &>/dev/null; then
-        curl -qsL "$url" -o "$dest"
+        curl -fSL --max-time 120 --retry 1 "$url" -o "$dest"
     else
         warn "wget 또는 curl이 필요합니다."
         return 1
