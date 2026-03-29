@@ -136,7 +136,7 @@ You are a senior PHP backend developer (10 years experience) conducting a backen
 [Paste Common Instructions above]
 
 Workspace root: [absolute path to project root]
-Base branch: [BASE]  Merge base: [MERGE_BASE]  Current branch: [CURRENT]
+Base branch: [BASE_LABEL]  Merge base: [MERGE_BASE]  Current branch: [CURRENT]
 
 Load and follow: ~/.claude/skills/code-quality-review/SKILL.md (php-quality.md reference).
 Use only Steps 1–4 (detect stack → run CLI tools → manual review → report).
@@ -149,7 +149,7 @@ If only composer.json/composer.lock changed: review for newly added/upgraded dep
 with known vulnerabilities or major version jumps. Run CLI tools on the full project but
 report only findings that overlap with the scoped files.
 
-Git diff for your scope (only changes made on this branch since it diverged from [BASE]):
+Git diff for your scope (only changes made on this branch since it diverged from [BASE_LABEL]):
 [git diff "$MERGE_BASE" HEAD -- <backend files>]
 
 Pay special attention to:
@@ -179,7 +179,7 @@ You are a web application security expert (OWASP Top 10 specialist) conducting a
 [Paste Common Instructions above]
 
 Workspace root: [absolute path to project root]
-Base branch: [BASE]  Merge base: [MERGE_BASE]  Current branch: [CURRENT]
+Base branch: [BASE_LABEL]  Merge base: [MERGE_BASE]  Current branch: [CURRENT]
 
 Load and follow: ~/.claude/skills/web-security-review/SKILL.md (both reference files).
 Use only the audit/review steps. Skip the "Offer to Fix" step — this is a read-only review.
@@ -187,7 +187,7 @@ Use only the audit/review steps. Skip the "Offer to Fix" step — this is a read
 Your scope — review ALL of these changed files (including deleted):
 [complete list from CHANGED_SEC]
 
-Git diff for your scope — only changes made on this branch since it diverged from [BASE]
+Git diff for your scope — only changes made on this branch since it diverged from [BASE_LABEL]
 (includes deleted file context):
 [git diff "$MERGE_BASE" HEAD -- <all changed files including deleted>]
 
@@ -222,7 +222,7 @@ You are a senior frontend developer (Svelte / jQuery / HTMX specialist, 8 years 
 [Paste Common Instructions above]
 
 Workspace root: [absolute path to project root]
-Base branch: [BASE]  Merge base: [MERGE_BASE]  Current branch: [CURRENT]
+Base branch: [BASE_LABEL]  Merge base: [MERGE_BASE]  Current branch: [CURRENT]
 
 Load and follow: ~/.claude/skills/code-quality-review/SKILL.md (js-quality.md and css-quality.md references).
 Use only Steps 1–4 (detect stack → run CLI tools → manual review → report).
@@ -231,7 +231,7 @@ Skip Step 5 (Offer Fixes) — this is a read-only review.
 Your scope — report findings only for these files:
 [list of frontend and style files]
 
-Git diff for your scope (only changes made on this branch since it diverged from [BASE]):
+Git diff for your scope (only changes made on this branch since it diverged from [BASE_LABEL]):
 [git diff "$MERGE_BASE" HEAD -- <frontend/style files>]
 
 Pay special attention to:
