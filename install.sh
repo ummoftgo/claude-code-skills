@@ -106,6 +106,15 @@ ensure_npm_global_in_path() {
     npm config set prefix "$NPM_GLOBAL" 2>/dev/null || true
 }
 
+# PHAR가 실제로 실행 가능한지 확인 (부분 다운로드 파일 감지)
+phar_ok() {
+    local name="$1"
+    local path
+    path="$(command -v "$name" 2>/dev/null)" || return 1
+    # 파일 크기 1KB 미만이면 불완전한 파일로 간주
+    [[ -s "$path" ]] && [[ "$(stat -c%s "$path" 2>/dev/null || stat -f%z "$path" 2>/dev/null)" -gt 1024 ]]
+}
+
 # PHAR 다운로드 후 실행 가능하게 설정
 install_phar() {
     local name="$1"
@@ -113,14 +122,22 @@ install_phar() {
     local dest="$LOCAL_BIN/$name"
 
     info "${name} 다운로드 중... (최대 120초)"
+    local ok_download=false
     if command -v wget &>/dev/null; then
-        wget -q --timeout=120 --tries=2 -O "$dest" "$url"
+        wget -q --timeout=120 --tries=2 -O "$dest" "$url" && ok_download=true
     elif command -v curl &>/dev/null; then
-        curl -fSL --max-time 120 --retry 1 "$url" -o "$dest"
+        curl -fSL --max-time 120 --retry 1 "$url" -o "$dest" && ok_download=true
     else
         warn "wget 또는 curl이 필요합니다."
         return 1
     fi
+
+    if ! $ok_download; then
+        rm -f "$dest"
+        warn "${name} 다운로드 실패 — 파일을 삭제했습니다. 나중에 다시 시도하세요."
+        return 1
+    fi
+
     chmod +x "$dest"
     ok "${name} → ${dest}"
 }
@@ -142,7 +159,7 @@ install_php_tools() {
 
     local any_missing=false
     for tool in phpstan phpcs phpmd phpcpd; do
-        command -v "$tool" &>/dev/null || { any_missing=true; break; }
+        phar_ok "$tool" || { any_missing=true; break; }
     done
 
     if ! $any_missing; then
@@ -159,7 +176,7 @@ install_php_tools() {
     ensure_local_bin_in_path
 
     # PHPStan
-    if command -v phpstan &>/dev/null; then
+    if phar_ok phpstan; then
         ok "phpstan 이미 설치됨 ($(phpstan --version 2>/dev/null | head -1))"
     else
         if ask_install_mode "phpstan" \
@@ -173,7 +190,7 @@ install_php_tools() {
     fi
 
     # phpcs + phpcbf
-    if command -v phpcs &>/dev/null; then
+    if phar_ok phpcs; then
         ok "phpcs 이미 설치됨"
     else
         if ask_install_mode "phpcs / phpcbf" \
@@ -187,7 +204,7 @@ install_php_tools() {
     fi
 
     # phpmd
-    if command -v phpmd &>/dev/null; then
+    if phar_ok phpmd; then
         ok "phpmd 이미 설치됨"
     else
         if ask_install_mode "phpmd" \
@@ -201,7 +218,7 @@ install_php_tools() {
     fi
 
     # phpcpd
-    if command -v phpcpd &>/dev/null; then
+    if phar_ok phpcpd; then
         ok "phpcpd 이미 설치됨"
     else
         if ask_install_mode "phpcpd" \
