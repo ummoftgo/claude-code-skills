@@ -111,15 +111,15 @@ codex -a never exec -s read-only -o /tmp/out.txt "task description. Context: .ag
 codex "task description. Context: .agent-works/FILENAME.md"
 ```
 
-**Parallel execution pattern** — run agents in background and poll for completion:
+**Parallel execution pattern** — run agents in background and wait for all to finish:
 ```bash
 codex -a never exec -s read-only "task 1. Context: .agent-works/FILE1.md" > /tmp/r1.txt 2>&1 &
+PID1=$!
 codex -a never exec -s read-only "task 2. Context: .agent-works/FILE2.md" > /tmp/r2.txt 2>&1 &
+PID2=$!
 
-# Poll until all output files contain the completion marker
-for f in /tmp/r1.txt /tmp/r2.txt; do
-  while ! grep -q "tokens used" "$f" 2>/dev/null; do sleep 5; done
-done
+# Wait for all background jobs to complete (preferred over polling)
+wait $PID1 $PID2
 ```
 
 > **Key rules**:

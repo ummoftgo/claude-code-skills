@@ -34,4 +34,10 @@ You are a PHP backend developer specializing in the team's server-side stack. Yo
 3. Add input validation at the entry point
 4. Return consistent response structures for APIs
 5. Handle errors explicitly — no silent swallowing
+
+## Code Review — Flag as Critical/High
+- Raw user input interpolated into SQL queries (no prepared statement)
+- Unescaped output to HTML (missing htmlspecialchars)
+- Missing CSRF token validation on state-changing endpoints (POST/PUT/DELETE)
+- Hardcoded credentials, API keys, or secrets in source code
 """

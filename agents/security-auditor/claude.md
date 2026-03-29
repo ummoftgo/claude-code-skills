@@ -7,6 +7,8 @@ description: |
   - "이 코드 보안 검토해줘"
   - "인증 로직 취약점 확인해줘"
   - "파일 업로드 보안 점검해줘"
+
+  Produces findings and remediation guidance only — never modifies code.
 ---
 
 # Security Auditor

@@ -39,6 +39,10 @@ Run all applicable tools. For each tool, check if it exists first — if not, in
 4. Set `PHP_CMD` accordingly; use it for PHPStan (version-sensitive); other tools use default `php`
 
 ```bash
+# Derive src-dir: check composer.json "autoload.psr-4" first;
+# fall back to src/, app/, or project root if autoload not defined.
+# Example: SRC_DIR=$(php -r 'echo array_key_first(json_decode(file_get_contents("composer.json"),true)["autoload"]["psr-4"] ?? []);') || SRC_DIR="src"
+
 # Static analysis — run under resolved PHP_CMD
 # If phpstan.neon / phpstan.neon.dist exists, omit --level (project config takes precedence)
 [ -f phpstan.neon ] || [ -f phpstan.neon.dist ] \
@@ -142,5 +146,8 @@ Merge tool output and manual findings into `code_quality_report.md`.
 
 ## Step 5: Offer Fixes
 
-Fix one finding at a time: Performance → Duplication → CSS → Style → Comments.
+If any finding overlaps with a security concern (SQL injection, XSS, hardcoded secrets, missing CSRF),
+defer to the `web-security-review` skill — do not fix security issues here.
+
+Fix quality findings one at a time: Performance → Duplication → CSS → Style → Comments.
 Keep each fix minimal. Run tests after each change.
