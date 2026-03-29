@@ -39,15 +39,20 @@ Run all applicable tools. For each tool, check if it exists first — if not, in
 4. Set `PHP_CMD` accordingly; use it for PHPStan (version-sensitive); other tools use default `php`
 
 ```bash
-# Derive src-dir: check composer.json "autoload.psr-4" first;
+# Derive src-dir: read the first PSR-4 *directory value* from composer.json;
 # fall back to src/, app/, or project root if autoload not defined.
-# Example: SRC_DIR=$(php -r 'echo array_key_first(json_decode(file_get_contents("composer.json"),true)["autoload"]["psr-4"] ?? []);') || SRC_DIR="src"
+# PSR-4 maps namespace keys ("App\\") to directory values ("src/") — use array_values, not array_keys.
+# Example: SRC_DIR=$(php -r '$p=json_decode(file_get_contents("composer.json"),true)["autoload"]["psr-4"]??[];echo rtrim(array_values($p)[0]??""," /");') || SRC_DIR="src"
 
 # Static analysis — run under resolved PHP_CMD
 # If phpstan.neon / phpstan.neon.dist exists, omit --level (project config takes precedence)
-[ -f phpstan.neon ] || [ -f phpstan.neon.dist ] \
-  && $PHP_CMD $(command -v phpstan) analyse <src-dir> --no-progress --error-format=raw \
-  || $PHP_CMD $(command -v phpstan) analyse <src-dir> --level=5 --no-progress --error-format=raw
+# Use if/else to avoid double-execution: phpstan exits non-zero when it finds errors,
+# which would trigger the || fallback in a chained &&/|| expression.
+if [ -f phpstan.neon ] || [ -f phpstan.neon.dist ]; then
+  $PHP_CMD $(command -v phpstan) analyse <src-dir> --no-progress --error-format=raw
+else
+  $PHP_CMD $(command -v phpstan) analyse <src-dir> --level=5 --no-progress --error-format=raw
+fi
 
 # Style/convention (version-agnostic)
 phpcs --standard=PSR12 --report=full <src-dir>

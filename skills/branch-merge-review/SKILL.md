@@ -15,22 +15,29 @@ Run the following to detect the base branch and list changed files:
 
 ```bash
 # Auto-detect base branch: explicit priority — main → master → develop
-BASE=""
+# Use the full ref (origin/main) when available so git merge-base works
+# even when no local tracking branch exists.
+BASE_REF=""
+BASE_LABEL=""
 for candidate in origin/main origin/master origin/develop main master develop; do
-  if git show-ref --verify --quiet "refs/remotes/${candidate}" 2>/dev/null || \
-     git show-ref --verify --quiet "refs/heads/${candidate}" 2>/dev/null; then
-    BASE="${candidate#origin/}"
+  if git show-ref --verify --quiet "refs/remotes/${candidate}" 2>/dev/null; then
+    BASE_REF="$candidate"
+    BASE_LABEL="${candidate#origin/}"
+    break
+  elif git show-ref --verify --quiet "refs/heads/${candidate}" 2>/dev/null; then
+    BASE_REF="$candidate"
+    BASE_LABEL="$candidate"
     break
   fi
 done
-if [ -z "$BASE" ]; then
+if [ -z "$BASE_REF" ]; then
   echo "ERROR: Could not detect base branch. Please specify manually (e.g., 'review against staging')."
   exit 1
 fi
 
 CURRENT=$(git rev-parse --abbrev-ref HEAD)
-MERGE_BASE=$(git merge-base "$BASE" HEAD)
-echo "Base: $BASE  →  Current: $CURRENT"
+MERGE_BASE=$(git merge-base "$BASE_REF" HEAD)
+echo "Base: $BASE_LABEL  →  Current: $CURRENT"
 echo "Merge base: $MERGE_BASE"
 
 # Collect only files touched by non-merge commits on this branch.
@@ -43,7 +50,7 @@ echo "Merge base: $MERGE_BASE"
 #
 # Using --no-merges on git log ensures we see only the developer's own commits,
 # regardless of mid-branch merges from main.
-ALL_TOUCHED=$(git log "$BASE"..HEAD --no-merges --name-only --format="" | sort -u | grep -v '^$')
+ALL_TOUCHED=$(git log "$BASE_REF"..HEAD --no-merges --name-only --format="" | sort -u | grep -v '^$')
 
 # Quality reviewers: exclude deleted files
 CHANGED_QA=$(echo "$ALL_TOUCHED" | while read -r f; do
@@ -70,7 +77,7 @@ fi
 ```
 
 **How the file list is determined**:
-- `git log "$BASE"..HEAD --no-merges` collects only the developer's own commits — mid-branch merges from main are excluded, so files that changed only due to an upstream merge never enter the review scope.
+- `git log "$BASE_REF"..HEAD --no-merges` collects only the developer's own commits — mid-branch merges from main are excluded, so files that changed only due to an upstream merge never enter the review scope.
 - `MERGE_BASE` is used solely as the diff base when generating patch content (current state vs. divergence point).
 - Quality reviewers (A/C) receive `CHANGED_QA` — deleted files excluded.
 - Security reviewer (B) receives `CHANGED_SEC` — deleted files included (a removed security guard is itself a finding).
@@ -95,7 +102,7 @@ Dispatch all three agents **in a single message** (parallel Agent tool calls). D
 Supply each agent with:
 - Their specific file list (from Step 1 categorization)
 - Their persona and skill instructions
-- The git diff content for their files: `git diff "$BASE"...HEAD -- <file_list>`
+- The git diff content for their files: `git diff "$BASE_REF"...HEAD -- <file_list>`
 
 ### Common Instructions (embed in every agent prompt)
 
@@ -278,32 +285,34 @@ After all reports are received:
 
 **Security patterns** (from `web-security-review/references/`):
 ```bash
+# Use -P for Perl-compatible regex (\s, alternation groups) — required on GNU grep
+
 # SQL injection
-grep -rn "query\s*(\s*[\"'].*\$" --include="*.php" <implicated_files>
-grep -rn "\.\s*\$_(GET|POST|REQUEST|COOKIE)" --include="*.php" <implicated_files>
+grep -rnP "query\s*\(\s*[\"'].*\$" --include="*.php" <implicated_files>
+grep -rnP "\.\s*\$_(GET|POST|REQUEST|COOKIE)" --include="*.php" <implicated_files>
 
 # XSS
-grep -rn "echo \$_(GET|POST|REQUEST|COOKIE|SERVER)" --include="*.php" <implicated_files>
-grep -rn "innerHTML\s*=" --include="*.js" --include="*.svelte" <implicated_files>
+grep -rnP "echo \$_(GET|POST|REQUEST|COOKIE|SERVER)" --include="*.php" <implicated_files>
+grep -rnP "innerHTML\s*=" --include="*.js" --include="*.svelte" <implicated_files>
 
 # CSRF — check for missing token validation on state-changing endpoints
-grep -rn "\$_POST\[" --include="*.php" <implicated_files> | grep -v "csrf"
+grep -rn "\$_POST\[" --include="*.php" <implicated_files> | grep -iv "csrf"
 
 # Session security
 grep -rn "session_start" --include="*.php" <implicated_files>
 grep -rn "session_regenerate_id" --include="*.php" <implicated_files>
 
 # File upload
-grep -rn "move_uploaded_file\|\$_FILES" --include="*.php" <implicated_files>
+grep -rnP "move_uploaded_file|\\\$_FILES" --include="*.php" <implicated_files>
 
 # Hardcoded secrets
-grep -rn "password\s*=\s*['\"][^'\"]\+['\"]" --include="*.php" --include="*.js" <implicated_files>
-grep -rn "api_key\|secret_key\|access_token" --include="*.env*" --include="*.json" <implicated_files>
+grep -rnP "password\s*=\s*['\"][^'\"]{3,}" --include="*.php" --include="*.js" <implicated_files>
+grep -rnP "api_key|secret_key|access_token" --include="*.env" --include="*.json" <implicated_files>
 
 # Frontend sinks
-grep -rn "\.html(\|\.append(\|\.prepend(" --include="*.js" <implicated_files>
+grep -rnP "\.html\(|\.append\(|\.prepend\(" --include="*.js" <implicated_files>
 grep -rn "{@html" --include="*.svelte" <implicated_files>
-grep -rn "localStorage\|sessionStorage" --include="*.js" --include="*.svelte" <implicated_files>
+grep -rnP "localStorage|sessionStorage" --include="*.js" --include="*.svelte" <implicated_files>
 ```
 
 **Quality patterns** (from `code-quality-review/references/`):
@@ -331,7 +340,9 @@ grep -rn "!important" --include="*.css" --include="*.scss" <implicated_files>
 
 **Language**: Write the report in the same language the user used when requesting the review. Apply this to all sections including findings, recommendations, and the executive summary.
 
-Save the report to: `branch_review_<branch-name>_<YYYYMMDD>.md`
+Save the report to: `branch_review_<branch-slug>_<YYYYMMDD>.md`
+where `<branch-slug>` is the branch name with `/` and non-alphanumeric characters replaced by `-`
+(e.g., `feature/user-auth` → `feature-user-auth`, `fix/bug#42` → `fix-bug-42`).
 
 ```
 # Branch Review Report
