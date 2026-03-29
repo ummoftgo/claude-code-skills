@@ -211,7 +211,7 @@ install_php_tools() {
             "~/.local/bin/phpmd 으로 설치" \
             "건너뜀"; then
             install_phar "phpmd" \
-                "https://static.phpmd.org/php/latest/phpmd.phar"
+                "https://github.com/phpmd/phpmd/releases/latest/download/phpmd.phar"
         else
             skip "phpmd 건너뜀"
         fi
