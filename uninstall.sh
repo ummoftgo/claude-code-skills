@@ -57,6 +57,18 @@ removed() { echo -e "${RED}[삭제]${NC}  $*"; }
 section() { echo -e "\n${BOLD}${CYAN}▶ $*${NC}"; }
 skip()    { echo -e "${YELLOW}[SKIP]${NC}  $*"; }
 
+# 경로 입력값 정규화: 따옴표 제거, ~ 확장, 후행 슬래시 제거
+normalize_path_input() {
+    local input="$1"
+    input="${input#"${input%%[![:space:]]*}"}"
+    input="${input%"${input##*[![:space:]]}"}"
+    input="${input#\'}" ; input="${input%\'}"
+    input="${input#\"}" ; input="${input%\"}"
+    input="${input/#\~/$HOME}"
+    input="${input%/}"
+    echo "$input"
+}
+
 ask_yn() {
     local prompt="$1"
     local reply
@@ -92,9 +104,10 @@ ask_uninstall_scope() {
                 UNINSTALL_SCOPE="project"
                 echo
                 local default_dir
-                default_dir="$(pwd)"
-                read -rp "  프로젝트 경로 [${default_dir}]: " input_dir
-                local project_dir="${input_dir:-$default_dir}"
+                default_dir="$(dirname "$(pwd)")"
+                read -re -i "$default_dir" -p "  프로젝트 경로: " input_dir
+                local project_dir
+                project_dir="$(normalize_path_input "${input_dir:-$default_dir}")"
 
                 project_dir="$(cd "$project_dir" 2>/dev/null && pwd)" || {
                     warn "디렉토리를 찾을 수 없습니다: ${input_dir:-$default_dir}"

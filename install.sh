@@ -53,6 +53,22 @@ section() { echo -e "\n${BOLD}${CYAN}▶ $*${NC}"; }
 skip()    { echo -e "${YELLOW}[SKIP]${NC}  $*"; }
 
 # yes/no 질문 (기본값 y)
+# 경로 입력값 정규화: 따옴표 제거, ~ 확장, 후행 슬래시 제거
+normalize_path_input() {
+    local input="$1"
+    # 앞뒤 공백 제거
+    input="${input#"${input%%[![:space:]]*}"}"
+    input="${input%"${input##*[![:space:]]}"}"
+    # 앞뒤 따옴표 제거 (드래그&드롭 시 붙는 경우)
+    input="${input#\'}" ; input="${input%\'}"
+    input="${input#\"}" ; input="${input%\"}"
+    # ~ 확장
+    input="${input/#\~/$HOME}"
+    # 후행 슬래시 제거
+    input="${input%/}"
+    echo "$input"
+}
+
 ask_yn() {
     local prompt="$1"
     local reply
@@ -461,9 +477,10 @@ ask_install_scope() {
                 INSTALL_SCOPE="project"
                 echo
                 local default_dir
-                default_dir="$(pwd)"
-                read -rp "  프로젝트 경로 [${default_dir}]: " input_dir
-                local project_dir="${input_dir:-$default_dir}"
+                default_dir="$(dirname "$(pwd)")"
+                read -re -i "$default_dir" -p "  프로젝트 경로: " input_dir
+                local project_dir
+                project_dir="$(normalize_path_input "${input_dir:-$default_dir}")"
 
                 # 절대 경로로 정규화
                 project_dir="$(cd "$project_dir" 2>/dev/null && pwd)" || {
