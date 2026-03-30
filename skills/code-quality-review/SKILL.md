@@ -112,7 +112,14 @@ See reference files for language-specific examples.
 
 **Language**: Write the report in the same language the user used when requesting the review. If the user wrote in Korean, write the report in Korean. If in English, write in English.
 
-Merge tool output and manual findings into `code_quality_report.md`.
+Save the report to: `.tasks/reports/{yyyy-mm-dd}-{hh-mm}-{slug}-quality.md`
+
+- **Path**: Create `.tasks/reports/` if it does not exist.
+- **Date/time**: Current local date and time (e.g., `2026-03-30-14-05`).
+- **Slug**: Short identifier in kebab-case derived from the user's request or the target — e.g., feature name, file name, or a keyword from the request. Max ~30 chars.
+- **Example**: `.tasks/reports/2026-03-30-14-05-user-auth-quality.md`
+
+Merge tool output and manual findings into this file.
 
 ```
 # Code Quality Report

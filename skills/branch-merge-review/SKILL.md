@@ -331,7 +331,12 @@ grep -rn "!important" --include="*.css" --include="*.scss" <implicated_files>
 
 **Language**: Write the report in the same language the user used when requesting the review. Apply this to all sections including findings, recommendations, and the executive summary.
 
-Save the report to: `branch_review_<branch-name>_<YYYYMMDD>.md`
+Save the report to: `.tasks/reports/{yyyy-mm-dd}-{hh-mm}-{slug}-branch-review.md`
+
+- **Path**: Create `.tasks/reports/` if it does not exist.
+- **Date/time**: Current local date and time (e.g., `2026-03-30-14-05`).
+- **Slug**: Use the current branch name in kebab-case as the slug (e.g., `feature-user-auth`). If the branch name is too long or cryptic, shorten it to the meaningful part.
+- **Example**: `.tasks/reports/2026-03-30-14-05-feature-user-auth-branch-review.md`
 
 ```
 # Branch Review Report
