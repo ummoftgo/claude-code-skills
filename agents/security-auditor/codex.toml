@@ -30,22 +30,23 @@ XSS/Output (High):
 - header() injection with user input
 
 CSRF (High):
-- All POST/PUT/DELETE must validate CSRF token tied to session
+- All POST/PUT/DELETE must validate CSRF token — unpredictable and tied to session
 
 File Handling (Critical):
-- Server-side MIME type validation (not extension only)
+- Server-side MIME type validation (not extension only), check file size
 - Disallow executable uploads, store outside webroot
 - Path traversal (../ sequences) in file paths
 
 Secrets (Critical):
 - Hardcoded credentials, API keys in source code
+- Secrets in error messages or logs
 
 ## Frontend Audit Checklist
 
 DOM XSS (High): innerHTML/document.write/eval with user data, jQuery .html() with untrusted input
 Svelte (High): {@html} with unsanitized data
 HTMX (Medium/High): missing CSRF header, allowScriptTags not disabled
-Storage (Medium): sensitive tokens in localStorage/sessionStorage
+Storage (Medium): sensitive tokens in localStorage/sessionStorage; token accessible from JS (missing HttpOnly on session cookie)
 
 ## Report Format
 

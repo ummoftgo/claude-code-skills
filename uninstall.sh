@@ -228,13 +228,14 @@ remove_codex_skills() {
         return
     fi
 
-    # codex-delegate는 Codex에 설치되지 않으므로 제외
+    # install.sh의 Codex 설치 목록과 일치시켜야 함 (codex-delegate만 제외)
     local codex_skills=(
         "use-context7"
         "web-security-review"
         "web-parallel-dispatch"
-        "web-browser-preview"
         "code-quality-review"
+        "branch-merge-review"
+        "web-browser-preview"
     )
 
     local installed=()

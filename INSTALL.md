@@ -1,6 +1,6 @@
 # 팀 스킬 설치 가이드
 
-이 문서는 팀에서 개발한 Claude Code 스킬 6종을 새 개발 환경에 설치하는 방법을 설명합니다.
+이 문서는 팀에서 개발한 Claude Code 스킬 7종을 새 개발 환경에 설치하는 방법을 설명합니다.
 
 ---
 
@@ -14,6 +14,7 @@
 | `web-browser-preview` | WSL에서 Windows Chrome으로 작업 결과 확인 |
 | `codex-delegate` | Codex CLI 서브에이전트에 검토/구현 위임 |
 | `code-quality-review` | CLI 도구 기반 코드 품질 종합 검토 |
+| `branch-merge-review` | 머지 전 브랜치 변경사항 병렬 리뷰 |
 
 ---
 
@@ -48,16 +49,17 @@ Claude Code는 `~/.claude/skills/` 디렉토리에서 스킬을 로드합니다.
 # ~/.claude/skills/ 디렉토리 생성 (없는 경우)
 mkdir -p ~/.claude/skills
 
-# SKILLS_DIR을 클론한 실제 경로로 변경하세요
-SKILLS_DIR=~/work/claude-code-skills
+# SKILLS_DIR을 클론한 경로 아래 skills/ 디렉토리로 지정하세요 (스킬은 저장소의 skills/ 하위에 있습니다)
+SKILLS_DIR=~/work/claude-code-skills/skills
 
-# 6개 스킬 모두 심볼릭 링크 등록
+# 7개 스킬 모두 심볼릭 링크 등록
 ln -s $SKILLS_DIR/use-context7        ~/.claude/skills/use-context7
 ln -s $SKILLS_DIR/web-security-review ~/.claude/skills/web-security-review
 ln -s $SKILLS_DIR/web-parallel-dispatch ~/.claude/skills/web-parallel-dispatch
 ln -s $SKILLS_DIR/web-browser-preview ~/.claude/skills/web-browser-preview
 ln -s $SKILLS_DIR/codex-delegate      ~/.claude/skills/codex-delegate
 ln -s $SKILLS_DIR/code-quality-review ~/.claude/skills/code-quality-review
+ln -s $SKILLS_DIR/branch-merge-review ~/.claude/skills/branch-merge-review
 ```
 
 > **팁**: 심볼릭 링크 대신 복사하려면 `ln -s` 대신 `cp -r`을 사용하세요.
@@ -148,7 +150,7 @@ fi
 # phpmd — 복잡도 및 코드 냄새 감지
 if ! command -v phpmd &>/dev/null; then
   wget -q -O ~/.local/bin/phpmd \
-    https://static.phpmd.org/php/latest/phpmd.phar
+    https://github.com/phpmd/phpmd/releases/latest/download/phpmd.phar
   chmod +x ~/.local/bin/phpmd
 fi
 
@@ -195,15 +197,18 @@ export OPENAI_API_KEY="sk-..."
 수동으로 설치하려면:
 
 ```bash
-SKILLS_DIR=~/work/claude-code-skills
+SKILLS_DIR=~/work/claude-code-skills/skills
 mkdir -p ~/.codex/skills/local
 
 ln -s $SKILLS_DIR/use-context7        ~/.codex/skills/local/use-context7
 ln -s $SKILLS_DIR/web-security-review ~/.codex/skills/local/web-security-review
 ln -s $SKILLS_DIR/web-parallel-dispatch ~/.codex/skills/local/web-parallel-dispatch
-ln -s $SKILLS_DIR/web-browser-preview ~/.codex/skills/local/web-browser-preview
 ln -s $SKILLS_DIR/code-quality-review ~/.codex/skills/local/code-quality-review
+ln -s $SKILLS_DIR/branch-merge-review ~/.codex/skills/local/branch-merge-review
+ln -s $SKILLS_DIR/web-browser-preview ~/.codex/skills/local/web-browser-preview
 ```
+
+> `codex-delegate`는 "Claude → Codex 위임" 전용이라 Codex에는 설치하지 않습니다. `web-browser-preview`는 WSL 환경에서만 동작합니다(macOS/네이티브 Linux 미지원).
 
 ---
 
@@ -222,6 +227,7 @@ Claude Code를 열고 각 스킬이 정상 인식되는지 확인합니다.
 - `web-browser-preview`
 - `codex-delegate`
 - `code-quality-review`
+- `branch-merge-review`
 
 ---
 
@@ -236,6 +242,7 @@ Claude Code를 열고 각 스킬이 정상 인식되는지 확인합니다.
 | "코덱스에게 검토해" | `codex-delegate` — 4개 서브에이전트 병렬 검토 |
 | "코덱스에게 구현시켜" | `codex-delegate` — 분할 구현 위임 |
 | "코드 품질 검토해줘" | `code-quality-review` |
+| "머지 전에 브랜치 리뷰해줘" | `branch-merge-review` |
 
 ---
 
@@ -253,4 +260,4 @@ Claude Code를 열고 각 스킬이 정상 인식되는지 확인합니다.
 
 **PHP PHAR 실행 오류**
 → PHP CLI 설치 확인: `php --version`
-→ PHAR 파일 실행 권한 확인: `ls -la /usr/local/bin/phpstan`
+→ PHAR 파일 실행 권한 확인: `ls -la ~/.local/bin/phpstan`

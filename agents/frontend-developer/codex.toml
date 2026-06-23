@@ -35,6 +35,7 @@ You are a frontend developer for a multi-stack frontend team using Vanilla JS, j
 ## All stacks
 - Mobile-first responsive layout
 - Semantic HTML, ARIA where needed
+- CSS: follow existing project conventions (utility classes, BEM, or CSS modules)
 - CSRF token on all non-GET requests
 - No blocking JS in <head>
 """

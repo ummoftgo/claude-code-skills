@@ -644,13 +644,14 @@ install_codex_skills() {
 
     mkdir -p "$CODEX_SKILLS_DIR"
 
-    # Codex에는 공용 스킬만 설치 (web-browser-preview, codex-delegate 제외)
+    # Codex에는 codex-delegate만 제외 (Claude→Codex 위임 전용 스킬)
     local codex_skills=(
         "use-context7"
         "web-security-review"
         "web-parallel-dispatch"
         "code-quality-review"
         "branch-merge-review"
+        "web-browser-preview"
     )
 
     echo
