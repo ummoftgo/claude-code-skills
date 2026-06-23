@@ -1,11 +1,35 @@
 ---
 name: codex-delegate
-description: "Delegate code review or implementation tasks to Codex CLI sub-agents. Trigger when user says '코덱스에게 검토해', '코덱스에게 구현시켜', 'codex로 리뷰해', 'codex로 만들어줘' or similar. For review: spawns 4 parallel sub-agents (2 code quality + 2 security). For implementation: splits work by frontend/backend or screen/function into parallel sub-agents. Always creates a context MD file in .agent-works/ to pass project context to Codex sessions that have no prior knowledge."
+description: "Delegate code review or implementation tasks to Codex. Trigger when user says '코덱스에게 검토해', '코덱스에게 구현시켜', 'codex로 리뷰해', 'codex로 만들어줘' or similar. Prefer OpenAI's official Claude Code plugin (openai/codex-plugin-cc) slash commands when installed; otherwise fall back to the codex CLI. For review: spawns 4 parallel sub-agents (2 code quality + 2 security). For implementation: splits work by frontend/backend or screen/function into parallel sub-agents. Always creates a context MD file in .agent-works/ to pass project context to Codex sessions that have no prior knowledge."
 ---
 
 # Codex Delegate
 
 Delegate code review or implementation to Codex CLI sub-agents. Because each Codex session starts fresh with no conversation history, always prepare a context file first.
+
+## Step -1: Choose How to Call Codex (Plugin vs CLI)
+
+Before anything else, decide how Codex will be invoked. If OpenAI's official Claude Code plugin [openai/codex-plugin-cc](https://github.com/openai/codex-plugin-cc) is installed, drive Codex through the plugin's slash commands. Otherwise, fall back to the raw `codex` CLI described under [Codex CLI Invocation](#codex-cli-invocation).
+
+Detect the plugin (marketplace `openai-codex`, plugin `codex`):
+
+```bash
+# Prints "plugin" if the official Codex plugin is installed, otherwise "cli"
+if [ -d "$HOME/.claude/plugins/cache/openai-codex/codex" ]; then
+  echo plugin
+else
+  echo cli
+fi
+```
+
+- **plugin** → use the slash commands. They wrap the Codex app server using the same local `codex` binary, auth, and config.
+  - Review → `/codex:review` (read-only), or `/codex:adversarial-review` for a steerable design challenge. Both accept `--base <ref>`, `--wait`, `--background`.
+  - Implement / fix / investigate → `/codex:rescue <task>` (write-capable; add `--background`, `--wait`, `--resume`, `--fresh`, `--model`, `--effort` as needed).
+  - Manage jobs → `/codex:status`, `/codex:result`, `/codex:cancel`.
+  - You still create the `.agent-works/` context file (Step 0) and reference it in the slash-command prompt so Codex reads it at session start.
+- **cli** → use `codex -a never exec ...` exactly as documented below.
+
+> If unsure whether the plugin is wired up, run `/codex:setup` inside Claude Code; it reports whether Codex is ready. The filesystem check above is the non-interactive default.
 
 ## Step 0: Create Context File
 
@@ -56,7 +80,9 @@ Create one file per agent when dispatching parallel sub-agents.
 
 ## Mode 1: Review
 
-Dispatch 4 Codex CLI sub-agents in parallel — 2 for code quality, 2 for security.
+**If the plugin is installed**, prefer `/codex:review` for a standard read-only review of the current changes, or `/codex:adversarial-review` when the user wants the design and tradeoffs pressure-tested. Use `--base <ref>` for branch review and `--background` for multi-file changes, then collect output with `/codex:status` and `/codex:result`. This replaces the parallel CLI sub-agent fan-out below.
+
+**If only the CLI is available**, dispatch 4 Codex CLI sub-agents in parallel — 2 for code quality, 2 for security.
 
 | Agent | Focus | Codex prompt |
 |---|---|---|
@@ -70,6 +96,10 @@ After all agents return, aggregate findings into a single review summary for the
 ---
 
 ## Mode 2: Implement
+
+**If the plugin is installed**, hand the work to Codex with `/codex:rescue <task>` (write-capable by default). Add `--background` for long tasks and `--resume`/`--fresh` to control thread continuity, then check in with `/codex:status` and `/codex:result`. Reference the `.agent-works/` context file in the task text. For multi-part splits, you can run separate `/codex:rescue` handoffs per scope.
+
+**If only the CLI is available**, dispatch implementation sub-agents with `codex -a never exec -s workspace-write ...` as shown under [Codex CLI Invocation](#codex-cli-invocation).
 
 Before dispatching implementation agents: if the `use-context7` skill is installed, invoke it by name (`use-context7`) to query the relevant library/framework docs for each layer being implemented. Do this before writing agent prompts — the queried docs should inform the prompt's requirements and constraints.
 
@@ -95,6 +125,8 @@ After agents return:
 ---
 
 ## Codex CLI Invocation
+
+Use this section only when the official Codex plugin is **not** installed (see [Step -1](#step--1-choose-how-to-call-codex-plugin-vs-cli)).
 
 ```bash
 # Non-interactive, read-only sandbox — for review / analysis tasks
