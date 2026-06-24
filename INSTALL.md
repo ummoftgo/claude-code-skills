@@ -185,6 +185,16 @@ export OPENAI_API_KEY="sk-..."
 # ~/.bashrc 또는 ~/.zshrc에 추가하여 영구 설정
 ```
 
+> **Claude Code Codex 플러그인 (선택)**
+> `install.sh`의 Codex 단계에서 Claude Code용 공식 Codex 플러그인(`codex@openai-codex`) 설치 여부를 묻습니다.
+> 설치하면 `codex-delegate` 스킬이 `/codex:review`, `/codex:rescue` 같은 슬래시 커맨드를 우선 사용하고, 없으면 `codex` CLI로 폴백합니다.
+> 수동 설치:
+>
+> ```bash
+> claude plugin marketplace add openai/codex-plugin-cc
+> claude plugin install codex@openai-codex
+> ```
+
 ---
 
 ### Codex 스킬 설치 (선택)

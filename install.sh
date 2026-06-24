@@ -326,6 +326,58 @@ install_codex() {
         echo -e "  ${CYAN}2) ~/.bashrc 또는 ~/.zshrc에 추가:${NC}"
         echo -e "     ${CYAN}export OPENAI_API_KEY=\"sk-...\"${NC}"
     fi
+
+    # --- Claude Code용 Codex 플러그인 설치 (codex-delegate 스킬이 우선 사용) ---
+    install_codex_cc_plugin
+}
+
+# Claude Code에 OpenAI 공식 Codex 플러그인(codex@openai-codex)을 설치한다.
+# codex-delegate 스킬은 이 플러그인이 있으면 슬래시 커맨드를, 없으면 codex CLI를 사용한다.
+install_codex_cc_plugin() {
+    local marketplace="openai-codex"
+    local marketplace_source="openai/codex-plugin-cc"
+    local plugin="codex@${marketplace}"
+
+    echo
+    info "Claude Code용 Codex 플러그인(${plugin}) 확인 중..."
+
+    # claude CLI가 없으면 플러그인 설치를 진행할 수 없다.
+    if ! command -v claude &>/dev/null; then
+        skip "claude CLI를 찾을 수 없어 Codex 플러그인 설치를 건너뜁니다. (codex-delegate는 codex CLI로 폴백)"
+        return
+    fi
+
+    # 이미 설치되어 있으면 그대로 둔다.
+    if claude plugin list 2>/dev/null | grep -q "${plugin}"; then
+        ok "Codex 플러그인이 이미 설치되어 있습니다 (${plugin})."
+        return
+    fi
+
+    echo
+    if ! ask_yn "Claude Code에 Codex 플러그인(${plugin})을 설치하시겠습니까?"; then
+        skip "Codex 플러그인 건너뜀 (codex-delegate는 codex CLI로 폴백)"
+        return
+    fi
+
+    # 마켓플레이스가 등록되어 있지 않으면 먼저 등록한다.
+    if claude plugin marketplace list 2>/dev/null | grep -q "${marketplace}"; then
+        ok "마켓플레이스 이미 등록됨 (${marketplace})"
+    else
+        info "마켓플레이스 등록 중: ${marketplace_source}"
+        if ! claude plugin marketplace add "${marketplace_source}"; then
+            warn "마켓플레이스 등록 실패. 수동으로 등록하세요: claude plugin marketplace add ${marketplace_source}"
+            return
+        fi
+        ok "마켓플레이스 등록 완료 (${marketplace})"
+    fi
+
+    info "Codex 플러그인 설치 중: ${plugin}"
+    if claude plugin install "${plugin}"; then
+        ok "Codex 플러그인 설치 완료 (${plugin})"
+        info "Claude Code를 재시작하면 /codex 슬래시 커맨드가 활성화됩니다."
+    else
+        warn "Codex 플러그인 설치 실패. 수동으로 설치하세요: claude plugin install ${plugin}"
+    fi
 }
 
 # =============================================================================

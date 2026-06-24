@@ -327,6 +327,43 @@ PYEOF
 }
 
 # =============================================================================
+# 섹션 3.5: Claude Code Codex 플러그인 제거
+# =============================================================================
+
+remove_codex_cc_plugin() {
+    section "Claude Code Codex 플러그인 제거"
+
+    local plugin="codex@openai-codex"
+
+    if [[ "$UNINSTALL_SCOPE" == "project" ]]; then
+        skip "프로젝트 제거 모드 — Codex 플러그인은 전역 설정입니다. 건너뜁니다."
+        return
+    fi
+
+    if ! command -v claude &>/dev/null; then
+        skip "claude CLI 없음 — Codex 플러그인 제거 건너뜁니다."
+        return
+    fi
+
+    if ! claude plugin list 2>/dev/null | grep -q "${plugin}"; then
+        skip "Codex 플러그인이 설치되어 있지 않습니다 (${plugin})."
+        return
+    fi
+
+    echo
+    if ! ask_yn "Claude Code에서 Codex 플러그인(${plugin})을 제거하시겠습니까?"; then
+        skip "Codex 플러그인 유지"
+        return
+    fi
+
+    if claude plugin uninstall "${plugin}"; then
+        removed "Codex 플러그인 제거 완료 (${plugin})"
+    else
+        warn "Codex 플러그인 제거 실패. 수동으로 제거하세요: claude plugin uninstall ${plugin}"
+    fi
+}
+
+# =============================================================================
 # 섹션 4: 에이전트 제거 (Claude + Codex)
 # =============================================================================
 
@@ -424,6 +461,7 @@ main() {
     remove_codex_skills
     remove_agents
     remove_context7_mcp
+    remove_codex_cc_plugin
 
     echo
     echo -e "${BOLD}${GREEN}══════════════════════════════════════════════════${NC}"
