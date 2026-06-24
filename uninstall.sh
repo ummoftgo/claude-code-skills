@@ -28,6 +28,11 @@ CLAUDE_AGENTS_DIR="$HOME/.claude/agents"
 CODEX_SKILLS_DIR="$HOME/.codex/skills/local"
 CODEX_AGENTS_DIR="$HOME/.codex/agents"
 
+# 설치 소유권 추적 매니페스트 (set_manifest_path에서 스코프 기준으로 확정)
+MANIFEST_DIR="$HOME/.claude-code-skills"
+MANIFEST_FILE="$MANIFEST_DIR/manifest.tsv"
+MANIFEST_HEADER="#claude-code-skills-manifest v1"
+
 # 제거 대상 스킬 목록
 ALL_SKILLS=(
     "use-context7"
@@ -75,6 +80,98 @@ ask_yn() {
     read -rp "$(echo -e "${YELLOW}?${NC} ${prompt} [Y/n] ")" reply
     reply="${reply:-Y}"
     [[ "$reply" =~ ^[Yy]$ ]]
+}
+
+# 기본값 N 확인 (파괴적/소유권 불확실 분기용)
+ask_yn_default_no() {
+    local prompt="$1"
+    local reply
+    read -rp "$(echo -e "${YELLOW}?${NC} ${prompt} [y/N] ")" reply || reply=""
+    reply="${reply:-N}"
+    [[ "$reply" =~ ^[Yy]$ ]]
+}
+
+# =============================================================================
+# 소유권 추적 헬퍼 (매니페스트 + 심볼릭 링크 검증 + 내용 해시)
+# =============================================================================
+
+# 스코프(INSTALL_BASE_DIR) 기준으로 매니페스트 경로 확정
+set_manifest_path() {
+    MANIFEST_DIR="$INSTALL_BASE_DIR/.claude-code-skills"
+    MANIFEST_FILE="$MANIFEST_DIR/manifest.tsv"
+}
+
+# 파일/디렉터리 내용 지문(해시). 실패 시 "-". 항상 0 반환.
+content_hash() {
+    local path="$1" h="-"
+    if [[ -d "$path" ]]; then
+        h="$( { cd "$path" 2>/dev/null && find . -type f -print0 2>/dev/null \
+                | LC_ALL=C sort -z | xargs -0 sha256sum 2>/dev/null; } \
+              | sha256sum 2>/dev/null | awk '{print $1}' )" || h="-"
+    elif [[ -e "$path" ]]; then
+        h="$(sha256sum "$path" 2>/dev/null | awk '{print $1}')" || h="-"
+    fi
+    [[ -n "$h" ]] || h="-"
+    printf '%s\n' "$h"
+}
+
+# 대상 소유권 분류: ours | foreign | legacy-unverified | none
+# $1=abs path, $2=name(목록 매칭용), $3=kind("skill"|"agent")
+classify_ownership() {
+    local target="$1" name="$2"
+    if [[ ! -e "$target" && ! -L "$target" ]]; then echo "none"; return; fi
+
+    local mline=""
+    if [[ -f "$MANIFEST_FILE" ]]; then
+        mline="$(awk -F'\t' -v p="$target" '!/^#/ && $2==p {print; exit}' "$MANIFEST_FILE" 2>/dev/null || true)"
+    fi
+
+    if [[ -L "$target" ]]; then
+        local dest; dest="$(readlink -f "$target" 2>/dev/null || true)"
+        if [[ -n "$dest" && ( "$dest" == "$SCRIPT_DIR/skills/"* || "$dest" == "$SCRIPT_DIR/agents/"* ) ]]; then
+            echo "ours"; return
+        fi
+        # 깨진 링크(해석 실패/대상 없음) → 확증 불가, 기본 N 대상
+        if [[ -z "$dest" || ! -e "$dest" ]]; then echo "legacy-unverified"; return; fi
+        # 외부 실재 경로를 가리키는 동명 링크 → 보호
+        echo "foreign"; return
+    fi
+
+    # 실제 파일/디렉터리: 매니페스트는 힌트일 뿐 — 현재 내용 해시로 확증
+    if [[ -n "$mline" ]]; then
+        local rec_hash cur_hash
+        rec_hash="$(printf '%s' "$mline" | awk -F'\t' '{print $5}')"
+        cur_hash="$(content_hash "$target")"
+        if [[ "$rec_hash" != "-" && "$rec_hash" == "$cur_hash" ]]; then echo "ours"; return; fi
+        echo "legacy-unverified"; return
+    fi
+
+    # 매니페스트 없음(유실/스코프 오선택): 내용으로 확증 불가 → 기본 N(legacy-unverified).
+    # .installed-by 마커는 사람이 읽는 provenance 용도이며 소유권 판정에는 사용하지 않는다
+    # (내용 검증 없이 ours로 단정하면 사용자가 수정한 복사본을 무확인 삭제할 위험).
+
+    # 레거시/미검증: 이름이 목록에 있고 경계 안이면 기본 N, 아니면 외부
+    if [[ -n "$name" && "${target}/" == "$INSTALL_BASE_DIR/"* ]]; then
+        echo "legacy-unverified"; return
+    fi
+    echo "foreign"
+}
+
+# 매니페스트에서 해당 경로 라인 제거 (원자적). best-effort.
+manifest_prune() {
+    local abs="$1"
+    [[ -f "$MANIFEST_FILE" ]] || return 0
+    local tmp; tmp="$(mktemp "${MANIFEST_DIR}/.manifest.XXXXXX" 2>/dev/null)" || return 0
+    {
+        printf '%s\n' "$MANIFEST_HEADER"
+        awk -F'\t' -v p="$abs" '!/^#/ && $2!=p' "$MANIFEST_FILE" 2>/dev/null || true
+    } > "$tmp" 2>/dev/null || { rm -f "$tmp"; return 0; }
+    mv "$tmp" "$MANIFEST_FILE" 2>/dev/null || { rm -f "$tmp"; return 0; }
+    # 비-헤더 라인이 하나도 없으면 매니페스트 정리 (grep -vq: 비주석 라인 존재 시 0)
+    if ! grep -vq '^#' "$MANIFEST_FILE" 2>/dev/null; then
+        rm -f "$MANIFEST_FILE" 2>/dev/null || true
+        rmdir "$MANIFEST_DIR" 2>/dev/null || true
+    fi
 }
 
 # =============================================================================
@@ -133,29 +230,46 @@ remove_skill() {
     local base_dir="$2"
     local target="$base_dir/$skill"
 
+    # 소유권 판정: 우리 것만 자동 제거, 외부는 보호, 레거시/미검증은 기본 N
+    local own; own="$(classify_ownership "$target" "$skill" skill)"
+    case "$own" in
+        none)    skip "${skill} — 설치된 항목 없음"; return ;;
+        foreign) warn "${skill} — 이 저장소가 설치한 항목이 아닙니다 — 보호(건너뜀): ${target}"; return ;;
+    esac
+
+    # 안전 검사: target이 base_dir 자체이거나 INSTALL_BASE_DIR 외부이면 거부
+    if [[ -z "$skill" || "$target" == "$base_dir" || "$target" == "$base_dir/" || \
+          "$target/" != "$INSTALL_BASE_DIR/"* ]]; then
+        warn "안전 검사 실패: 예상치 못한 경로 — 건너뜀 (${target})"
+        return
+    fi
+
     if [[ -L "$target" ]]; then
         # 심볼릭 링크 — 링크만 제거 (원본 파일 보존)
-        local link_dest
-        link_dest="$(readlink "$target")"
+        local link_dest; link_dest="$(readlink "$target" 2>/dev/null || true)"
+        if [[ "$own" == "legacy-unverified" ]]; then
+            warn "${skill} 링크의 소유를 확증할 수 없습니다 (깨진 링크 등): ${target}"
+            if ! ask_yn_default_no "  링크를 제거할까요?"; then skip "${skill} 건너뜀"; return; fi
+        fi
         rm "$target"
+        manifest_prune "$target"
         removed "${skill} 링크 제거 (원본: ${link_dest})"
 
     elif [[ -d "$target" ]]; then
-        # 복사된 디렉토리 — 내용 포함 삭제 전 확인
-
-        # 안전 검사: target이 base_dir 자체이거나 HOME 외부이면 거부
-        if [[ -z "$skill" || "$target" == "$base_dir" || "$target" == "$base_dir/" || \
-              "$target/" != "$INSTALL_BASE_DIR/"* ]]; then
-            warn "안전 검사 실패: 예상치 못한 경로 — 건너뜀 (${target})"
-            return
-        fi
-
-        warn "${skill} 은 복사 방식으로 설치되어 있습니다: ${target}"
-        if ask_yn "  디렉토리를 삭제하시겠습니까?"; then
+        if [[ "$own" == "ours" ]]; then
             rm -rf "$target"
+            manifest_prune "$target"
             removed "${skill} 디렉토리 삭제"
         else
-            skip "${skill} 건너뜀"
+            # legacy-unverified — 기본 N
+            warn "${skill} 은 복사 방식으로 설치되어 있으나 이 저장소 소유로 확증할 수 없습니다: ${target}"
+            if ask_yn_default_no "  그래도 디렉토리를 삭제하시겠습니까?"; then
+                rm -rf "$target"
+                manifest_prune "$target"
+                removed "${skill} 디렉토리 삭제"
+            else
+                skip "${skill} 건너뜀"
+            fi
         fi
 
     else
@@ -167,6 +281,51 @@ remove_skill() {
 # 섹션 1: Claude Code 스킬 제거
 # =============================================================================
 
+# 한 디렉터리의 스킬 집합 제거.
+# 소유권으로 라벨링 → 일괄 프롬프트 기본 N → ours만 자동, legacy는 개별 기본 N(remove_skill), foreign 보호.
+# $1=base_dir, $2=표시 라벨, $3..=스킬 이름들
+remove_skill_set() {
+    local base_dir="$1" what="$2"; shift 2
+    local names=("$@")
+    local installed=() skill target own
+    for skill in "${names[@]}"; do
+        target="$base_dir/$skill"
+        [[ -L "$target" || -d "$target" ]] && installed+=("$skill")
+    done
+
+    if [[ ${#installed[@]} -eq 0 ]]; then
+        ok "${what}: 제거할 스킬이 없습니다."
+        return
+    fi
+
+    echo
+    info "${what} 설치된 스킬 (소유권 분류):"
+    local has_removable=false
+    for skill in "${installed[@]}"; do
+        own="$(classify_ownership "$base_dir/$skill" "$skill" skill)"
+        case "$own" in
+            ours)              echo -e "    ${GREEN}[내 것]${NC}     $skill"; has_removable=true ;;
+            legacy-unverified) echo -e "    ${YELLOW}[미검증]${NC}    $skill (개별 확인, 기본 N)"; has_removable=true ;;
+            foreign)           echo -e "    ${CYAN}[외부·보호]${NC} $skill (제거하지 않음)" ;;
+            *)                 echo -e "    ${CYAN}[?]${NC}        $skill" ;;
+        esac
+    done
+
+    if ! $has_removable; then
+        skip "${what}: 제거 대상(내 것/미검증)이 없습니다 — 외부 항목은 보호합니다."
+        return
+    fi
+
+    echo
+    if ! ask_yn_default_no "위 항목을 제거하시겠습니까? (내 것=자동, 미검증=개별 확인, 외부=보호)"; then
+        skip "${what} 유지"
+        return
+    fi
+    for skill in "${installed[@]}"; do
+        remove_skill "$skill" "$base_dir"
+    done
+}
+
 remove_claude_skills() {
     section "Claude Code 스킬 제거 (${CLAUDE_SKILLS_DIR})"
 
@@ -175,45 +334,7 @@ remove_claude_skills() {
         return
     fi
 
-    # 설치된 스킬 목록 미리 확인
-    local installed=()
-    for skill in "${ALL_SKILLS[@]}"; do
-        local target="$CLAUDE_SKILLS_DIR/$skill"
-        [[ -L "$target" || -d "$target" ]] && installed+=("$skill")
-    done
-
-    if [[ ${#installed[@]} -eq 0 ]]; then
-        ok "제거할 스킬이 없습니다."
-        return
-    fi
-
-    echo
-    info "설치된 스킬:"
-    for skill in "${installed[@]}"; do
-        local target="$CLAUDE_SKILLS_DIR/$skill"
-        if [[ -L "$target" ]]; then
-            echo -e "    ${CYAN}[링크]${NC} $skill → $(readlink "$target")"
-        else
-            echo -e "    ${CYAN}[복사]${NC} $skill"
-        fi
-    done
-
-    echo
-    if ! ask_yn "위 스킬을 모두 제거하시겠습니까?"; then
-        echo
-        info "개별 선택으로 진행합니다."
-        for skill in "${installed[@]}"; do
-            if ask_yn "  ${skill} 제거?"; then
-                remove_skill "$skill" "$CLAUDE_SKILLS_DIR"
-            else
-                skip "$skill"
-            fi
-        done
-    else
-        for skill in "${installed[@]}"; do
-            remove_skill "$skill" "$CLAUDE_SKILLS_DIR"
-        done
-    fi
+    remove_skill_set "$CLAUDE_SKILLS_DIR" "Claude" "${ALL_SKILLS[@]}"
 }
 
 # =============================================================================
@@ -228,10 +349,9 @@ remove_agent_browser() {
     [[ -L "$target" || -d "$target" ]] || return
 
     section "agent-browser 스킬 제거 (${target})"
-    info "vercel-labs/agent-browser — install.sh가 web-browser-preview용으로 설치한 외부 스킬입니다."
-    info "이 저장소 소유가 아닌 외부 스킬이므로, 아래 삭제 확인 후 진행합니다."
-    # remove_skill의 안전검사(빈 값·자기경로·INSTALL_BASE_DIR 외부 차단)와
-    # 디렉토리 삭제 확인 프롬프트를 그대로 재사용한다.
+    info "vercel-labs/agent-browser — install.sh가 web-browser-preview용으로 설치하는 외부 스킬입니다."
+    # remove_skill이 소유권을 판정한다: 이 스크립트가 설치한 내용과 해시가 일치하면(ours) 자동 제거,
+    # 그렇지 않으면(미검증/외부) 기본 N 확인 또는 보호. 안전검사(경계/자기경로)도 재사용한다.
     remove_skill "agent-browser" "$CLAUDE_SKILLS_DIR"
 }
 
@@ -257,44 +377,7 @@ remove_codex_skills() {
         "web-browser-preview"
     )
 
-    local installed=()
-    for skill in "${codex_skills[@]}"; do
-        local target="$CODEX_SKILLS_DIR/$skill"
-        [[ -L "$target" || -d "$target" ]] && installed+=("$skill")
-    done
-
-    if [[ ${#installed[@]} -eq 0 ]]; then
-        ok "Codex에 제거할 스킬이 없습니다."
-        return
-    fi
-
-    echo
-    info "Codex에 설치된 스킬:"
-    for skill in "${installed[@]}"; do
-        local target="$CODEX_SKILLS_DIR/$skill"
-        if [[ -L "$target" ]]; then
-            echo -e "    ${CYAN}[링크]${NC} $skill → $(readlink "$target")"
-        else
-            echo -e "    ${CYAN}[복사]${NC} $skill"
-        fi
-    done
-
-    echo
-    if ! ask_yn "위 Codex 스킬을 모두 제거하시겠습니까?"; then
-        echo
-        info "개별 선택으로 진행합니다."
-        for skill in "${installed[@]}"; do
-            if ask_yn "  ${skill} 제거?"; then
-                remove_skill "$skill" "$CODEX_SKILLS_DIR"
-            else
-                skip "$skill"
-            fi
-        done
-    else
-        for skill in "${installed[@]}"; do
-            remove_skill "$skill" "$CODEX_SKILLS_DIR"
-        done
-    fi
+    remove_skill_set "$CODEX_SKILLS_DIR" "Codex" "${codex_skills[@]}"
 }
 
 # =============================================================================
@@ -386,6 +469,27 @@ remove_codex_cc_plugin() {
 # 섹션 4: 에이전트 제거 (Claude + Codex)
 # =============================================================================
 
+# 에이전트 파일 하나 제거 (소유권 판정 + 매니페스트 프루닝)
+# $1=abs path, $2=agent name, $3=확장자 라벨(md|toml)
+remove_agent_file() {
+    local f="$1" agent="$2" label="$3"
+    local own; own="$(classify_ownership "$f" "$agent" agent)"
+    case "$own" in
+        none)    skip "${agent}.${label} — 설치된 항목 없음"; return ;;
+        foreign) warn "${agent}.${label} — 이 저장소가 설치한 항목이 아닙니다 — 보호(건너뜀): ${f}"; return ;;
+    esac
+    if [[ "${f}/" != "$INSTALL_BASE_DIR/"* ]]; then
+        warn "안전 검사 실패: $f — 건너뜀"; return
+    fi
+    if [[ "$own" != "ours" ]]; then
+        warn "${agent}.${label} 의 소유를 확증할 수 없습니다 (레거시/수정됨): ${f}"
+        if ! ask_yn_default_no "  그래도 제거할까요?"; then skip "${agent}.${label} 건너뜀"; return; fi
+    fi
+    rm "$f"
+    manifest_prune "$f"
+    removed "${agent}.${label} 제거"
+}
+
 remove_agents() {
     section "에이전트 제거 (Claude + Codex)"
 
@@ -405,16 +509,9 @@ remove_agents() {
                           || echo -e "    ${CYAN}[파일]${NC} ${agent}.md"
         done
         echo
-        if ask_yn "위 Claude 에이전트를 모두 제거하시겠습니까?"; then
+        if ask_yn "위 Claude 에이전트를 제거하시겠습니까? (외부/미검증 항목은 보호됩니다)"; then
             for agent in "${claude_installed[@]}"; do
-                local f="$CLAUDE_AGENTS_DIR/${agent}.md"
-                # 안전 검사
-                if [[ "${f}/" != "$INSTALL_BASE_DIR/"* ]]; then
-                    warn "안전 검사 실패: $f — 건너뜀"
-                    continue
-                fi
-                rm "$f"
-                removed "${agent}.md 제거"
+                remove_agent_file "$CLAUDE_AGENTS_DIR/${agent}.md" "$agent" md
             done
         else
             skip "Claude 에이전트 유지"
@@ -444,15 +541,9 @@ remove_agents() {
                           || echo -e "    ${CYAN}[파일]${NC} ${agent}.toml"
         done
         echo
-        if ask_yn "위 Codex 에이전트를 모두 제거하시겠습니까?"; then
+        if ask_yn "위 Codex 에이전트를 제거하시겠습니까? (외부/미검증 항목은 보호됩니다)"; then
             for agent in "${codex_installed[@]}"; do
-                local f="$CODEX_AGENTS_DIR/${agent}.toml"
-                if [[ "${f}/" != "$INSTALL_BASE_DIR/"* ]]; then
-                    warn "안전 검사 실패: $f — 건너뜀"
-                    continue
-                fi
-                rm "$f"
-                removed "${agent}.toml 제거"
+                remove_agent_file "$CODEX_AGENTS_DIR/${agent}.toml" "$agent" toml
             done
         else
             skip "Codex 에이전트 유지"
@@ -476,6 +567,7 @@ main() {
     info "스킬/에이전트 링크·파일과 MCP 설정만 제거합니다."
 
     ask_uninstall_scope
+    set_manifest_path
     remove_claude_skills
     remove_agent_browser
     remove_codex_skills

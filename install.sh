@@ -42,6 +42,11 @@ USE_CODEX=true
 # 스킬 설치 방식: "symlink" 또는 "copy"
 SKILL_INSTALL_MODE="symlink"
 
+# 설치 소유권 추적 매니페스트 (set_manifest_path에서 스코프 기준으로 확정)
+MANIFEST_DIR="$HOME/.claude-code-skills"
+MANIFEST_FILE="$MANIFEST_DIR/manifest.tsv"
+MANIFEST_HEADER="#claude-code-skills-manifest v1"
+
 # =============================================================================
 # 유틸 함수
 # =============================================================================
@@ -75,6 +80,116 @@ ask_yn() {
     read -rp "$(echo -e "${YELLOW}?${NC} ${prompt} [Y/n] ")" reply
     reply="${reply:-Y}"
     [[ "$reply" =~ ^[Yy]$ ]]
+}
+
+# 기본값 N 확인 (파괴적/소유권 불확실 분기용)
+ask_yn_default_no() {
+    local prompt="$1"
+    local reply
+    read -rp "$(echo -e "${YELLOW}?${NC} ${prompt} [y/N] ")" reply || reply=""
+    reply="${reply:-N}"
+    [[ "$reply" =~ ^[Yy]$ ]]
+}
+
+# =============================================================================
+# 소유권 추적 헬퍼 (매니페스트 + 심볼릭 링크 검증 + 내용 해시)
+# =============================================================================
+
+# 스코프(INSTALL_BASE_DIR) 기준으로 매니페스트 경로 확정
+set_manifest_path() {
+    MANIFEST_DIR="$INSTALL_BASE_DIR/.claude-code-skills"
+    MANIFEST_FILE="$MANIFEST_DIR/manifest.tsv"
+}
+
+# 파일/디렉터리 내용 지문(해시). 실패 시 "-". 항상 0 반환.
+content_hash() {
+    local path="$1" h="-"
+    if [[ -d "$path" ]]; then
+        h="$( { cd "$path" 2>/dev/null && find . -type f -print0 2>/dev/null \
+                | LC_ALL=C sort -z | xargs -0 sha256sum 2>/dev/null; } \
+              | sha256sum 2>/dev/null | awk '{print $1}' )" || h="-"
+    elif [[ -e "$path" ]]; then
+        h="$(sha256sum "$path" 2>/dev/null | awk '{print $1}')" || h="-"
+    fi
+    [[ -n "$h" ]] || h="-"
+    printf '%s\n' "$h"
+}
+
+# copy 스킬 디렉터리에 소유 마커 기록 (보조 신호). best-effort.
+marker_write() {
+    local dir="$1"
+    [[ -d "$dir" ]] || return 0
+    {
+        printf 'repo=claude-code-skills\n'
+        printf 'installed_at=%s\n' "$(date -u +%FT%TZ 2>/dev/null || echo '-')"
+    } > "$dir/.installed-by" 2>/dev/null || true
+}
+
+# 매니페스트 헤더 보장
+manifest_init() {
+    mkdir -p "$MANIFEST_DIR" 2>/dev/null || { warn "매니페스트 디렉터리 생성 실패: $MANIFEST_DIR"; return 1; }
+    if [[ ! -f "$MANIFEST_FILE" ]]; then
+        printf '%s\n' "$MANIFEST_HEADER" > "$MANIFEST_FILE" 2>/dev/null || { warn "매니페스트 생성 실패"; return 1; }
+    fi
+}
+
+# 한 항목 기록: type, abs_path, mode(symlink|copy|external), source, hash(선택)
+# 경로 기준 dedupe 후 원자적 교체. best-effort(실패해도 설치는 진행).
+manifest_record() {
+    local type="$1" abs="$2" mode="$3" src="$4" hash="${5:--}"
+    local ts; ts="$(date -u +%FT%TZ 2>/dev/null || echo '-')"
+    manifest_init || return 0
+    local tmp; tmp="$(mktemp "${MANIFEST_DIR}/.manifest.XXXXXX" 2>/dev/null)" || { warn "매니페스트 임시파일 실패"; return 0; }
+    {
+        printf '%s\n' "$MANIFEST_HEADER"
+        if [[ -f "$MANIFEST_FILE" ]]; then
+            awk -F'\t' -v p="$abs" '!/^#/ && $2!=p' "$MANIFEST_FILE" 2>/dev/null || true
+        fi
+        printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$type" "$abs" "$mode" "$src" "$hash" "$ts"
+    } > "$tmp" 2>/dev/null || { rm -f "$tmp"; return 0; }
+    mv "$tmp" "$MANIFEST_FILE" 2>/dev/null || { rm -f "$tmp"; warn "매니페스트 갱신 실패"; return 0; }
+}
+
+# 대상 소유권 분류: ours | foreign | legacy-unverified | none
+# $1=abs path, $2=name(목록 매칭용), $3=kind("skill"|"agent")
+classify_ownership() {
+    local target="$1" name="$2"
+    if [[ ! -e "$target" && ! -L "$target" ]]; then echo "none"; return; fi
+
+    local mline=""
+    if [[ -f "$MANIFEST_FILE" ]]; then
+        mline="$(awk -F'\t' -v p="$target" '!/^#/ && $2==p {print; exit}' "$MANIFEST_FILE" 2>/dev/null || true)"
+    fi
+
+    if [[ -L "$target" ]]; then
+        local dest; dest="$(readlink -f "$target" 2>/dev/null || true)"
+        if [[ -n "$dest" && ( "$dest" == "$SCRIPT_DIR/skills/"* || "$dest" == "$SCRIPT_DIR/agents/"* ) ]]; then
+            echo "ours"; return
+        fi
+        # 깨진 링크(해석 실패/대상 없음) → 확증 불가, 기본 N 대상
+        if [[ -z "$dest" || ! -e "$dest" ]]; then echo "legacy-unverified"; return; fi
+        # 외부 실재 경로를 가리키는 동명 링크 → 보호
+        echo "foreign"; return
+    fi
+
+    # 실제 파일/디렉터리: 매니페스트는 힌트일 뿐 — 현재 내용 해시로 확증
+    if [[ -n "$mline" ]]; then
+        local rec_hash cur_hash
+        rec_hash="$(printf '%s' "$mline" | awk -F'\t' '{print $5}')"
+        cur_hash="$(content_hash "$target")"
+        if [[ "$rec_hash" != "-" && "$rec_hash" == "$cur_hash" ]]; then echo "ours"; return; fi
+        echo "legacy-unverified"; return
+    fi
+
+    # 매니페스트 없음(유실/스코프 오선택): 내용으로 확증 불가 → 기본 N(legacy-unverified).
+    # .installed-by 마커는 사람이 읽는 provenance 용도이며 소유권 판정에는 사용하지 않는다
+    # (내용 검증 없이 ours로 단정하면 사용자가 수정한 복사본을 무확인 삭제할 위험).
+
+    # 레거시/미검증: 이름이 목록에 있고 경계 안이면 기본 N, 아니면 외부
+    if [[ -n "$name" && "${target}/" == "$INSTALL_BASE_DIR/"* ]]; then
+        echo "legacy-unverified"; return
+    fi
+    echo "foreign"
 }
 
 # 설치 방식 선택: 1=전역, 2=npx/skip
@@ -461,7 +576,9 @@ install_agent_browser() {
 
     # --- 스킬 설치 ---
     if [[ -d "$HOME/.claude/skills/agent-browser" ]]; then
-        ok "agent-browser 스킬이 이미 설치되어 있습니다."
+        # 기존에 이미 있는 디렉터리는 이 스크립트가 설치한 것이라고 단정할 수 없으므로
+        # 매니페스트에 자동 등록(adopt)하지 않는다 (§10.6). 제거 시 legacy-unverified로 기본 N 처리.
+        ok "agent-browser 스킬이 이미 설치되어 있습니다 (이 스크립트 설치본이 아닐 수 있어 매니페스트 미등록)."
     else
         echo
         if ! ask_yn "agent-browser 스킬을 설치하시겠습니까?"; then
@@ -470,6 +587,8 @@ install_agent_browser() {
             info "agent-browser 스킬 설치 중..."
             if npx skills add vercel-labs/agent-browser --skill agent-browser; then
                 ok "agent-browser 스킬 설치 완료"
+                # 신규 설치본은 내용 해시로 기록 → 제거 시 변경 없으면 ours로 검증 가능
+                manifest_record agent-browser "$HOME/.claude/skills/agent-browser" external "vercel-labs/agent-browser" "$(content_hash "$HOME/.claude/skills/agent-browser")"
             else
                 warn "agent-browser 스킬 설치 실패. 수동으로 설치하세요: npx skills add vercel-labs/agent-browser --skill agent-browser"
             fi
@@ -575,6 +694,8 @@ install_skill() {
     local dst_dir="$2"
     local src="$SKILLS_DIR/$skill"
     local dst="$dst_dir/$skill"
+    local mtype="claude-skill"
+    [[ "$dst_dir" == "$CODEX_SKILLS_DIR" ]] && mtype="codex-skill"
 
     if [[ ! -d "$src" ]]; then
         warn "소스 디렉토리 없음: $src — 건너뜀"
@@ -590,25 +711,49 @@ install_skill() {
         fi
 
         if [[ -L "$dst" ]]; then
+            local own; own="$(classify_ownership "$dst" "$skill" skill)"
             warn "${skill} 위치에 심볼릭 링크가 있습니다: $dst"
-            if ask_yn "  링크를 제거하고 파일로 복사하시겠습니까?"; then
+            local proceed=false
+            if [[ "$own" == "ours" ]]; then
+                proceed=true   # 우리 링크 → 확인 없이 파일로 대체
+            else
+                # foreign(외부) / legacy-unverified(깨진·미검증 링크) — 파괴적이므로 기본 N
+                [[ "$own" == "foreign" ]] && warn "  이 링크는 이 저장소가 만든 것이 아닙니다 (외부 대상)." \
+                                          || warn "  이 링크의 소유를 확증할 수 없습니다 (깨진/미검증 링크)."
+                ask_yn_default_no "  그래도 제거하고 파일로 복사할까요?" && proceed=true
+            fi
+            if $proceed; then
                 rm "$dst"
                 cp -r "$src" "$dst"
+                marker_write "$dst"
+                manifest_record "$mtype" "$dst" copy "$src" "$(content_hash "$dst")"
                 ok "${skill} → ${dst} (복사, 링크 대체)"
             else
                 skip "${skill} 건너뜀"
             fi
         elif [[ -d "$dst" ]]; then
-            warn "${skill} 디렉토리가 이미 존재합니다: $dst"
-            if ask_yn "  덮어쓰시겠습니까?"; then
+            local own; own="$(classify_ownership "$dst" "$skill" skill)"
+            local proceed=false
+            if [[ "$own" == "ours" ]]; then
+                proceed=true   # 이 저장소가 설치한 항목 — 확인 없이 갱신
+            else
+                warn "${skill} 디렉토리가 이미 존재합니다: $dst"
+                [[ "$own" == "foreign" ]] && warn "  이 저장소가 설치한 항목이 아닐 수 있습니다 (사용자/외부 자산)."
+                ask_yn_default_no "  덮어쓰시겠습니까?" && proceed=true
+            fi
+            if $proceed; then
                 rm -rf "$dst"
                 cp -r "$src" "$dst"
+                marker_write "$dst"
+                manifest_record "$mtype" "$dst" copy "$src" "$(content_hash "$dst")"
                 ok "${skill} → ${dst} (복사, 덮어씀)"
             else
                 skip "${skill} 건너뜀"
             fi
         else
             cp -r "$src" "$dst"
+            marker_write "$dst"
+            manifest_record "$mtype" "$dst" copy "$src" "$(content_hash "$dst")"
             ok "${skill} → ${dst} (복사)"
         fi
     else
@@ -617,11 +762,24 @@ install_skill() {
             local current_target
             current_target="$(readlink "$dst")"
             if [[ "$current_target" == "$src" ]]; then
+                manifest_record "$mtype" "$dst" symlink "$src" "-"
                 ok "${skill} 링크 이미 존재 (최신)"
             else
+                local own; own="$(classify_ownership "$dst" "$skill" skill)"
                 warn "${skill} 링크가 다른 경로를 가리킵니다: $current_target"
-                if ask_yn "  링크를 현재 경로(${src})로 업데이트할까요?"; then
+                local proceed=false
+                if [[ "$own" == "ours" ]]; then
+                    # 우리 저장소를 가리키는 링크 → 경로 갱신(기본 Y)
+                    ask_yn "  링크를 현재 경로(${src})로 업데이트할까요?" && proceed=true
+                else
+                    # foreign(외부) / legacy-unverified(깨진·미검증) — 파괴적이므로 기본 N
+                    [[ "$own" == "foreign" ]] && warn "  이 링크는 이 저장소가 만든 것이 아닙니다 (외부 대상)." \
+                                              || warn "  이 링크의 소유를 확증할 수 없습니다 (깨진/미검증 링크)."
+                    ask_yn_default_no "  현재 경로(${src})로 강제 업데이트할까요?" && proceed=true
+                fi
+                if $proceed; then
                     ln -sfn "$src" "$dst"
+                    manifest_record "$mtype" "$dst" symlink "$src" "-"
                     ok "${skill} → ${dst} (링크 업데이트)"
                 else
                     skip "${skill} 링크 업데이트 건너뜀"
@@ -632,6 +790,7 @@ install_skill() {
             skip "${skill} 건너뜀 (수동 처리 필요)"
         else
             ln -s "$src" "$dst"
+            manifest_record "$mtype" "$dst" symlink "$src" "-"
             ok "${skill} → ${dst} (링크)"
         fi
     fi
@@ -743,11 +902,26 @@ install_agents() {
                 continue
             fi
 
+            # 기존 항목이 있으면 소유권 확인 후 덮어쓰기 (foreign/레거시는 기본 N)
+            if [[ -e "$dst" || -L "$dst" ]]; then
+                local own; own="$(classify_ownership "$dst" "$agent" agent)"
+                if [[ "$own" != "ours" && "$own" != "none" ]]; then
+                    warn "${agent}.md 이(가) 이미 있습니다: $dst"
+                    [[ "$own" == "foreign" ]] && warn "  이 저장소가 설치한 항목이 아닐 수 있습니다."
+                    if ! ask_yn_default_no "  덮어쓰시겠습니까?"; then
+                        skip "${agent}.md 건너뜀"
+                        continue
+                    fi
+                fi
+            fi
+
             if [[ "$SKILL_INSTALL_MODE" == "symlink" ]]; then
                 ln -sfn "$src" "$dst"
+                manifest_record claude-agent "$dst" symlink "$src" "-"
                 ok "${agent} → ~/.claude/agents/${agent}.md (링크)"
             else
                 cp "$src" "$dst"
+                manifest_record claude-agent "$dst" copy "$src" "$(content_hash "$dst")"
                 ok "${agent} → ~/.claude/agents/${agent}.md (복사)"
             fi
         done
@@ -778,11 +952,26 @@ install_agents() {
                         continue
                     fi
 
+                    # 기존 항목이 있으면 소유권 확인 후 덮어쓰기 (foreign/레거시는 기본 N)
+                    if [[ -e "$dst" || -L "$dst" ]]; then
+                        local own; own="$(classify_ownership "$dst" "$agent" agent)"
+                        if [[ "$own" != "ours" && "$own" != "none" ]]; then
+                            warn "${agent}.toml 이(가) 이미 있습니다: $dst"
+                            [[ "$own" == "foreign" ]] && warn "  이 저장소가 설치한 항목이 아닐 수 있습니다."
+                            if ! ask_yn_default_no "  덮어쓰시겠습니까?"; then
+                                skip "${agent}.toml 건너뜀"
+                                continue
+                            fi
+                        fi
+                    fi
+
                     if [[ "$SKILL_INSTALL_MODE" == "symlink" ]]; then
                         ln -sfn "$src" "$dst"
+                        manifest_record codex-agent "$dst" symlink "$src" "-"
                         ok "${agent} → ~/.codex/agents/${agent}.toml (링크)"
                     else
                         cp "$src" "$dst"
+                        manifest_record codex-agent "$dst" copy "$src" "$(content_hash "$dst")"
                         ok "${agent} → ~/.codex/agents/${agent}.toml (복사)"
                     fi
                 done
@@ -942,6 +1131,7 @@ main() {
     install_ctx7
     install_codex
     ask_install_scope
+    set_manifest_path
     setup_context7_mcp
     install_agent_browser
     ask_skill_install_mode
