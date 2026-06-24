@@ -7,6 +7,8 @@ description: "Perform security review for PHP backend + vanilla JS/jQuery/Svelte
 
 Security review skill for PHP backend + vanilla JS / jQuery / Svelte / HTMX frontend stack.
 
+> **Read-only mode (priority rule).** If the user asked to review **without changing anything** ("수정하지 말고", "read-only", or a read-only sandbox), do not write to the workspace: **do not create the report file** under `.tasks/reports/` and **do not install** any tooling. Emit the full report **inline** in your response instead. Write files only when the user has not restricted writes.
+
 ## Reference Files
 
 Load these before proceeding:
@@ -35,7 +37,7 @@ When the user asks for a security review, scan, or audit:
 2. **Read references**: Load `references/php-backend-security.md` and/or `references/web-frontend-security.md`.
 3. **Scan codebase**: Search for patterns listed in the reference files. Use Grep for sinks, dangerous functions, and missing protections.
 4. **Classify findings**: Assign severity (Critical / High / Medium / Low) per the reference file guidance.
-5. **Write report**: Save to `.tasks/reports/{yyyy-mm-dd}-{hh-mm}-{slug}-security.md`. Create `.tasks/reports/` if it does not exist. Slug is a short kebab-case identifier from the user's request or target scope (e.g., `file-upload`, `user-login`). Write in the same language the user used when requesting the review.
+5. **Write report**: Save to `.tasks/reports/{yyyy-mm-dd}-{hh-mm}-{slug}-security.md`. Create `.tasks/reports/` if it does not exist. Slug is a short kebab-case identifier from the user's request or target scope (e.g., `file-upload`, `user-login`). Write in the same language the user used when requesting the review. **(Read-only mode: skip writing the file — emit the report inline instead.)**
 6. **Summarize**: Report findings to the user inline in the same language, offer to fix.
 
 ## Report Format

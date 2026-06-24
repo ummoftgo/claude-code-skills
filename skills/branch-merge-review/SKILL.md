@@ -7,6 +7,8 @@ description: "Review all changes between the current branch and main/master befo
 
 Review all diff changes against main/master using a 3-person parallel reviewer team. Produces a consolidated report with cross-validated findings.
 
+> **Read-only mode (priority rule).** Reviewers never modify code regardless. Additionally, if the user asked to review **without writing anything** ("수정하지 말고", "read-only", or a read-only sandbox), the team leader must **not create the consolidated report file** under `.tasks/reports/` — emit it **inline** instead — and must tell each spawned reviewer to run read-only (no tool installs, no report files). Write the file only when the user has not restricted writes.
+
 ---
 
 ## Step 1: Collect Changed Files
@@ -340,7 +342,7 @@ grep -rn "!important" --include="*.css" --include="*.scss" <implicated_files>
 
 **Language**: Write the report in the same language the user used when requesting the review. Apply this to all sections including findings, recommendations, and the executive summary.
 
-Save the report to: `.tasks/reports/{yyyy-mm-dd}-{hh-mm}-{slug}-branch-review.md`
+Save the report to: `.tasks/reports/{yyyy-mm-dd}-{hh-mm}-{slug}-branch-review.md` **(skip in read-only mode — emit the report inline instead).**
 
 - **Path**: Create `.tasks/reports/` if it does not exist.
 - **Date/time**: Current local date and time (e.g., `2026-03-30-14-05`).

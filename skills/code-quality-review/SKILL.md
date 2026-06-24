@@ -7,6 +7,12 @@ description: "Review code for quality and performance issues. Trigger when user 
 
 Runs CLI analysis tools first, then supplements with pattern-based review. Adapts to the detected stack.
 
+> **Read-only mode (priority rule).** If the user asked for a review **without changing anything** (e.g. "수정하지 말고 검토만", "read-only", review delegated under a read-only sandbox), then this skill must not write to the workspace:
+> - **Do not install** missing tools (no `npm install`, `composer require`, PHAR downloads, etc.). Run only the tools already present; for each missing tool, record it as **`skipped (not installed)`** in the report.
+> - **Do not create the report file.** Emit the report **inline** in your response instead of writing to `.tasks/reports/`.
+>
+> Only perform installs and file writes when the user has not restricted writes. When in doubt, treat the request as read-only and ask before installing or writing.
+
 ## Reference Files
 
 Load before scanning:
@@ -28,7 +34,7 @@ Infer project conventions from **existing code majority** (not assumed standards
 
 ## Step 2: Run CLI Tools
 
-Run all applicable tools. For each tool, check if it exists first — if not, install per the reference file instructions. Capture output for integration into the report.
+Run all applicable tools. For each tool, check if it exists first — if not, install per the reference file instructions **(unless read-only mode applies — then skip the install and mark the tool `skipped (not installed)`)**. Capture output for integration into the report.
 
 ### PHP stack
 
@@ -121,7 +127,7 @@ See reference files for language-specific examples.
 
 **Language**: Write the report in the same language the user used when requesting the review. If the user wrote in Korean, write the report in Korean. If in English, write in English.
 
-Save the report to: `.tasks/reports/{yyyy-mm-dd}-{hh-mm}-{slug}-quality.md`
+Save the report to: `.tasks/reports/{yyyy-mm-dd}-{hh-mm}-{slug}-quality.md` **(skip this in read-only mode — emit the report inline instead).**
 
 - **Path**: Create `.tasks/reports/` if it does not exist.
 - **Date/time**: Current local date and time (e.g., `2026-03-30-14-05`).

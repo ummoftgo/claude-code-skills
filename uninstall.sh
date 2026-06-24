@@ -217,6 +217,25 @@ remove_claude_skills() {
 }
 
 # =============================================================================
+# 섹션 1.5: agent-browser 스킬 제거 (install.sh가 전역 설치하는 외부 스킬)
+# =============================================================================
+
+remove_agent_browser() {
+    # install.sh는 전역 모드에서만 ~/.claude/skills/agent-browser 를 설치한다.
+    [[ "$UNINSTALL_SCOPE" == "global" ]] || return
+
+    local target="$CLAUDE_SKILLS_DIR/agent-browser"
+    [[ -L "$target" || -d "$target" ]] || return
+
+    section "agent-browser 스킬 제거 (${target})"
+    info "vercel-labs/agent-browser — install.sh가 web-browser-preview용으로 설치한 외부 스킬입니다."
+    info "이 저장소 소유가 아닌 외부 스킬이므로, 아래 삭제 확인 후 진행합니다."
+    # remove_skill의 안전검사(빈 값·자기경로·INSTALL_BASE_DIR 외부 차단)와
+    # 디렉토리 삭제 확인 프롬프트를 그대로 재사용한다.
+    remove_skill "agent-browser" "$CLAUDE_SKILLS_DIR"
+}
+
+# =============================================================================
 # 섹션 2: Codex 스킬 제거
 # =============================================================================
 
@@ -458,6 +477,7 @@ main() {
 
     ask_uninstall_scope
     remove_claude_skills
+    remove_agent_browser
     remove_codex_skills
     remove_agents
     remove_context7_mcp

@@ -737,8 +737,8 @@ install_agents() {
                 continue
             fi
 
-            # 안전 검사
-            if [[ -z "$agent" || "${dst}/" != "$HOME/"* ]]; then
+            # 안전 검사 (Codex 에이전트 분기와 동일하게 INSTALL_BASE_DIR 기준)
+            if [[ -z "$agent" || "${dst}/" != "$INSTALL_BASE_DIR/"* ]]; then
                 warn "안전 검사 실패: $dst — 건너뜀"
                 continue
             fi

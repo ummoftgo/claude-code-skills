@@ -99,7 +99,7 @@ fi
 # phpmd — complexity, dead code, code smells
 if ! command -v phpmd &>/dev/null; then
   wget -q -O ~/.local/bin/phpmd \
-    https://static.phpmd.org/php/latest/phpmd.phar
+    https://github.com/phpmd/phpmd/releases/latest/download/phpmd.phar
   chmod +x ~/.local/bin/phpmd
 fi
 

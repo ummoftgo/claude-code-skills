@@ -65,7 +65,10 @@ Write-Host "[완료] 포트 $DebugPort portproxy 정리됨" -ForegroundColor Gre
 Write-Host "[🛡️] 네트워크 인터페이스 및 보안 성벽을 재구성합니다." -ForegroundColor Cyan
 
 # WSL 가상 어댑터 식별 (IP + 실제 서브넷 마스크 동적 감지)
-$WSL_Interface = Get-NetIPAddress | Where-Object { $_.InterfaceAlias -like "*WSL*" -and $_.AddressFamily -eq 'IPv4' }
+# 후보가 여러 개면 IPAddress/PrefixLength가 배열이 되어 netsh 인자가 깨지므로 첫 항목만 사용
+$WSL_Interface = Get-NetIPAddress |
+    Where-Object { $_.InterfaceAlias -like "*WSL*" -and $_.AddressFamily -eq 'IPv4' } |
+    Select-Object -First 1
 if (-not $WSL_Interface) {
     Write-Error "[오류] 활성화된 WSL 인스턴스를 찾을 수 없습니다."
     Pause; exit
@@ -103,7 +106,7 @@ if ($existingProcs) {
 # 8. 엔진 가동 및 검증 (Execution & Validation)
 # =====================================================================
 Write-Host "[🚀] 크롬 디버깅 인터페이스를 기동합니다." -ForegroundColor Green
-Start-Process $ChromePath -ArgumentList "--remote-debugging-port=$DebugPort --user-data-dir=$UserDataDir --no-first-run"
+Start-Process $ChromePath -ArgumentList "--remote-debugging-port=$DebugPort --user-data-dir=`"$UserDataDir`" --no-first-run"
 
 # Chrome 리스닝 검증
 Start-Sleep -Seconds 2
