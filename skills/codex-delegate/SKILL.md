@@ -14,13 +14,24 @@ Before anything else, decide how Codex will be invoked. If OpenAI's official Cla
 Detect the plugin (marketplace `openai-codex`, plugin `codex`):
 
 ```bash
-# Prints "plugin" if the official Codex plugin is installed, otherwise "cli"
-if [ -d "$HOME/.claude/plugins/cache/openai-codex/codex" ]; then
+# Prints "plugin" if the official Codex plugin is installed, otherwise "cli".
+# Cheap filesystem check (a few stats) — NOT a readiness probe. Do NOT run
+# `setup --json` here just to detect the plugin; that spins up node + the codex
+# app-server and is the real source of latency (see note below).
+PLUGIN_BASE="$HOME/.claude/plugins/cache/openai-codex/codex"
+PLUGIN_ROOT="$(ls -d "$PLUGIN_BASE"/*/ 2>/dev/null | sort -V | tail -1)"
+COMPANION="${PLUGIN_ROOT%/}/scripts/codex-companion.mjs"
+if [ -n "$PLUGIN_ROOT" ] && [ -f "$COMPANION" ]; then
   echo plugin
 else
   echo cli
 fi
 ```
+
+**Fallback policy** — only the *absence* of the plugin sends you to the CLI path:
+
+- Route to **cli** only when `PLUGIN_ROOT` is empty or `$COMPANION` does not exist (`[ ! -f "$COMPANION" ]`). That is the one fast, unambiguous "plugin not installed" signal — do not pattern-match on a `MODULE_NOT_FOUND` string, which depends on the Node loader's output format.
+- Once you have committed to the **plugin** path, treat any failure of `node "$COMPANION" ...` as a **real Codex execution failure** (auth expired, `codex` binary missing, app-server failure, sandbox refusal, or genuine review findings) and report it. Do **not** silently retry on the CLI — the CLI shares the same `codex` binary and auth, so it would just fail the same way (or worse, double-run the work).
 
 - **plugin** → use the slash commands. They wrap the Codex app server using the same local `codex` binary, auth, and config.
   - Review → `/codex:review` (read-only), or `/codex:adversarial-review` for a steerable design challenge. Both accept `--base <ref>`, `--wait`, `--background`.
@@ -29,7 +40,35 @@ fi
   - You still create the `.agent-works/` context file (Step 0) and reference it in the slash-command prompt so Codex reads it at session start.
 - **cli** → use `codex -a never exec ...` exactly as documented below.
 
-> If unsure whether the plugin is wired up, run `/codex:setup` inside Claude Code; it reports whether Codex is ready. The filesystem check above is the non-interactive default.
+> **Do not pre-run a readiness check.** `setup --json` (or `/codex:setup`) probes node, npm, `codex --version`, `codex app-server`, and auth — a multi-second round-trip — so reserve it for *diagnosis after a failure*, not as a gate before every call. The cheap filesystem check above is the only thing you need to choose a path; go straight to `review`/`task` and let the first real call surface any readiness problem (its error message is already actionable).
+
+### Plugin Invocation Recipe
+
+The slash commands are the preferred entry point, but inside an agent/subagent context they may not be directly invocable. In that case call the bundled **companion script** directly — it is exactly what the slash commands wrap (same `codex` binary, auth, and config), so you never need to read `commands/*.md` to discover the call:
+
+```bash
+# Resolve the installed plugin root (highest installed version dir)
+PLUGIN_ROOT="$(ls -d "$HOME/.claude/plugins/cache/openai-codex/codex"/*/ 2>/dev/null | sort -V | tail -1)"
+COMPANION="${PLUGIN_ROOT%/}/scripts/codex-companion.mjs"
+
+node "$COMPANION" setup --json                          # diagnose readiness AFTER a failure — not a pre-gate
+node "$COMPANION" review --wait --base <ref>            # read-only native review of local git state (always foreground)
+node "$COMPANION" adversarial-review --wait --base <ref> "focus text"   # steerable review (always foreground)
+node "$COMPANION" task --write "<task>"                 # implement/fix — omit --write to stay read-only (slash: /codex:rescue)
+node "$COMPANION" task --background --write "<task>"    # same, but as a real background job
+node "$COMPANION" result                                # collect a backgrounded `task --background` job's output
+```
+
+Companion subcommand = slash-command name. Argument map:
+
+| Subcommand | Purpose | Key args |
+|---|---|---|
+| `review` | Read-only native review of **local git state** | `--base <ref>`, `--scope auto\|working-tree\|branch`. **Always foreground** — `--wait` is the effective default; a passed `--background` is parsed but ignored |
+| `adversarial-review` | Review with custom focus / design challenge | same as `review`, plus trailing `focus text` |
+| `task` (slash `/codex:rescue`) | Implement / fix / investigate — **read-only unless `--write`** | `--write` (enables `workspace-write`), `--background` (real background job → collect with `result`), `--resume`, `--fresh`, `--model`, `--effort` |
+| `status` / `result` / `cancel` | Inspect or stop background jobs | — |
+
+**Foreground vs background**: the companion `review` / `adversarial-review` subcommands **always run foreground** — a passed `--background` is silently ignored, so don't expect a collectable job from them. For a long review, background the `node` call itself with Claude's `run_in_background` instead. Only `task --background` enqueues a real background job you later collect with `result`. (The slash commands' `--background` is a separate runner-side flag handled by Claude, not the companion.) Note also that companion `task` defaults to **read-only** — pass `--write` for any implement/fix that must edit files. `review` is read-only and **rejects custom focus text** — use `adversarial-review` when you need to steer the review.
 
 ## Step 0: Create Context File
 
@@ -80,7 +119,23 @@ Create one file per agent when dispatching parallel sub-agents.
 
 ## Mode 1: Review
 
-**If the plugin is installed**, prefer `/codex:review` for a standard read-only review of the current changes, or `/codex:adversarial-review` when the user wants the design and tradeoffs pressure-tested. Use `--base <ref>` for branch review and `--background` for multi-file changes, then collect output with `/codex:status` and `/codex:result`. This replaces the parallel CLI sub-agent fan-out below.
+**If the plugin is installed**, prefer `/codex:review` (or the `review` companion subcommand) for a standard read-only review of the current changes, or `/codex:adversarial-review` when the user wants the design and tradeoffs pressure-tested. Use `--base <ref>` for branch review and `--background` for multi-file changes, then collect output with `/codex:status` and `/codex:result`. This replaces the parallel CLI sub-agent fan-out below.
+
+> **Reviewing one specific commit (not the working tree).** `review` always diffs against **HEAD** using a three-dot (`base...HEAD`, merge-base) range, so it **cannot isolate a single mid-history commit** while HEAD is ahead of it. To review exactly commit `<sha>` and nothing else, detach onto it so it becomes HEAD, diff against its parent, then restore:
+>
+> ```bash
+> git status --short --untracked-files=all          # confirm clean tree (untracked is OK)
+> (                                                   # subshell so the trap fires on exit
+>   set -e
+>   # current ref: branch name, or the commit SHA if HEAD is already detached
+>   orig_ref="$(git symbolic-ref --quiet --short HEAD || git rev-parse --verify HEAD)"
+>   trap 'git checkout --quiet "$orig_ref"' EXIT      # ALWAYS restore — success, failure, or abort
+>   git checkout --detach <sha>                        # <sha> is now HEAD
+>   node "$COMPANION" review --wait --base <sha>^      # base...HEAD == only <sha>
+> )                                                    # trap restores orig_ref here
+> ```
+>
+> Two reasons this must run with `--wait` (foreground): (1) the trap restores `HEAD` only *after* the review returns, and (2) the companion `review` runs foreground regardless of any `--background` flag (see the recipe note above) — so there is no safe way to background it here. Capturing `orig_ref` via `symbolic-ref || rev-parse HEAD` also keeps the restore correct even if you started from an already-detached HEAD (where `git branch --show-current` would be empty).
 
 **If only the CLI is available**, dispatch 4 Codex CLI sub-agents in parallel — 2 for code quality, 2 for security.
 
