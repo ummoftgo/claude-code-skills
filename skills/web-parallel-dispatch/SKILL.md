@@ -1,6 +1,6 @@
 ---
 name: web-parallel-dispatch
-description: "Dispatch multiple sub-agents in parallel to accelerate web development tasks. Use when: (1) API contract is finalized and PHP backend + frontend can be built simultaneously, (2) multiple independent pages or components need implementation, (3) a feature can be split into DB schema + API + frontend work, (4) UI layout and JS logic are independent. Saves significant time vs. sequential implementation."
+description: "Dispatch multiple sub-agents in parallel to accelerate web development tasks after explicit user approval. Use when: (1) API contract is finalized and PHP backend + frontend can be built simultaneously, (2) multiple independent pages or components need implementation, (3) a feature can be split into DB schema + API + frontend work, (4) UI layout and JS logic are independent. Never start parallel workers before presenting the split and receiving user approval."
 ---
 
 # Web Parallel Dispatch
@@ -40,9 +40,10 @@ Four patterns cover most PHP + JS/Svelte/HTMX scenarios. See `references/dispatc
    (e.g., Svelte runes for a frontend agent, PDO for a PHP backend agent).
    Use the exact skill name: `use-context7`.
 3. **Verify independence** — Confirm agents will not write to the same files.
-4. **Write focused agent prompts** — Each prompt: scope, shared context, deliverable, constraints.
-5. **Dispatch in parallel** using the Agent tool (multiple calls in a single message).
-6. **Integrate** — Read each agent's summary, check for conflicts, test the integration.
+4. **Request approval** — Present the proposed workers, responsibilities, file ownership boundaries, shared contract, and why the split is safe. Ask whether to proceed in parallel and wait for explicit user approval.
+5. **Write focused agent prompts** — Each prompt: scope, shared context, deliverable, constraints.
+6. **Dispatch in parallel** using the available subagent tool only after approval. A prior request to implement the feature is not by itself approval for the proposed parallel split.
+7. **Integrate** — Read each agent's summary, check for conflicts, test the integration.
 
 ## Integration Checklist
 

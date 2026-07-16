@@ -1,6 +1,6 @@
 # 팀 스킬 설치 가이드
 
-이 문서는 팀에서 개발한 Claude Code 스킬 7종을 새 개발 환경에 설치하는 방법을 설명합니다.
+이 문서는 팀에서 개발한 Claude Code/Codex 스킬 9종과 선택적 워크플로우 훅을 새 개발 환경에 설치하는 방법을 설명합니다.
 
 ---
 
@@ -9,6 +9,8 @@
 | 스킬 이름 | 역할 |
 |-----------|------|
 | `use-context7` | 프레임워크 코드 작성 전 최신 공식 문서 조회 |
+| `plan-and-build` | 새 프로젝트·기능의 스펙/계획, TDD 판단, 병렬 분할 |
+| `systematic-debugging` | 불명확한 장애의 재현·근본 원인 확인·회귀 검증 |
 | `web-security-review` | PHP 백엔드 + 프론트엔드 보안 취약점 검토 |
 | `web-parallel-dispatch` | 에이전트 병렬 실행으로 개발 속도 향상 |
 | `web-browser-preview` | WSL에서 Windows Chrome으로 작업 결과 확인 |
@@ -52,8 +54,10 @@ mkdir -p ~/.claude/skills
 # SKILLS_DIR을 클론한 경로 아래 skills/ 디렉토리로 지정하세요 (스킬은 저장소의 skills/ 하위에 있습니다)
 SKILLS_DIR=~/work/claude-code-skills/skills
 
-# 7개 스킬 모두 심볼릭 링크 등록
+# 9개 스킬 모두 심볼릭 링크 등록
 ln -s $SKILLS_DIR/use-context7        ~/.claude/skills/use-context7
+ln -s $SKILLS_DIR/plan-and-build      ~/.claude/skills/plan-and-build
+ln -s $SKILLS_DIR/systematic-debugging ~/.claude/skills/systematic-debugging
 ln -s $SKILLS_DIR/web-security-review ~/.claude/skills/web-security-review
 ln -s $SKILLS_DIR/web-parallel-dispatch ~/.claude/skills/web-parallel-dispatch
 ln -s $SKILLS_DIR/web-browser-preview ~/.claude/skills/web-browser-preview
@@ -66,6 +70,42 @@ ln -s $SKILLS_DIR/branch-merge-review ~/.claude/skills/branch-merge-review
 > 단, 복사 방식은 원본 파일 수정이 자동 반영되지 않습니다.
 
 등록 후 Claude Code를 재시작하면 스킬이 활성화됩니다.
+
+### `plan-and-build` 리마인더 훅 — Claude Code
+
+`install.sh`는 설치 여부를 확인한 뒤 `hooks/workflow-reminder.py`를 `~/.claude/hooks/`에 복사하고 기존 설정을 보존한 채 `UserPromptSubmit` 훅을 병합합니다. 이 훅은 새 프로젝트·기능 등 명백한 구현 요청에만 계획 워크플로우를 상기시키며, 프롬프트를 차단하지 않습니다.
+
+수동 설치 시에는 훅 파일을 복사한 다음 `~/.claude/settings.json`의 `hooks` 객체에 아래 항목을 병합합니다.
+
+```bash
+mkdir -p ~/.claude/hooks
+cp hooks/workflow-reminder.py ~/.claude/hooks/claude-code-skills-workflow.py
+chmod +x ~/.claude/hooks/claude-code-skills-workflow.py
+```
+
+```json
+{
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 /home/USER/.claude/hooks/claude-code-skills-workflow.py",
+            "timeout": 5
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+`/home/USER`는 실제 홈 경로로 바꿉니다. 기존 `hooks` 설정이 있다면 전체 객체를 덮어쓰지 말고 `UserPromptSubmit` 배열에 항목을 추가해야 합니다.
+
+자동 설치·제거기는 설정 파일이 심볼릭 링크이면 실제 대상 파일을 원자적으로 수정하고 링크 자체는 유지합니다. 설정 또는 훅 파일의 실제 대상이 선택한 전역·프로젝트 범위 밖에 있으면 경로를 알리고 기본값으로 건너뜁니다. dotfiles 저장소처럼 의도한 외부 대상일 때만 명시적으로 허용하세요. 깨진 링크는 안전하게 수정할 수 없으므로 설치·제거를 중단합니다.
+
+Codex용 훅은 아래의 Codex 설치 절에서 별도로 등록합니다. 같은 Python 스크립트가 Claude Code의 `user_prompt` 입력과 Codex의 `prompt` 입력을 모두 처리합니다.
 
 ---
 
@@ -203,6 +243,7 @@ export OPENAI_API_KEY="sk-..."
 
 - 설치 경로: `~/.codex/skills/local/{스킬명}/`
 - `codex-delegate`는 "Claude → Codex 위임" 스킬이므로 Codex 자신에게는 설치되지 않습니다.
+- `install.sh`에서 Codex 스킬 설치를 선택하면 Codex용 `UserPromptSubmit` 훅도 별도로 설치할지 묻습니다.
 
 수동으로 설치하려면:
 
@@ -211,6 +252,8 @@ SKILLS_DIR=~/work/claude-code-skills/skills
 mkdir -p ~/.codex/skills/local
 
 ln -s $SKILLS_DIR/use-context7        ~/.codex/skills/local/use-context7
+ln -s $SKILLS_DIR/plan-and-build      ~/.codex/skills/local/plan-and-build
+ln -s $SKILLS_DIR/systematic-debugging ~/.codex/skills/local/systematic-debugging
 ln -s $SKILLS_DIR/web-security-review ~/.codex/skills/local/web-security-review
 ln -s $SKILLS_DIR/web-parallel-dispatch ~/.codex/skills/local/web-parallel-dispatch
 ln -s $SKILLS_DIR/code-quality-review ~/.codex/skills/local/code-quality-review
@@ -219,6 +262,48 @@ ln -s $SKILLS_DIR/web-browser-preview ~/.codex/skills/local/web-browser-preview
 ```
 
 > `codex-delegate`는 "Claude → Codex 위임" 전용이라 Codex에는 설치하지 않습니다. `web-browser-preview`는 WSL 환경에서만 동작합니다(macOS/네이티브 Linux 미지원).
+
+#### Codex `plan-and-build` 리마인더 훅
+
+자동 설치를 선택하면 훅 스크립트는 `~/.codex/hooks/claude-code-skills-workflow.py`, 설정은 `~/.codex/hooks.json`에 등록됩니다. 프로젝트 설치에서는 각각 `<project>/.codex/hooks/`와 `<project>/.codex/hooks.json`을 사용합니다.
+
+같은 설정 계층의 `config.toml`에 인라인 `[hooks]` 또는 `[[hooks.<Event>]]` 설정이 이미 있으면 자동 설치기가 이를 알리고 기본값으로 `hooks.json` 설치를 건너뜁니다. 두 표현을 함께 사용하려는 경우에만 명시적으로 계속합니다. `[hooks.state.*]` 신뢰 기록은 인라인 훅으로 간주하지 않습니다.
+
+`config.toml`에 `[features] hooks = false` 또는 이전 호환 키인 `[features] codex_hooks = false`가 적용되어 있으면 `hooks.json` 훅이 실행되지 않습니다. 자동 설치기는 적용된 설정을 알리고, 기본값 `No`로 훅 기능을 활성화한 뒤 설치할지 묻습니다. 동의하면 다른 TOML 설정과 주석을 보존하면서 현재 키인 `hooks = true`로 갱신합니다. 프로젝트 설치에서는 사용자 `~/.codex/config.toml`을 직접 바꾸지 않고 프로젝트 `.codex/config.toml`에 활성화 값을 재정의합니다. `hooks`와 `codex_hooks`가 함께 있으면 현재 키인 `hooks`가 우선합니다.
+
+안전한 TOML 검증과 갱신에는 Python 3.11 이상이 필요합니다. 더 낮은 버전에서는 비활성 상태를 알리되 설정을 자동 수정하지 않습니다.
+
+기업 관리 환경의 `allow_managed_hooks_only`는 `config.toml`이 아니라 관리형 `requirements.toml` 정책입니다. 이 저장소의 개인용 설치기는 관리 정책 탐지를 자동화하지 않습니다.
+
+수동 설치:
+
+```bash
+mkdir -p ~/.codex/hooks
+cp hooks/workflow-reminder.py ~/.codex/hooks/claude-code-skills-workflow.py
+chmod +x ~/.codex/hooks/claude-code-skills-workflow.py
+```
+
+`~/.codex/hooks.json`의 기존 설정을 보존하면서 아래 항목을 병합합니다.
+
+```json
+{
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 /home/USER/.codex/hooks/claude-code-skills-workflow.py",
+            "timeout": 5
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+Codex를 다시 시작한 뒤 `/hooks`에서 새 훅의 내용과 경로를 검토하고 신뢰해야 실행됩니다. 프로젝트 훅은 해당 프로젝트가 신뢰된 경우에만 로드됩니다.
 
 ---
 
@@ -232,12 +317,16 @@ Claude Code를 열고 각 스킬이 정상 인식되는지 확인합니다.
 
 아래 스킬들이 목록에 보이면 설치 완료입니다:
 - `use-context7`
+- `plan-and-build`
+- `systematic-debugging`
 - `web-security-review`
 - `web-parallel-dispatch`
 - `web-browser-preview`
 - `codex-delegate`
 - `code-quality-review`
 - `branch-merge-review`
+
+Codex CLI에서는 `/hooks`를 열어 `claude-code-skills-workflow.py`가 등록됐고 신뢰 상태인지도 확인합니다.
 
 ---
 
@@ -246,6 +335,8 @@ Claude Code를 열고 각 스킬이 정상 인식되는지 확인합니다.
 | 말하면 | 실행되는 스킬 |
 |--------|--------------|
 | "Svelte 5 컴포넌트 만들어줘" | `use-context7` — 먼저 Svelte 5 문서 조회 |
+| "새 인증 기능을 구현해줘" | `plan-and-build` — 스펙·계획 작성 후 TDD와 병렬화 판단 |
+| "원인이 불명확한 오류를 분석하고 고쳐줘" | `systematic-debugging` — 재현과 근본 원인 확인 후 최소 수정 |
 | "보안 검토해줘" | `web-security-review` |
 | "API 스펙 나왔으니까 백/프론트 동시에 만들어줘" | `web-parallel-dispatch` |
 | "브라우저에서 확인해봐" | `web-browser-preview` |

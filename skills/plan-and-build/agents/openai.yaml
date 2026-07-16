@@ -1,0 +1,4 @@
+interface:
+  display_name: "Plan and Build"
+  short_description: "Plan, test, and parallelize substantial code work"
+  default_prompt: "Use $plan-and-build to plan and implement this substantial coding task."

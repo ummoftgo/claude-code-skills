@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # =============================================================================
-# 팀 AI 스킬 & 에이전트 제거 스크립트
-# 설치된 스킬/에이전트 링크/파일만 제거합니다. 프로그램·패키지는 건드리지 않습니다.
+# 팀 AI 스킬·훅·에이전트 제거 스크립트
+# 설치된 스킬/훅/에이전트 링크·파일만 제거합니다. 프로그램·패키지는 건드리지 않습니다.
 # =============================================================================
 
 set -euo pipefail
@@ -17,6 +17,7 @@ NC='\033[0m'
 
 # --- 경로 설정 ---
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+HOOK_CONFIG_TOOL="$SCRIPT_DIR/hooks/workflow_hook_config.py"
 
 # 제거 범위 (ask_uninstall_scope에서 결정)
 UNINSTALL_SCOPE="global"    # "global" | "project"
@@ -25,8 +26,12 @@ INSTALL_BASE_DIR="$HOME"    # 안전 검사 기준 경로
 # 제거 대상 경로 (ask_uninstall_scope에서 재설정)
 CLAUDE_SKILLS_DIR="$HOME/.claude/skills"
 CLAUDE_AGENTS_DIR="$HOME/.claude/agents"
+CLAUDE_HOOKS_DIR="$HOME/.claude/hooks"
+CLAUDE_SETTINGS_FILE="$HOME/.claude/settings.json"
 CODEX_SKILLS_DIR="$HOME/.codex/skills/local"
 CODEX_AGENTS_DIR="$HOME/.codex/agents"
+CODEX_HOOKS_DIR="$HOME/.codex/hooks"
+CODEX_HOOKS_FILE="$HOME/.codex/hooks.json"
 
 # 설치 소유권 추적 매니페스트 (set_manifest_path에서 스코프 기준으로 확정)
 MANIFEST_DIR="$HOME/.claude-code-skills"
@@ -36,6 +41,8 @@ MANIFEST_HEADER="#claude-code-skills-manifest v1"
 # 제거 대상 스킬 목록
 ALL_SKILLS=(
     "use-context7"
+    "plan-and-build"
+    "systematic-debugging"
     "web-security-review"
     "web-parallel-dispatch"
     "web-browser-preview"
@@ -192,8 +199,12 @@ ask_uninstall_scope() {
                 INSTALL_BASE_DIR="$HOME"
                 CLAUDE_SKILLS_DIR="$HOME/.claude/skills"
                 CLAUDE_AGENTS_DIR="$HOME/.claude/agents"
+                CLAUDE_HOOKS_DIR="$HOME/.claude/hooks"
+                CLAUDE_SETTINGS_FILE="$HOME/.claude/settings.json"
                 CODEX_SKILLS_DIR="$HOME/.codex/skills/local"
                 CODEX_AGENTS_DIR="$HOME/.codex/agents"
+                CODEX_HOOKS_DIR="$HOME/.codex/hooks"
+                CODEX_HOOKS_FILE="$HOME/.codex/hooks.json"
                 ok "전역 제거 선택"
                 return
                 ;;
@@ -214,8 +225,12 @@ ask_uninstall_scope() {
                 INSTALL_BASE_DIR="$project_dir"
                 CLAUDE_SKILLS_DIR="$project_dir/.claude/skills"
                 CLAUDE_AGENTS_DIR="$project_dir/.claude/agents"
+                CLAUDE_HOOKS_DIR="$project_dir/.claude/hooks"
+                CLAUDE_SETTINGS_FILE="$project_dir/.claude/settings.json"
                 CODEX_SKILLS_DIR="$project_dir/.codex/skills"
                 CODEX_AGENTS_DIR="$project_dir/.codex/agents"
+                CODEX_HOOKS_DIR="$project_dir/.codex/hooks"
+                CODEX_HOOKS_FILE="$project_dir/.codex/hooks.json"
                 ok "프로젝트 제거 선택: ${project_dir}"
                 return
                 ;;
@@ -370,6 +385,8 @@ remove_codex_skills() {
     # install.sh의 Codex 설치 목록과 일치시켜야 함 (codex-delegate만 제외)
     local codex_skills=(
         "use-context7"
+        "plan-and-build"
+        "systematic-debugging"
         "web-security-review"
         "web-parallel-dispatch"
         "code-quality-review"
@@ -381,7 +398,137 @@ remove_codex_skills() {
 }
 
 # =============================================================================
-# 섹션 3: context7 MCP 설정 제거
+# 섹션 3: 개발 워크플로우 훅 제거
+# =============================================================================
+
+remove_workflow_hook() {
+    local client="$1"
+    local hooks_dir="$2"
+    local settings_file="$3"
+
+    section "개발 워크플로우 리마인더 훅 제거 (${client})"
+
+    local target="$hooks_dir/claude-code-skills-workflow.py"
+    local configured=false
+    local config_invalid=false
+    local outside_scope_approved=false
+    local config_scope_args=(--allowed-root "$INSTALL_BASE_DIR")
+    if [[ -e "$settings_file" || -L "$settings_file" ]]; then
+        if [[ ! -f "$HOOK_CONFIG_TOOL" ]]; then
+            warn "훅 설정 도우미 없음: $HOOK_CONFIG_TOOL"
+            config_invalid=true
+        else
+            local validation_status=0
+            if python3 "$HOOK_CONFIG_TOOL" validate "$settings_file" "${config_scope_args[@]}"; then
+                :
+            else
+                validation_status=$?
+            fi
+
+            if [[ $validation_status -eq 3 ]]; then
+                warn "훅 설정 대상이 선택한 제거 범위 밖에 있습니다: $settings_file"
+                if ask_yn_default_no "  범위 밖의 워크플로우 파일 수정을 허용할까요?"; then
+                    outside_scope_approved=true
+                    config_scope_args+=(--allow-outside-root)
+                    if ! python3 "$HOOK_CONFIG_TOOL" validate "$settings_file" "${config_scope_args[@]}"; then
+                        config_invalid=true
+                    fi
+                else
+                    warn "범위 밖 설정을 보존하기 위해 훅 제거를 중단합니다."
+                    return 1
+                fi
+            elif [[ $validation_status -ne 0 ]]; then
+                warn "훅 설정을 읽을 수 없습니다: $settings_file"
+                config_invalid=true
+            fi
+
+            if ! $config_invalid; then
+                if python3 "$HOOK_CONFIG_TOOL" status "$settings_file" "$target" "${config_scope_args[@]}"; then
+                    configured=true
+                else
+                    local status_code=$?
+                    if [[ $status_code -eq 2 || $status_code -eq 3 ]]; then
+                        warn "훅 설정을 읽을 수 없습니다: $settings_file"
+                        config_invalid=true
+                    fi
+                fi
+            fi
+        fi
+    fi
+
+    if [[ -e "$target" || -L "$target" ]]; then
+        if python3 "$HOOK_CONFIG_TOOL" scope-status "$target" --allowed-root "$INSTALL_BASE_DIR"; then
+            :
+        else
+            local hook_scope_status=$?
+            if [[ $hook_scope_status -eq 3 ]]; then
+                warn "훅 파일 대상이 선택한 제거 범위 밖에 있습니다: $target"
+                if ! $outside_scope_approved && \
+                    ! ask_yn_default_no "  범위 밖의 워크플로우 파일 수정을 허용할까요?"; then
+                    warn "범위 밖 훅 파일을 보존하기 위해 제거를 중단합니다."
+                    return 1
+                fi
+                outside_scope_approved=true
+            else
+                warn "훅 파일 경로를 안전하게 확인할 수 없습니다: $target"
+                return 1
+            fi
+        fi
+    fi
+
+    if [[ ! -e "$target" && ! -L "$target" ]] && ! $configured && ! $config_invalid; then
+        skip "개발 워크플로우 훅 없음 — 건너뜁니다."
+        return
+    fi
+
+    echo
+    if ! ask_yn "${client}의 plan-and-build UserPromptSubmit 훅을 제거하시겠습니까?"; then
+        skip "${client} 개발 워크플로우 훅 유지"
+        return
+    fi
+
+    if $config_invalid; then
+        warn "설정을 안전하게 수정할 수 없어 훅 제거를 중단합니다. JSON 구조를 먼저 복구하세요."
+        return 1
+    fi
+
+    if $configured; then
+        if python3 "$HOOK_CONFIG_TOOL" remove "$settings_file" "$target" "${config_scope_args[@]}"; then
+            removed "UserPromptSubmit 훅 설정 제거"
+        else
+            warn "훅 설정 제거 실패: $settings_file"
+            return 1
+        fi
+    fi
+
+    if [[ -e "$target" || -L "$target" ]]; then
+        local own; own="$(classify_ownership "$target" "claude-code-skills-workflow.py" hook)"
+        case "$own" in
+            ours)
+                rm "$target"
+                manifest_prune "$target"
+                removed "워크플로우 훅 파일 제거"
+                ;;
+            foreign)
+                warn "훅 파일이 이 저장소 소유가 아니므로 보존합니다: $target"
+                ;;
+            *)
+                warn "훅 파일 소유를 확증할 수 없습니다: $target"
+                if ask_yn_default_no "  그래도 파일을 제거할까요?"; then
+                    rm "$target"
+                    manifest_prune "$target"
+                    removed "워크플로우 훅 파일 제거"
+                else
+                    skip "워크플로우 훅 파일 보존"
+                fi
+                ;;
+        esac
+    fi
+    rmdir "$hooks_dir" 2>/dev/null || true
+}
+
+# =============================================================================
+# 섹션 4: context7 MCP 설정 제거
 # =============================================================================
 
 remove_context7_mcp() {
@@ -429,7 +576,7 @@ PYEOF
 }
 
 # =============================================================================
-# 섹션 3.5: Claude Code Codex 플러그인 제거
+# 섹션 4.5: Claude Code Codex 플러그인 제거
 # =============================================================================
 
 remove_codex_cc_plugin() {
@@ -466,7 +613,7 @@ remove_codex_cc_plugin() {
 }
 
 # =============================================================================
-# 섹션 4: 에이전트 제거 (Claude + Codex)
+# 섹션 5: 에이전트 제거 (Claude + Codex)
 # =============================================================================
 
 # 에이전트 파일 하나 제거 (소유권 판정 + 매니페스트 프루닝)
@@ -560,17 +707,19 @@ remove_agents() {
 main() {
     echo -e "${BOLD}"
     echo "╔══════════════════════════════════════════════════╗"
-    echo "║     팀 AI 스킬 & 에이전트 제거 스크립트         ║"
+    echo "║      팀 AI 스킬·훅·에이전트 제거 스크립트      ║"
     echo "╚══════════════════════════════════════════════════╝"
     echo -e "${NC}"
     info "프로그램·패키지(phpstan, codex 등)는 제거하지 않습니다."
-    info "스킬/에이전트 링크·파일과 MCP 설정만 제거합니다."
+    info "스킬/훅/에이전트 링크·파일과 MCP 설정만 제거합니다."
 
     ask_uninstall_scope
     set_manifest_path
     remove_claude_skills
+    remove_workflow_hook "Claude Code" "$CLAUDE_HOOKS_DIR" "$CLAUDE_SETTINGS_FILE"
     remove_agent_browser
     remove_codex_skills
+    remove_workflow_hook "Codex" "$CODEX_HOOKS_DIR" "$CODEX_HOOKS_FILE"
     remove_agents
     remove_context7_mcp
     remove_codex_cc_plugin
@@ -583,4 +732,6 @@ main() {
     info "Claude Code / Codex를 재시작하면 비활성화됩니다."
 }
 
-main
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+    main
+fi

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # =============================================================================
-# 팀 Claude Code 스킬 설치 스크립트
+# 팀 Claude Code 스킬·훅 설치 스크립트
 # sudo 없이 현재 사용자 기준으로 설치합니다.
 # =============================================================================
 
@@ -19,6 +19,8 @@ NC='\033[0m'
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SKILLS_DIR="$SCRIPT_DIR/skills"
 AGENTS_DIR="$SCRIPT_DIR/agents"
+HOOKS_DIR="$SCRIPT_DIR/hooks"
+HOOK_CONFIG_TOOL="$HOOKS_DIR/workflow_hook_config.py"
 
 # 설치 범위 (ask_install_scope에서 결정)
 INSTALL_SCOPE="global"      # "global" | "project"
@@ -27,8 +29,13 @@ INSTALL_BASE_DIR="$HOME"    # 안전 검사 기준 경로 (global=HOME, project=
 # 설치 대상 경로 (ask_install_scope에서 재설정)
 CLAUDE_SKILLS_DIR="$HOME/.claude/skills"
 CLAUDE_AGENTS_DIR="$HOME/.claude/agents"
+CLAUDE_HOOKS_DIR="$HOME/.claude/hooks"
+CLAUDE_SETTINGS_FILE="$HOME/.claude/settings.json"
 CODEX_SKILLS_DIR="$HOME/.codex/skills/local"
 CODEX_AGENTS_DIR="$HOME/.codex/agents"
+CODEX_HOOKS_DIR="$HOME/.codex/hooks"
+CODEX_HOOKS_FILE="$HOME/.codex/hooks.json"
+CODEX_CONFIG_FILE="$HOME/.codex/config.toml"
 
 LOCAL_BIN="$HOME/.local/bin"
 NPM_GLOBAL="$HOME/.npm-global"
@@ -639,8 +646,13 @@ ask_install_scope() {
                 INSTALL_BASE_DIR="$HOME"
                 CLAUDE_SKILLS_DIR="$HOME/.claude/skills"
                 CLAUDE_AGENTS_DIR="$HOME/.claude/agents"
+                CLAUDE_HOOKS_DIR="$HOME/.claude/hooks"
+                CLAUDE_SETTINGS_FILE="$HOME/.claude/settings.json"
                 CODEX_SKILLS_DIR="$HOME/.codex/skills/local"
                 CODEX_AGENTS_DIR="$HOME/.codex/agents"
+                CODEX_HOOKS_DIR="$HOME/.codex/hooks"
+                CODEX_HOOKS_FILE="$HOME/.codex/hooks.json"
+                CODEX_CONFIG_FILE="$HOME/.codex/config.toml"
                 ok "전역 설치 선택"
                 return
                 ;;
@@ -662,8 +674,13 @@ ask_install_scope() {
                 INSTALL_BASE_DIR="$project_dir"
                 CLAUDE_SKILLS_DIR="$project_dir/.claude/skills"
                 CLAUDE_AGENTS_DIR="$project_dir/.claude/agents"
+                CLAUDE_HOOKS_DIR="$project_dir/.claude/hooks"
+                CLAUDE_SETTINGS_FILE="$project_dir/.claude/settings.json"
                 CODEX_SKILLS_DIR="$project_dir/.codex/skills"
                 CODEX_AGENTS_DIR="$project_dir/.codex/agents"
+                CODEX_HOOKS_DIR="$project_dir/.codex/hooks"
+                CODEX_HOOKS_FILE="$project_dir/.codex/hooks.json"
+                CODEX_CONFIG_FILE="$project_dir/.codex/config.toml"
                 ok "프로젝트 설치 선택: ${project_dir}"
                 return
                 ;;
@@ -808,6 +825,8 @@ create_skill_links() {
     # Claude + Codex 공용 스킬
     local shared_skills=(
         "use-context7"
+        "plan-and-build"
+        "systematic-debugging"
         "web-security-review"
         "web-parallel-dispatch"
         "code-quality-review"
@@ -831,7 +850,236 @@ create_skill_links() {
 }
 
 # =============================================================================
-# 섹션 8: Codex 스킬 설치 (선택)
+# 섹션 8: 개발 워크플로우 훅 설치 (Claude Code / Codex)
+# =============================================================================
+
+setup_workflow_hook() {
+    local client="$1"
+    local hooks_dir="$2"
+    local settings_file="$3"
+    local manifest_type="$4"
+    local codex_config_file="${5:-}"
+    local codex_base_config_file="${6:-}"
+
+    section "개발 워크플로우 리마인더 훅 (${client})"
+    info "새 프로젝트·기능 구현 요청에서 plan-and-build 스킬을 가볍게 상기시킵니다."
+    info "작은 수정, 리뷰, 설명 요청에는 동작하지 않습니다."
+
+    if ! command -v python3 &>/dev/null; then
+        warn "python3가 없어 워크플로우 훅을 설치할 수 없습니다."
+        return
+    fi
+
+    echo
+    if ! ask_yn "${client}에 plan-and-build UserPromptSubmit 훅을 설치하시겠습니까?"; then
+        skip "${client} 개발 워크플로우 훅 건너뜀"
+        return
+    fi
+
+    local src="$HOOKS_DIR/workflow-reminder.py"
+    local dst="$hooks_dir/claude-code-skills-workflow.py"
+    if [[ ! -f "$src" ]]; then
+        warn "훅 소스 파일 없음: $src"
+        return 1
+    fi
+    if [[ ! -f "$HOOK_CONFIG_TOOL" ]]; then
+        warn "훅 설정 도우미 없음: $HOOK_CONFIG_TOOL"
+        return 1
+    fi
+
+    local outside_scope_approved=false
+    local config_scope_args=(--allowed-root "$INSTALL_BASE_DIR")
+    if python3 "$HOOK_CONFIG_TOOL" validate "$settings_file" "${config_scope_args[@]}"; then
+        :
+    else
+        local validation_status=$?
+        if [[ $validation_status -eq 3 ]]; then
+            warn "훅 설정 대상이 선택한 설치 범위 밖에 있습니다: $settings_file"
+            if ! ask_yn_default_no "  범위 밖의 워크플로우 파일 수정을 허용할까요?"; then
+                skip "${client} 워크플로우 훅 건너뜀 — 설치 범위 밖 설정 보호"
+                return
+            fi
+            outside_scope_approved=true
+            config_scope_args+=(--allow-outside-root)
+            if ! python3 "$HOOK_CONFIG_TOOL" validate "$settings_file" "${config_scope_args[@]}"; then
+                warn "훅 설정 등록 실패: $settings_file 의 JSON 구조를 확인하세요."
+                return 1
+            fi
+        else
+            warn "훅 설정 등록 실패: $settings_file 의 JSON 구조를 확인하세요."
+            return 1
+        fi
+    fi
+
+    if python3 "$HOOK_CONFIG_TOOL" scope-status "$dst" --allowed-root "$INSTALL_BASE_DIR"; then
+        :
+    else
+        local hook_scope_status=$?
+        if [[ $hook_scope_status -eq 3 ]]; then
+            warn "훅 파일 대상이 선택한 설치 범위 밖에 있습니다: $dst"
+            if ! $outside_scope_approved && \
+                ! ask_yn_default_no "  범위 밖의 워크플로우 파일 수정을 허용할까요?"; then
+                skip "${client} 워크플로우 훅 건너뜀 — 설치 범위 밖 훅 파일 보호"
+                return
+            fi
+            outside_scope_approved=true
+        else
+            warn "훅 파일 경로를 안전하게 확인할 수 없습니다: $dst"
+            return 1
+        fi
+    fi
+
+    if [[ -n "$codex_config_file" ]]; then
+        local disabled_reason=""
+        local disabled_args=()
+        local enable_codex_hooks=false
+        if [[ -n "$codex_base_config_file" ]]; then
+            disabled_args+=(--base-config "$codex_base_config_file")
+        fi
+        if disabled_reason="$(python3 "$HOOK_CONFIG_TOOL" disabled-status "$codex_config_file" "${disabled_args[@]}")"; then
+            warn "Codex 사용자·프로젝트 훅을 실행할 수 없는 설정입니다: $disabled_reason"
+            warn "이 상태에서는 설치한 hooks.json 훅이 실행되지 않습니다: $codex_config_file"
+            if ! ask_yn_default_no "  Codex 훅 기능을 활성화하고 워크플로우 훅을 설치할까요?"; then
+                skip "Codex 워크플로우 훅 건너뜀 — 기존 비활성화 설정 유지"
+                return
+            fi
+            enable_codex_hooks=true
+        else
+            local disabled_status=$?
+            if [[ $disabled_status -eq 2 ]]; then
+                warn "Codex 훅 활성화 상태를 확인할 수 없습니다: $codex_config_file"
+                return 1
+            fi
+        fi
+
+        if python3 "$HOOK_CONFIG_TOOL" inline-status "$codex_config_file"; then
+            warn "Codex config.toml에 인라인 훅이 이미 있습니다: $codex_config_file"
+            warn "같은 설정 계층에 hooks.json을 추가하면 Codex가 둘을 병합하고 시작 시 경고합니다."
+            if ! ask_yn_default_no "  그래도 별도 hooks.json에 워크플로우 훅을 설치할까요?"; then
+                skip "Codex 워크플로우 훅 건너뜀 — 기존 config.toml 훅 유지"
+                return
+            fi
+        else
+            local inline_status=$?
+            if [[ $inline_status -eq 2 ]]; then
+                warn "Codex 인라인 훅 설정을 확인할 수 없습니다: $codex_config_file"
+                return 1
+            fi
+        fi
+
+        if $enable_codex_hooks; then
+            local enable_args=(--allowed-root "$INSTALL_BASE_DIR")
+            if python3 "$HOOK_CONFIG_TOOL" enable-hooks "$codex_config_file" "${enable_args[@]}"; then
+                :
+            else
+                local enable_status=$?
+                if [[ $enable_status -eq 3 ]]; then
+                    warn "Codex config.toml 대상이 선택한 설치 범위 밖에 있습니다: $codex_config_file"
+                    if ! $outside_scope_approved && \
+                        ! ask_yn_default_no "  범위 밖의 워크플로우 파일 수정을 허용할까요?"; then
+                        skip "Codex 워크플로우 훅 건너뜀 — 설치 범위 밖 config.toml 보호"
+                        return
+                    fi
+                    outside_scope_approved=true
+                    enable_args+=(--allow-outside-root)
+                    if ! python3 "$HOOK_CONFIG_TOOL" enable-hooks "$codex_config_file" "${enable_args[@]}"; then
+                        warn "Codex 훅 기능을 활성화할 수 없습니다: $codex_config_file"
+                        return 1
+                    fi
+                else
+                    warn "Codex 훅 기능을 활성화할 수 없습니다: $codex_config_file"
+                    return 1
+                fi
+            fi
+            ok "Codex 훅 기능을 활성화했습니다: $codex_config_file"
+        fi
+    fi
+
+    mkdir -p "$hooks_dir" "$(dirname "$settings_file")"
+
+    local install_file=false
+    local own=""
+    if [[ ! -e "$dst" && ! -L "$dst" ]]; then
+        install_file=true
+    elif cmp -s "$src" "$dst" 2>/dev/null; then
+        own="$(classify_ownership "$dst" "claude-code-skills-workflow.py" hook)"
+        if [[ "$own" == "ours" ]]; then
+            ok "워크플로우 훅 파일이 이미 최신입니다."
+        else
+            warn "동일한 훅 파일이 있지만 이 저장소가 설치한 항목인지 확인할 수 없습니다: $dst"
+            if ask_yn_default_no "  이 저장소의 관리 대상으로 등록할까요?"; then
+                ok "기존 훅 파일을 관리 대상으로 등록합니다."
+            else
+                skip "워크플로우 훅 건너뜀"
+                return
+            fi
+        fi
+    else
+        own="$(classify_ownership "$dst" "claude-code-skills-workflow.py" hook)"
+        if [[ "$own" == "ours" ]]; then
+            install_file=true
+        else
+            warn "동명 훅 파일이 이미 있으며 이 저장소 소유로 확증할 수 없습니다: $dst"
+            if ask_yn_default_no "  덮어쓰시겠습니까?"; then
+                install_file=true
+            else
+                skip "워크플로우 훅 건너뜀"
+                return
+            fi
+        fi
+    fi
+
+    local backup_dir=""
+    local file_changed=false
+    if $install_file; then
+        if [[ -e "$dst" || -L "$dst" ]]; then
+            backup_dir="$(mktemp -d "$hooks_dir/.workflow-backup.XXXXXX")" || {
+                warn "기존 훅 백업 디렉터리를 만들 수 없습니다."
+                return 1
+            }
+            if ! mv "$dst" "$backup_dir/original"; then
+                rmdir "$backup_dir" 2>/dev/null || true
+                warn "기존 훅 파일을 백업할 수 없습니다: $dst"
+                return 1
+            fi
+        fi
+        if ! cp "$src" "$dst" || ! chmod +x "$dst"; then
+            rm -f "$dst" 2>/dev/null || true
+            if [[ -n "$backup_dir" ]]; then
+                mv "$backup_dir/original" "$dst" 2>/dev/null || true
+                rmdir "$backup_dir" 2>/dev/null || true
+            fi
+            warn "워크플로우 훅 파일을 설치할 수 없습니다: $dst"
+            return 1
+        fi
+        file_changed=true
+        ok "워크플로우 훅 파일 → $dst"
+    fi
+
+    if ! python3 "$HOOK_CONFIG_TOOL" install "$settings_file" "$dst" "${config_scope_args[@]}"; then
+        if $file_changed; then
+            rm -f "$dst" 2>/dev/null || true
+            if [[ -n "$backup_dir" ]]; then
+                mv "$backup_dir/original" "$dst" 2>/dev/null || true
+                rmdir "$backup_dir" 2>/dev/null || true
+            fi
+        fi
+        warn "훅 설정 등록 실패 — 훅 파일 변경을 원복했습니다: $settings_file"
+        return 1
+    fi
+
+    if [[ -n "$backup_dir" ]]; then
+        rm -rf "$backup_dir" 2>/dev/null || warn "임시 훅 백업 정리 실패: $backup_dir"
+    fi
+    manifest_record "$manifest_type" "$dst" copy "$src" "$(content_hash "$dst")"
+    ok "${client} UserPromptSubmit 훅을 등록했습니다: $settings_file"
+    if [[ "$client" == "Codex" ]]; then
+        info "Codex를 다시 시작한 뒤 /hooks에서 새 훅을 검토하고 신뢰하세요."
+    fi
+}
+
+# =============================================================================
+# 섹션 9: Codex 스킬 설치 (선택)
 # =============================================================================
 
 install_codex_skills() {
@@ -858,6 +1106,8 @@ install_codex_skills() {
     # Codex에는 codex-delegate만 제외 (Claude→Codex 위임 전용 스킬)
     local codex_skills=(
         "use-context7"
+        "plan-and-build"
+        "systematic-debugging"
         "web-security-review"
         "web-parallel-dispatch"
         "code-quality-review"
@@ -869,10 +1119,17 @@ install_codex_skills() {
     for skill in "${codex_skills[@]}"; do
         install_skill "$skill" "$CODEX_SKILLS_DIR"
     done
+
+    local codex_base_config_file=""
+    if [[ "$INSTALL_SCOPE" == "project" ]]; then
+        codex_base_config_file="$HOME/.codex/config.toml"
+    fi
+    setup_workflow_hook "Codex" "$CODEX_HOOKS_DIR" "$CODEX_HOOKS_FILE" \
+        "codex-hook" "$CODEX_CONFIG_FILE" "$codex_base_config_file"
 }
 
 # =============================================================================
-# 섹션 9: 에이전트 설치 (Claude + Codex)
+# 섹션 10: 에이전트 설치 (Claude + Codex)
 # =============================================================================
 
 install_agents() {
@@ -988,7 +1245,7 @@ install_agents() {
 }
 
 # =============================================================================
-# 섹션 10: Chrome DevTool Protocol 스크립트 → Windows 바탕화면 복사
+# 섹션 11: Chrome DevTool Protocol 스크립트 → Windows 바탕화면 복사
 # =============================================================================
 
 copy_cdp_script_to_desktop() {
@@ -1052,7 +1309,7 @@ copy_cdp_script_to_desktop() {
 }
 
 # =============================================================================
-# 섹션 11: PATH 설정 안내
+# 섹션 12: PATH 설정 안내
 # =============================================================================
 
 print_path_instructions() {
@@ -1120,11 +1377,11 @@ print_path_instructions() {
 main() {
     echo -e "${BOLD}"
     echo "╔══════════════════════════════════════════════════╗"
-    echo "║       팀 AI 스킬 & 에이전트 설치 스크립트       ║"
+    echo "║      팀 AI 스킬·훅·에이전트 설치 스크립트      ║"
     echo "╚══════════════════════════════════════════════════╝"
     echo -e "${NC}"
     info "소스 경로: $SCRIPT_DIR"
-    info "스킬: skills/  에이전트: agents/"
+    info "스킬: skills/  훅: hooks/  에이전트: agents/"
     echo
 
     install_php_tools
@@ -1136,6 +1393,7 @@ main() {
     install_agent_browser
     ask_skill_install_mode
     create_skill_links
+    setup_workflow_hook "Claude Code" "$CLAUDE_HOOKS_DIR" "$CLAUDE_SETTINGS_FILE" "claude-hook"
     install_codex_skills
     install_agents
     copy_cdp_script_to_desktop
@@ -1146,7 +1404,7 @@ main() {
     ok "설치 완료!"
     echo -e "${GREEN}══════════════════════════════════════════════════${NC}"
     echo
-    info "Claude Code를 재시작하면 스킬과 에이전트가 활성화됩니다."
+    info "Claude Code를 재시작하면 스킬, 훅, 에이전트가 활성화됩니다."
     if [[ "$INSTALL_SCOPE" == "global" ]]; then
         info "스킬 확인: Claude Code에서 /skills list 실행"
         if $USE_CODEX; then
@@ -1164,4 +1422,6 @@ main() {
     fi
 }
 
-main
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+    main
+fi
