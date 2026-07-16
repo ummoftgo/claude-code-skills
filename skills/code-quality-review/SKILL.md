@@ -7,6 +7,10 @@ description: "Review code for quality and performance issues. Trigger when user 
 
 Runs CLI analysis tools first, then supplements with pattern-based review. Adapts to the detected stack.
 
+## Platform command selection
+
+Detect the active shell before using a snippet. On POSIX use `command -v`, `[ -f ... ]`, and the Bash examples below. On Windows PowerShell use `Get-Command`, `Test-Path`, and PowerShell conditionals; invoke the same PHP/npm tools directly. Prefer `rg` for recursive searches on both platforms, with `Get-ChildItem -Recurse | Select-String` as the Windows fallback. Do not require WSL or Git Bash for a Windows-native installation.
+
 > **Read-only mode (priority rule).** If the user asked for a review **without changing anything** (e.g. "수정하지 말고 검토만", "read-only", review delegated under a read-only sandbox), then this skill must not write to the workspace:
 > - **Do not install** missing tools (no `npm install`, `composer require`, PHAR downloads, etc.). Run only the tools already present; for each missing tool, record it as **`skipped (not installed)`** in the report.
 > - **Do not create the report file.** Emit the report **inline** in your response instead of writing to `.tasks/reports/`.

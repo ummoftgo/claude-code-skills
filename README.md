@@ -1,139 +1,108 @@
-# 팀 AI 스킬 & 에이전트 모음
+# 팀 AI 스킬·에이전트 모음
 
-PHP 백엔드 + 바닐라 JS / jQuery / Svelte / HTMX 프론트엔드 개발팀을 위한 Claude Code / Codex 스킬 및 에이전트 모음입니다.
+Claude Desktop Code와 Codex 앱/CLI에서 함께 사용하는 스킬, 에이전트, 워크플로우 훅 모음입니다. Windows 네이티브 설치와 WSL/Linux 설치를 분리하며, 설치 대상은 [`components.json`](./components.json) 한 곳에서 관리합니다.
 
-> **지원 환경**: 현재 **WSL (Windows Subsystem for Linux)** 환경을 기준으로 작성되었습니다.
-> macOS / 네이티브 Linux에서는 `web-browser-preview` 스킬 및 `chrome-devtool-protocol.ps1`이 동작하지 않습니다. 나머지 스킬은 정상 사용 가능합니다.
+## 설치 환경 선택
 
----
-
-## 구조
-
-```
-.
-├── skills/       Claude + Codex 공용 스킬
-├── hooks/        Claude Code + Codex 워크플로우 리마인더 훅
-├── agents/       역할별 에이전트 (Claude .md + Codex .toml)
-├── install.sh    자동 설치 스크립트
-├── uninstall.sh  자동 제거 스크립트
-└── chrome-devtool-protocol.ps1   Windows Chrome CDP 실행 스크립트
-```
-
----
-
-## Skills
-
-| 스킬 | Claude | Codex | 역할 |
-|------|:------:|:-----:|------|
-| `use-context7` | ✅ | ✅ | 프레임워크 코드 작성 전 최신 공식 문서 조회 |
-| `plan-and-build` | ✅ | ✅ | 새 프로젝트·기능의 스펙/계획, TDD 판단, 병렬 분할 |
-| `systematic-debugging` | ✅ | ✅ | 재현·증거·가설 검증을 통한 근본 원인 수정 |
-| `web-security-review` | ✅ | ✅ | PHP 백엔드 + 프론트엔드 보안 취약점 검토 |
-| `web-parallel-dispatch` | ✅ | ✅ | 에이전트 병렬 디스패치로 개발 속도 향상 |
-| `code-quality-review` | ✅ | ✅ | PHP/JS CLI 도구 기반 품질 종합 검토 |
-| `branch-merge-review` | ✅ | ✅ | 머지 전 3인 병렬 리뷰어 팀 실행 |
-| `web-browser-preview` | ✅ | ✅ | WSL → Windows Chrome CDP 미리보기 (WSL 전용) |
-| `codex-delegate` | ✅ | — | Codex CLI 서브에이전트 검토/구현 위임 |
-
-### 트리거 예시
-
-| 말하면 | 실행 |
-|--------|------|
-| "Svelte 5 컴포넌트 만들어줘" | `use-context7` |
-| "새 인증 기능을 구현해줘" | `plan-and-build` |
-| "원인이 불명확한 오류를 분석하고 고쳐줘" | `systematic-debugging` |
-| "보안 검토해줘" | `web-security-review` |
-| "백/프론트 동시에 만들어줘" | `web-parallel-dispatch` |
-| "코드 품질 검토해줘" | `code-quality-review` |
-| "머지 전에 리뷰해줘" | `branch-merge-review` |
-| "브라우저에서 확인해" | `web-browser-preview` |
-| "코덱스에게 검토해" | `codex-delegate` |
-
----
-
-## Agents
-
-역할별 에이전트 페르소나입니다. Claude (`claude.md`)와 Codex (`codex.toml`) 형식으로 각각 제공됩니다.
-
-| 에이전트 | Claude | Codex | 역할 |
-|----------|:------:|:-----:|------|
-| `php-backend-developer` | ✅ | ✅ | PHP/PDO 백엔드 개발 전문가 |
-| `frontend-developer` | ✅ | ✅ | Vanilla JS / jQuery / Svelte 5 / HTMX 프론트엔드 전문가 |
-| `security-auditor` | ✅ | ✅ | PHP + 프론트엔드 보안 감사 전문가 (읽기 전용) |
-
-### 설치 위치
-
-| | Claude | Codex |
+| 실행 환경 | 설치기 | 대상 |
 |---|---|---|
-| 스킬 | `~/.claude/skills/` | `~/.codex/skills/local/` |
-| 훅 스크립트 | `~/.claude/hooks/` | `~/.codex/hooks/` |
-| 훅 설정 | `~/.claude/settings.json` | `~/.codex/hooks.json` |
-| 에이전트 | `~/.claude/agents/*.md` | `~/.codex/agents/*.toml` |
+| Windows 네이티브 PowerShell 5.1+ | `.\install.ps1` | Windows Claude Desktop Code, Windows Codex 앱/CLI |
+| WSL 또는 Linux 셸 | `bash install.sh` | 해당 Linux 홈을 사용하는 Claude Code/Codex |
 
----
+Windows 앱이 WSL 배포판을 작업 환경으로 사용한다면 Windows 설치기를 섞지 말고 배포판 안에서 `bash install.sh`를 실행하세요. 반대로 Windows 네이티브 앱·CLI에는 `.\install.ps1`을 사용합니다.
 
-## 설치
+설치기는 저장소의 스킬·에이전트·훅만 관리합니다. Claude 플러그인, Node.js, PHP, Codex CLI, Context7, agent-browser 같은 외부 도구는 자동 설치하지 않고 감지 결과와 설치 명령만 보여 줍니다.
+
+## 빠른 시작
+
+### Windows 네이티브
+
+```powershell
+Set-ExecutionPolicy -Scope Process Bypass
+.\install.ps1
+```
+
+대화형으로 다음을 선택합니다.
+
+- Claude Desktop Code, Codex 또는 둘 다
+- 전역 또는 프로젝트 범위
+- 스킬 복사 또는 심볼릭 링크
+- 전역 범위의 워크플로우 훅
+
+스킬 기본값은 복사입니다. 심볼릭 링크는 저장소와 대상이 모두 Windows 로컬 경로일 때만 선택할 수 있으며, 권한 문제로 링크 생성이 실패하면 복사로 안전하게 전환합니다. 에이전트와 훅은 항상 복사합니다.
+
+제거:
+
+```powershell
+.\uninstall.ps1
+```
+
+### WSL/Linux
 
 ```bash
 bash install.sh
 ```
 
-> Codex 단계에서 Claude Code용 공식 Codex 플러그인(`codex@openai-codex`) 설치 여부를 묻습니다. 설치하면 `codex-delegate` 스킬이 `/codex` 슬래시 커맨드를 우선 사용합니다.
-> Claude Code와 Codex에 각각 선택적으로 `UserPromptSubmit` 훅을 등록합니다. 새 프로젝트·기능처럼 큰 구현 요청에서만 `plan-and-build`를 상기시키며 작은 수정·리뷰·설명에는 동작하지 않습니다. Codex 훅은 첫 실행 전에 `/hooks`에서 신뢰 승인이 필요합니다.
-> 설정 또는 훅 파일의 실제 대상이 선택한 설치 범위 밖이면 자동 설치·제거기는 경로를 알리고 기본값으로 건너뜁니다. 의도한 외부 dotfiles 설정일 때만 명시적으로 허용할 수 있습니다.
+제거:
 
-상세 내용은 [INSTALL.md](./INSTALL.md)를 참고하세요.
-
----
-
-## 부록: Chrome CDP 스크립트 (Windows)
-
-`chrome-devtool-protocol.ps1` — `web-browser-preview` 스킬 사용을 위한 Windows PowerShell 스크립트입니다.
-
-- Chrome을 원격 디버깅 포트(9333)로 실행
-- WSL 서브넷만 허용하는 방화벽 규칙 자동 설정
-- WSL → Windows portproxy 자동 구성
-
-`install.sh` 실행 시 Windows 바탕화면으로 자동 복사할 수 있습니다.
-Windows에서 우클릭 → **PowerShell로 실행** (관리자 권한 자동 요청).
-
----
-
-## 파일 구조
-
+```bash
+bash uninstall.sh
 ```
-.
-├── README.md
-├── INSTALL.md
-├── install.sh
-├── uninstall.sh
-├── chrome-devtool-protocol.ps1
-├── hooks/
-│   ├── workflow-reminder.py
-│   └── workflow_hook_config.py
-│
-├── skills/
-│   ├── use-context7/
-│   ├── plan-and-build/
-│   ├── systematic-debugging/
-│   ├── web-security-review/
-│   │   └── references/
-│   ├── web-parallel-dispatch/
-│   │   └── references/
-│   ├── web-browser-preview/
-│   ├── codex-delegate/
-│   ├── code-quality-review/
-│   │   └── references/
-│   └── branch-merge-review/
-│
-└── agents/
-    ├── php-backend-developer/
-    │   ├── claude.md
-    │   └── codex.toml
-    ├── frontend-developer/
-    │   ├── claude.md
-    │   └── codex.toml
-    └── security-auditor/
-        ├── claude.md
-        └── codex.toml
-```
+
+## 설치 경로
+
+| 범위 | Claude | Codex |
+|---|---|---|
+| Windows/POSIX 전역 스킬 | `~/.claude/skills/` | `~/.agents/skills/` |
+| 전역 에이전트 | `~/.claude/agents/*.md` | `~/.codex/agents/*.toml` |
+| 전역 훅 파일 | `~/.claude/hooks/` | `~/.codex/hooks/` |
+| 전역 훅 설정 | `~/.claude/settings.json` | `~/.codex/hooks.json` |
+| 프로젝트 스킬 | `<project>/.claude/skills/` | `<project>/.agents/skills/` |
+| 프로젝트 에이전트 | `<project>/.claude/agents/*.md` | `<project>/.codex/agents/*.toml` |
+
+Windows 프로젝트 범위는 스킬과 에이전트만 설치합니다. Windows 훅은 전역 범위에서만 설치합니다.
+
+기존 Codex 스킬 경로 `~/.codex/skills/local/`은 설치기가 안전하게 이전합니다. 저장소 링크 대상 또는 매니페스트 해시로 소유가 확인되고 새 `.agents/skills/` 대상에 충돌이 없을 때만 복사 후 이전 항목을 제거합니다. 수정됨·미확인·충돌 항목은 그대로 보존합니다.
+
+## 제공 컴포넌트
+
+### 스킬
+
+| 스킬 | Claude | Codex | 역할 |
+|---|:---:|:---:|---|
+| `use-context7` | ✓ | ✓ | 외부 라이브러리 코드 전 최신 문서 조회 |
+| `plan-and-build` | ✓ | ✓ | 기능 사양·계획·TDD·병렬화 판단 |
+| `systematic-debugging` | ✓ | ✓ | 재현과 증거 기반 디버깅 |
+| `web-security-review` | ✓ | ✓ | PHP/프론트엔드 보안 검토 |
+| `web-parallel-dispatch` | ✓ | ✓ | 승인 기반 병렬 구현 분할 |
+| `code-quality-review` | ✓ | ✓ | 코드 품질·성능 검토 |
+| `branch-merge-review` | ✓ | ✓ | 머지 전 다중 리뷰 |
+| `web-browser-preview` | ✓ | ✓ | Windows/WSL Chrome CDP 미리보기 |
+| `codex-delegate` | ✓ | — | Claude에서 Codex로 위임 |
+
+### 에이전트
+
+- `php-backend-developer`
+- `frontend-developer`
+- `security-auditor`
+
+각 에이전트는 Claude용 `.md`와 Codex용 `.toml`을 제공합니다.
+
+## 훅과 재시작
+
+워크플로우 훅은 큰 구현 요청에서 `plan-and-build`를 상기시키며 오류가 나도 프롬프트를 차단하지 않습니다.
+
+- Claude: Windows에서는 `powershell.exe`와 `args`를 사용하는 exec 훅으로 등록합니다. 처음으로 `skills` 또는 `agents` 디렉터리를 만든 경우에만 Claude Desktop을 한 번 재시작하라는 안내가 표시됩니다.
+- Codex: `command`와 `commandWindows`를 함께 등록합니다. 새 Codex 세션을 시작하고 `/hooks`에서 경로와 내용을 검토한 뒤 신뢰를 승인해야 합니다.
+- 기존 JSON/TOML과 외부 훅은 보존합니다. 설정 병합이 실패하면 새 훅 파일과 설정 변경을 함께 원복합니다.
+- Windows 설치기가 Codex 훅 기능을 `false`에서 `true`로 바꾼 경우에만 이전 상태를 기록하며, 제거 시 값이 여전히 설치 후 상태일 때만 복원합니다. POSIX 설치기는 `config.toml`을 자동 변경하지 않고 수동 활성화를 안내합니다.
+
+## 소유권과 안전 제거
+
+설치 기록은 범위 루트의 `.claude-code-skills/manifest.json` v2에 저장됩니다. 플랫폼, 범위, 클라이언트, 컴포넌트, 대상, 설치 방식, 해시, 설정 변경 전후 상태를 기록합니다. 이전 `manifest.tsv` v1도 POSIX 기록으로 읽습니다.
+
+제거기는 매니페스트와 현재 해시 또는 저장소 링크 대상을 함께 확인합니다. 외부 동명 파일, 사용자가 수정한 복사본, 매니페스트 유실 항목, 확인할 수 없는 링크는 삭제하지 않습니다.
+
+자세한 설치·검증 절차는 [INSTALL.md](./INSTALL.md)를 참고하세요.
+
+관련 공식 문서: [Codex skills](https://learn.chatgpt.com/docs/build-skills), [Codex hooks](https://learn.chatgpt.com/docs/hooks), [Codex Windows](https://developers.openai.com/codex/app/windows), [Claude hooks](https://code.claude.com/docs/en/hooks), [Claude Desktop](https://code.claude.com/docs/en/desktop), [Chrome remote debugging](https://developer.chrome.com/blog/remote-debugging-port).

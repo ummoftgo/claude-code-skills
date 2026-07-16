@@ -1,364 +1,168 @@
-# 팀 스킬 설치 가이드
+# 설치 및 검증 가이드
 
-이 문서는 팀에서 개발한 Claude Code/Codex 스킬 9종과 선택적 워크플로우 훅을 새 개발 환경에 설치하는 방법을 설명합니다.
+## 1. Windows 네이티브와 WSL 중 선택
 
----
+먼저 실제 Claude/Codex 프로세스가 파일을 읽는 환경을 기준으로 설치기를 고릅니다.
 
-## 스킬 목록
+- Windows Claude Desktop Code 또는 Windows Codex 앱/CLI: Windows PowerShell에서 `.\install.ps1`
+- WSL 배포판 안의 Claude/Codex: WSL 셸에서 `bash install.sh`
+- 네이티브 Linux: `bash install.sh`
 
-| 스킬 이름 | 역할 |
-|-----------|------|
-| `use-context7` | 프레임워크 코드 작성 전 최신 공식 문서 조회 |
-| `plan-and-build` | 새 프로젝트·기능의 스펙/계획, TDD 판단, 병렬 분할 |
-| `systematic-debugging` | 불명확한 장애의 재현·근본 원인 확인·회귀 검증 |
-| `web-security-review` | PHP 백엔드 + 프론트엔드 보안 취약점 검토 |
-| `web-parallel-dispatch` | 에이전트 병렬 실행으로 개발 속도 향상 |
-| `web-browser-preview` | WSL에서 Windows Chrome으로 작업 결과 확인 |
-| `codex-delegate` | Codex CLI 서브에이전트에 검토/구현 위임 |
-| `code-quality-review` | CLI 도구 기반 코드 품질 종합 검토 |
-| `branch-merge-review` | 머지 전 브랜치 변경사항 병렬 리뷰 |
+Windows 설치기는 WSL 경로를 대상으로 하지 않습니다. WSL 모드를 쓰는 앱에는 배포판 내부 설치기를 별도로 실행하세요.
 
----
+## 2. Windows 네이티브 설치
 
-## 사전 요구사항
-
-- **Claude Code** 설치 및 로그인 완료
-- **Node.js** 18 이상 (npx 사용)
-- **PHP 8.1 이상** (`code-quality-review` 스킬의 PHP 도구 사용 시)
-
----
-
-## 1단계: 스킬 파일 가져오기
-
-스킬 파일을 로컬에 복사합니다.
-
-```bash
-# 팀 저장소에서 클론하는 경우 (원하는 디렉토리 이름으로 지정)
-git clone <팀-저장소-URL> ~/work/claude-code-skills
-
-# 또는 공유 폴더에서 복사하는 경우
-cp -r /경로/to/claude-code-skills ~/work/claude-code-skills
-```
-
----
-
-## 2단계: Claude Code에 스킬 등록
-
-Claude Code는 `~/.claude/skills/` 디렉토리에서 스킬을 로드합니다.
-스킬 디렉토리를 심볼릭 링크로 연결하면 파일 수정 시 자동으로 반영됩니다.
-
-```bash
-# ~/.claude/skills/ 디렉토리 생성 (없는 경우)
-mkdir -p ~/.claude/skills
-
-# SKILLS_DIR을 클론한 경로 아래 skills/ 디렉토리로 지정하세요 (스킬은 저장소의 skills/ 하위에 있습니다)
-SKILLS_DIR=~/work/claude-code-skills/skills
-
-# 9개 스킬 모두 심볼릭 링크 등록
-ln -s $SKILLS_DIR/use-context7        ~/.claude/skills/use-context7
-ln -s $SKILLS_DIR/plan-and-build      ~/.claude/skills/plan-and-build
-ln -s $SKILLS_DIR/systematic-debugging ~/.claude/skills/systematic-debugging
-ln -s $SKILLS_DIR/web-security-review ~/.claude/skills/web-security-review
-ln -s $SKILLS_DIR/web-parallel-dispatch ~/.claude/skills/web-parallel-dispatch
-ln -s $SKILLS_DIR/web-browser-preview ~/.claude/skills/web-browser-preview
-ln -s $SKILLS_DIR/codex-delegate      ~/.claude/skills/codex-delegate
-ln -s $SKILLS_DIR/code-quality-review ~/.claude/skills/code-quality-review
-ln -s $SKILLS_DIR/branch-merge-review ~/.claude/skills/branch-merge-review
-```
-
-> **팁**: 심볼릭 링크 대신 복사하려면 `ln -s` 대신 `cp -r`을 사용하세요.
-> 단, 복사 방식은 원본 파일 수정이 자동 반영되지 않습니다.
-
-등록 후 Claude Code를 재시작하면 스킬이 활성화됩니다.
-
-### `plan-and-build` 리마인더 훅 — Claude Code
-
-`install.sh`는 설치 여부를 확인한 뒤 `hooks/workflow-reminder.py`를 `~/.claude/hooks/`에 복사하고 기존 설정을 보존한 채 `UserPromptSubmit` 훅을 병합합니다. 이 훅은 새 프로젝트·기능 등 명백한 구현 요청에만 계획 워크플로우를 상기시키며, 프롬프트를 차단하지 않습니다.
-
-수동 설치 시에는 훅 파일을 복사한 다음 `~/.claude/settings.json`의 `hooks` 객체에 아래 항목을 병합합니다.
-
-```bash
-mkdir -p ~/.claude/hooks
-cp hooks/workflow-reminder.py ~/.claude/hooks/claude-code-skills-workflow.py
-chmod +x ~/.claude/hooks/claude-code-skills-workflow.py
-```
-
-```json
-{
-  "hooks": {
-    "UserPromptSubmit": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "python3 /home/USER/.claude/hooks/claude-code-skills-workflow.py",
-            "timeout": 5
-          }
-        ]
-      }
-    ]
-  }
-}
-```
-
-`/home/USER`는 실제 홈 경로로 바꿉니다. 기존 `hooks` 설정이 있다면 전체 객체를 덮어쓰지 말고 `UserPromptSubmit` 배열에 항목을 추가해야 합니다.
-
-자동 설치·제거기는 설정 파일이 심볼릭 링크이면 실제 대상 파일을 원자적으로 수정하고 링크 자체는 유지합니다. 설정 또는 훅 파일의 실제 대상이 선택한 전역·프로젝트 범위 밖에 있으면 경로를 알리고 기본값으로 건너뜁니다. dotfiles 저장소처럼 의도한 외부 대상일 때만 명시적으로 허용하세요. 깨진 링크는 안전하게 수정할 수 없으므로 설치·제거를 중단합니다.
-
-Codex용 훅은 아래의 Codex 설치 절에서 별도로 등록합니다. 같은 Python 스크립트가 Claude Code의 `user_prompt` 입력과 Codex의 `prompt` 입력을 모두 처리합니다.
-
----
-
-## 3단계: 스킬별 외부 의존성 설치
-
-### `use-context7` — context7 설정
-
-**방법 A: MCP (권장)** — Claude Code와 자동 통합, 별도 명령어 불필요
-
-`~/.claude/settings.json`의 `mcpServers` 섹션에 추가:
-
-```json
-{
-  "mcpServers": {
-    "context7": {
-      "command": "npx",
-      "args": ["-y", "@upstash/context7-mcp"]
-    }
-  }
-}
-```
-
-**방법 B: ctx7 CLI** — MCP 설정 없이 사용 가능
-
-```bash
-# 전역 설치 (선택)
-npm install -g ctx7
-
-# 또는 설치 없이 npx로 바로 사용
-npx ctx7 library svelte
-npx ctx7 docs /sveltejs/svelte "$state runes"
-```
-
-MCP가 설정되어 있으면 스킬이 MCP 도구를 우선 사용하고, 없으면 `ctx7 CLI`로 자동 전환합니다.
-
----
-
-### `web-browser-preview` — agent-browser 스킬 설치
-
-브라우저 미리보기는 `agent-browser` 스킬에 의존합니다.
-
-```bash
-npx skills add vercel-labs/agent-browser --skill agent-browser
-```
-
-**Windows Chrome 원격 디버깅 설정** (WSL 환경):
-
-Windows에서 Chrome을 원격 디버깅 포트와 함께 실행해야 합니다.
-Chrome 바로가기에 다음 옵션을 추가하거나, PowerShell에서 실행하세요:
+PowerShell 5.1 이상에서 저장소 루트로 이동합니다.
 
 ```powershell
-# PowerShell에서 실행
-& "C:\Program Files\Google\Chrome\Application\chrome.exe" --remote-debugging-port=9333
+Set-ExecutionPolicy -Scope Process Bypass
+.\install.ps1
 ```
 
-> 포트 9333이 이미 사용 중이면 Chrome을 완전히 종료한 후 다시 실행하세요.
+설치기는 무인 플래그를 받지 않습니다. 다음 항목을 순서대로 선택합니다.
 
----
+1. Claude Desktop Code, Codex 또는 둘 다
+2. 전역 또는 프로젝트 범위
+3. 스킬 복사 또는 심볼릭 링크
+4. 전역 범위일 때 클라이언트별 워크플로우 훅
 
-### `code-quality-review` — PHP 품질 도구 설치
+복사가 기본값입니다. 링크는 저장소와 대상이 모두 로컬 Windows 경로일 때만 제시되며, Developer Mode/권한 부족 등으로 생성이 실패하면 복사로 전환합니다. 에이전트와 훅은 링크하지 않습니다.
 
-PHP 코드베이스를 검토할 경우 PHP CLI 도구를 설치합니다.
+### Windows 경로
 
-```bash
-# sudo 없이 설치 — ~/.local/bin/ 사용
-mkdir -p ~/.local/bin
+| 항목 | Claude | Codex |
+|---|---|---|
+| 전역 스킬 | `%USERPROFILE%\.claude\skills` | `%USERPROFILE%\.agents\skills` |
+| 전역 에이전트 | `%USERPROFILE%\.claude\agents` | `%USERPROFILE%\.codex\agents` |
+| 전역 훅 | `%USERPROFILE%\.claude\hooks` | `%USERPROFILE%\.codex\hooks` |
+| 훅 설정 | `%USERPROFILE%\.claude\settings.json` | `%USERPROFILE%\.codex\hooks.json` |
+| Codex 기능 설정 | — | `%USERPROFILE%\.codex\config.toml` |
+| 프로젝트 스킬 | `.claude\skills` | `.agents\skills` |
+| 프로젝트 에이전트 | `.claude\agents` | `.codex\agents` |
 
-# PHPStan — 정적 분석
-if ! command -v phpstan &>/dev/null; then
-  wget -q -O ~/.local/bin/phpstan \
-    https://github.com/phpstan/phpstan/releases/latest/download/phpstan.phar
-  chmod +x ~/.local/bin/phpstan
-fi
+Windows 프로젝트 설치에는 훅이 포함되지 않습니다.
 
-# phpcs / phpcbf — 코딩 스타일 검사 및 자동 수정
-if ! command -v phpcs &>/dev/null; then
-  curl -qsL https://phars.phpcodesniffer.com/phpcs.phar -o ~/.local/bin/phpcs
-  curl -qsL https://phars.phpcodesniffer.com/phpcbf.phar -o ~/.local/bin/phpcbf
-  chmod +x ~/.local/bin/phpcs ~/.local/bin/phpcbf
-fi
+### 외부 도구 진단
 
-# phpmd — 복잡도 및 코드 냄새 감지
-if ! command -v phpmd &>/dev/null; then
-  wget -q -O ~/.local/bin/phpmd \
-    https://github.com/phpmd/phpmd/releases/latest/download/phpmd.phar
-  chmod +x ~/.local/bin/phpmd
-fi
+설치 마지막에 Node.js, PHP, Codex CLI, Context7, agent-browser, Chrome 상태를 보여 줍니다. 설치기는 어떤 도구나 Claude 플러그인도 자동 설치하지 않습니다. 누락 시 표시되는 명령을 검토한 뒤 사용자가 직접 실행합니다.
 
-# phpcpd — 중복 코드 감지
-if ! command -v phpcpd &>/dev/null; then
-  wget -q -O ~/.local/bin/phpcpd \
-    https://phar.phpunit.de/phpcpd.phar
-  chmod +x ~/.local/bin/phpcpd
-fi
-```
+예시:
 
-> `~/.local/bin`이 PATH에 없으면 아래를 `~/.bashrc` 또는 `~/.zshrc`에 추가하세요:
-> ```bash
-> export PATH="$HOME/.local/bin:$PATH"
-> ```
-> `install.sh`를 사용하면 PATH 설정까지 자동으로 처리됩니다.
-
-JS 도구(ESLint, Biome, knip 등)는 프로젝트 디렉토리에서 스킬이 자동으로 설치합니다.
-
----
-
-### `codex-delegate` — Codex CLI 설치
-
-```bash
+```powershell
 npm install -g @openai/codex
+npm install -g ctx7
+npm install -g agent-browser
 ```
 
-설치 후 OpenAI API 키를 설정합니다:
+## 3. WSL/Linux 설치
 
 ```bash
-export OPENAI_API_KEY="sk-..."
-# ~/.bashrc 또는 ~/.zshrc에 추가하여 영구 설정
+bash install.sh
 ```
 
-> **Claude Code Codex 플러그인 (선택)**
-> `install.sh`의 Codex 단계에서 Claude Code용 공식 Codex 플러그인(`codex@openai-codex`) 설치 여부를 묻습니다.
-> 설치하면 `codex-delegate` 스킬이 `/codex:review`, `/codex:rescue` 같은 슬래시 커맨드를 우선 사용하고, 없으면 `codex` CLI로 폴백합니다.
-> 수동 설치:
->
-> ```bash
-> claude plugin marketplace add openai/codex-plugin-cc
-> claude plugin install codex@openai-codex
-> ```
+Bash 설치기는 해당 POSIX 홈/프로젝트에만 설치합니다. Windows 네이티브 프로필에는 쓰지 않습니다. 설치 대상은 PowerShell 설치기와 같은 `components.json`에서 선택하며 Codex 스킬은 공식 `.agents/skills` 경로를 사용합니다.
 
----
+Codex `config.toml`에서 훅이 비활성화되어 있으면 Bash 설치기는 값을 바꾸지 않고 훅 설치를 건너뜁니다. 설정을 직접 검토해 활성화한 뒤 설치기를 다시 실행하세요.
 
-### Codex 스킬 설치 (선택)
+기존 `~/.codex/skills/local/<name>` 항목은 다음 조건을 모두 만족할 때만 이전합니다.
 
-`install.sh` 실행 시 Codex에도 스킬을 설치할지 묻는 단계가 있습니다. 설치하면 Claude Code와 동일한 스킬을 Codex에서도 사용할 수 있습니다.
+- 카탈로그에 있는 Codex 스킬이다.
+- v1/v2 매니페스트 해시가 현재 내용과 같거나 링크가 이 저장소의 스킬을 가리킨다.
+- 새 `~/.agents/skills/<name>` 대상이 없다.
 
-- 설치 경로: `~/.codex/skills/local/{스킬명}/`
-- `codex-delegate`는 "Claude → Codex 위임" 스킬이므로 Codex 자신에게는 설치되지 않습니다.
-- `install.sh`에서 Codex 스킬 설치를 선택하면 Codex용 `UserPromptSubmit` 훅도 별도로 설치할지 묻습니다.
+이전은 새 대상에 복사하고 v2 소유권을 기록한 뒤 구 항목을 제거하는 순서입니다. 불명확하거나 수정되었거나 충돌한 항목은 보존합니다.
 
-수동으로 설치하려면:
+## 4. 훅 설정
 
-```bash
-SKILLS_DIR=~/work/claude-code-skills/skills
-mkdir -p ~/.codex/skills/local
+### Claude Desktop Code
 
-ln -s $SKILLS_DIR/use-context7        ~/.codex/skills/local/use-context7
-ln -s $SKILLS_DIR/plan-and-build      ~/.codex/skills/local/plan-and-build
-ln -s $SKILLS_DIR/systematic-debugging ~/.codex/skills/local/systematic-debugging
-ln -s $SKILLS_DIR/web-security-review ~/.codex/skills/local/web-security-review
-ln -s $SKILLS_DIR/web-parallel-dispatch ~/.codex/skills/local/web-parallel-dispatch
-ln -s $SKILLS_DIR/code-quality-review ~/.codex/skills/local/code-quality-review
-ln -s $SKILLS_DIR/branch-merge-review ~/.codex/skills/local/branch-merge-review
-ln -s $SKILLS_DIR/web-browser-preview ~/.codex/skills/local/web-browser-preview
-```
-
-> `codex-delegate`는 "Claude → Codex 위임" 전용이라 Codex에는 설치하지 않습니다. `web-browser-preview`는 WSL 환경에서만 동작합니다(macOS/네이티브 Linux 미지원).
-
-#### Codex `plan-and-build` 리마인더 훅
-
-자동 설치를 선택하면 훅 스크립트는 `~/.codex/hooks/claude-code-skills-workflow.py`, 설정은 `~/.codex/hooks.json`에 등록됩니다. 프로젝트 설치에서는 각각 `<project>/.codex/hooks/`와 `<project>/.codex/hooks.json`을 사용합니다.
-
-같은 설정 계층의 `config.toml`에 인라인 `[hooks]` 또는 `[[hooks.<Event>]]` 설정이 이미 있으면 자동 설치기가 이를 알리고 기본값으로 `hooks.json` 설치를 건너뜁니다. 두 표현을 함께 사용하려는 경우에만 명시적으로 계속합니다. `[hooks.state.*]` 신뢰 기록은 인라인 훅으로 간주하지 않습니다.
-
-`config.toml`에 `[features] hooks = false` 또는 이전 호환 키인 `[features] codex_hooks = false`가 적용되어 있으면 `hooks.json` 훅이 실행되지 않습니다. 자동 설치기는 적용된 설정을 알리고, 기본값 `No`로 훅 기능을 활성화한 뒤 설치할지 묻습니다. 동의하면 다른 TOML 설정과 주석을 보존하면서 현재 키인 `hooks = true`로 갱신합니다. 프로젝트 설치에서는 사용자 `~/.codex/config.toml`을 직접 바꾸지 않고 프로젝트 `.codex/config.toml`에 활성화 값을 재정의합니다. `hooks`와 `codex_hooks`가 함께 있으면 현재 키인 `hooks`가 우선합니다.
-
-안전한 TOML 검증과 갱신에는 Python 3.11 이상이 필요합니다. 더 낮은 버전에서는 비활성 상태를 알리되 설정을 자동 수정하지 않습니다.
-
-기업 관리 환경의 `allow_managed_hooks_only`는 `config.toml`이 아니라 관리형 `requirements.toml` 정책입니다. 이 저장소의 개인용 설치기는 관리 정책 탐지를 자동화하지 않습니다.
-
-수동 설치:
-
-```bash
-mkdir -p ~/.codex/hooks
-cp hooks/workflow-reminder.py ~/.codex/hooks/claude-code-skills-workflow.py
-chmod +x ~/.codex/hooks/claude-code-skills-workflow.py
-```
-
-`~/.codex/hooks.json`의 기존 설정을 보존하면서 아래 항목을 병합합니다.
+Windows 훅은 `workflow-reminder.ps1`을 복사하고 다음 exec 형태를 `UserPromptSubmit`에 병합합니다.
 
 ```json
 {
-  "hooks": {
-    "UserPromptSubmit": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "python3 /home/USER/.codex/hooks/claude-code-skills-workflow.py",
-            "timeout": 5
-          }
-        ]
-      }
-    ]
-  }
+  "type": "command",
+  "command": "powershell.exe",
+  "args": ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "C:\\Users\\USER\\.claude\\hooks\\claude-code-skills-workflow.ps1"],
+  "timeout": 5
 }
 ```
 
-Codex를 다시 시작한 뒤 `/hooks`에서 새 훅의 내용과 경로를 검토하고 신뢰해야 실행됩니다. 프로젝트 훅은 해당 프로젝트가 신뢰된 경우에만 로드됩니다.
+다른 이벤트와 외부 훅은 유지됩니다. 기존 `skills`/`agents` 디렉터리가 없어서 새로 만든 경우에만 Claude Desktop 재시작 안내가 표시됩니다.
 
----
+### Codex
 
-## 4단계: 동작 확인
+Windows 훅 항목에는 필수 `command`와 Windows 전용 `commandWindows`가 모두 들어갑니다. 같은 `config.toml`에 인라인 훅이 있으면 기본적으로 건너뜁니다. `[features] hooks = false` 또는 이전 `codex_hooks = false`가 적용되면 활성화할지 별도로 확인합니다.
 
-Claude Code를 열고 각 스킬이 정상 인식되는지 확인합니다.
+설치기가 활성화 값을 바꾼 경우 매니페스트에 이전 키/값과 설치 후 값을 기록합니다. 제거기는 현재 값이 여전히 설치 후 값일 때만 이전 `false` 상태를 복원합니다. 사용자가 이후 값을 변경했다면 그대로 둡니다.
 
+설치 후 새 Codex 세션에서 다음을 수행합니다.
+
+1. `/hooks`를 연다.
+2. `claude-code-skills-workflow` 경로와 내용을 검토한다.
+3. 훅을 신뢰하도록 승인한다.
+
+## 5. Chrome과 `web-browser-preview`
+
+Windows 네이티브에서는 CDP 주소로 `http://127.0.0.1:9333`을 사용합니다. Chrome 136+ 보안 요구에 맞춰 기본 프로필이 아닌 전용 사용자 데이터 디렉터리를 사용해야 합니다.
+
+```powershell
+$chrome = "$env:ProgramFiles\Google\Chrome\Application\chrome.exe"
+$profile = Join-Path $env:LOCALAPPDATA 'claude-code-skills\chrome-cdp-profile'
+& $chrome --remote-debugging-port=9333 --user-data-dir="$profile"
 ```
-/skills list
+
+스킬과 설치기는 Chrome을 자동 실행하지 않습니다. Chrome과 agent-browser 상태, 필요한 명령만 안내합니다. WSL에서는 Windows 호스트 IP를 런타임에 구해 `<host>:9333`에 연결합니다.
+
+## 6. 제거
+
+Windows:
+
+```powershell
+.\uninstall.ps1
 ```
 
-아래 스킬들이 목록에 보이면 설치 완료입니다:
-- `use-context7`
-- `plan-and-build`
-- `systematic-debugging`
-- `web-security-review`
-- `web-parallel-dispatch`
-- `web-browser-preview`
-- `codex-delegate`
-- `code-quality-review`
-- `branch-merge-review`
+WSL/Linux:
 
-Codex CLI에서는 `/hooks`를 열어 `claude-code-skills-workflow.py`가 등록됐고 신뢰 상태인지도 확인합니다.
+```bash
+bash uninstall.sh
+```
 
----
+제거기는 `.claude-code-skills/manifest.json` v2 또는 안전하게 변환된 v1 기록으로 소유가 확인된 항목만 삭제합니다. 복사본의 현재 해시가 달라졌거나 매니페스트가 없거나 외부 링크/동명 항목이면 보존하고 경고합니다. JSON에서는 정확히 이 설치기가 추가한 훅만 제거합니다.
 
-## 스킬 사용 예시
+## 7. 수동 확인 체크리스트
 
-| 말하면 | 실행되는 스킬 |
-|--------|--------------|
-| "Svelte 5 컴포넌트 만들어줘" | `use-context7` — 먼저 Svelte 5 문서 조회 |
-| "새 인증 기능을 구현해줘" | `plan-and-build` — 스펙·계획 작성 후 TDD와 병렬화 판단 |
-| "원인이 불명확한 오류를 분석하고 고쳐줘" | `systematic-debugging` — 재현과 근본 원인 확인 후 최소 수정 |
-| "보안 검토해줘" | `web-security-review` |
-| "API 스펙 나왔으니까 백/프론트 동시에 만들어줘" | `web-parallel-dispatch` |
-| "브라우저에서 확인해봐" | `web-browser-preview` |
-| "코덱스에게 검토해" | `codex-delegate` — 4개 서브에이전트 병렬 검토 |
-| "코덱스에게 구현시켜" | `codex-delegate` — 분할 구현 위임 |
-| "코드 품질 검토해줘" | `code-quality-review` |
-| "머지 전에 브랜치 리뷰해줘" | `branch-merge-review` |
+앱은 자동 실행되지 않습니다. 설치 후 직접 확인합니다.
 
----
+### Codex
 
-## 문제 해결
+- 새 세션에서 `/skills`를 열어 선택한 스킬이 보이는지 확인
+- `~/.codex/agents` 또는 프로젝트 `.codex/agents`의 에이전트가 인식되는지 확인
+- 전역 설치라면 `/hooks`에서 훅을 검토하고 신뢰 승인
+- 큰 구현 프롬프트에는 계획 리마인더가 나오고 리뷰/설명/작은 수정에는 조용한지 확인
 
-**스킬이 목록에 안 보임**
-→ Claude Code 재시작. 심볼릭 링크 대상 경로가 올바른지 확인: `ls -la ~/.claude/skills/`
+### Claude Desktop Code
 
-**context7 MCP 연결 실패**
-→ `npx -y @upstash/context7-mcp` 단독 실행으로 오류 메시지 확인. Node.js 버전 18+ 필요.
+- Code 탭에서 스킬 목록 확인
+- 설치한 에이전트 선택/호출 확인
+- 큰 구현 프롬프트에서 훅 리마인더 확인
+- 기존 외부 훅과 settings.json의 다른 키가 유지되는지 확인
 
-**브라우저 CDP 연결 실패**
-→ Windows Chrome이 `--remote-debugging-port=9333` 옵션으로 실행 중인지 확인.
-→ WSL 방화벽이 포트 9333을 차단하지 않는지 확인.
+## 8. 문제 해결
 
-**PHP PHAR 실행 오류**
-→ PHP CLI 설치 확인: `php --version`
-→ PHAR 파일 실행 권한 확인: `ls -la ~/.local/bin/phpstan`
+### 수정한 스킬이 제거되지 않음
+
+정상적인 보호 동작입니다. 제거기는 설치 당시 해시와 달라진 복사본을 삭제하지 않습니다. 필요한 내용을 백업한 뒤 수동 정리하세요.
+
+### 기존 Codex 스킬이 이전되지 않음
+
+새 `.agents/skills` 대상 충돌, 매니페스트 유실, 내용 변경, 외부 링크 중 하나일 수 있습니다. 설치기 경고를 확인하고 두 위치를 수동 비교하세요.
+
+### 훅 설치 중 JSON/TOML 오류
+
+잘못된 기존 설정은 덮어쓰지 않습니다. 설치기는 훅 파일과 설정 변경을 원복합니다. 기존 파일을 유효한 JSON/TOML로 고친 뒤 다시 실행하세요.
+
+### Windows 훅이 보이지 않음
+
+새 Codex 세션을 시작한 뒤 `/hooks`에서 신뢰 상태를 확인하세요. Claude는 처음 디렉터리가 생성된 설치였다면 Desktop을 한 번 재시작하세요.
+
+공식 참고: [Codex skills](https://learn.chatgpt.com/docs/build-skills), [Codex hooks](https://learn.chatgpt.com/docs/hooks), [Codex Windows](https://developers.openai.com/codex/app/windows), [Claude hooks](https://code.claude.com/docs/en/hooks), [Claude Desktop](https://code.claude.com/docs/en/desktop), [Chrome remote debugging](https://developer.chrome.com/blog/remote-debugging-port).

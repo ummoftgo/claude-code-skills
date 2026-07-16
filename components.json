@@ -1,0 +1,83 @@
+{
+  "version": 1,
+  "components": [
+    {
+      "kind": "skill",
+      "name": "use-context7",
+      "source": "skills/use-context7",
+      "support": {"claude": {"posix": true, "windows": true}, "codex": {"posix": true, "windows": true}}
+    },
+    {
+      "kind": "skill",
+      "name": "plan-and-build",
+      "source": "skills/plan-and-build",
+      "support": {"claude": {"posix": true, "windows": true}, "codex": {"posix": true, "windows": true}}
+    },
+    {
+      "kind": "skill",
+      "name": "systematic-debugging",
+      "source": "skills/systematic-debugging",
+      "support": {"claude": {"posix": true, "windows": true}, "codex": {"posix": true, "windows": true}}
+    },
+    {
+      "kind": "skill",
+      "name": "web-security-review",
+      "source": "skills/web-security-review",
+      "support": {"claude": {"posix": true, "windows": true}, "codex": {"posix": true, "windows": true}}
+    },
+    {
+      "kind": "skill",
+      "name": "web-parallel-dispatch",
+      "source": "skills/web-parallel-dispatch",
+      "support": {"claude": {"posix": true, "windows": true}, "codex": {"posix": true, "windows": true}}
+    },
+    {
+      "kind": "skill",
+      "name": "code-quality-review",
+      "source": "skills/code-quality-review",
+      "support": {"claude": {"posix": true, "windows": true}, "codex": {"posix": true, "windows": true}}
+    },
+    {
+      "kind": "skill",
+      "name": "branch-merge-review",
+      "source": "skills/branch-merge-review",
+      "support": {"claude": {"posix": true, "windows": true}, "codex": {"posix": true, "windows": true}}
+    },
+    {
+      "kind": "skill",
+      "name": "web-browser-preview",
+      "source": "skills/web-browser-preview",
+      "support": {"claude": {"posix": true, "windows": true}, "codex": {"posix": true, "windows": true}}
+    },
+    {
+      "kind": "skill",
+      "name": "codex-delegate",
+      "source": "skills/codex-delegate",
+      "support": {"claude": {"posix": true, "windows": true}, "codex": {"posix": false, "windows": false}}
+    },
+    {
+      "kind": "agent",
+      "name": "php-backend-developer",
+      "source": {"claude": "agents/php-backend-developer/claude.md", "codex": "agents/php-backend-developer/codex.toml"},
+      "support": {"claude": {"posix": true, "windows": true}, "codex": {"posix": true, "windows": true}}
+    },
+    {
+      "kind": "agent",
+      "name": "frontend-developer",
+      "source": {"claude": "agents/frontend-developer/claude.md", "codex": "agents/frontend-developer/codex.toml"},
+      "support": {"claude": {"posix": true, "windows": true}, "codex": {"posix": true, "windows": true}}
+    },
+    {
+      "kind": "agent",
+      "name": "security-auditor",
+      "source": {"claude": "agents/security-auditor/claude.md", "codex": "agents/security-auditor/codex.toml"},
+      "support": {"claude": {"posix": true, "windows": true}, "codex": {"posix": true, "windows": true}}
+    },
+    {
+      "kind": "hook",
+      "name": "workflow-reminder",
+      "source": {"posix": "hooks/workflow-reminder.py", "windows": "hooks/workflow-reminder.ps1"},
+      "support": {"claude": {"posix": true, "windows": true}, "codex": {"posix": true, "windows": true}}
+    }
+  ]
+}

@@ -1,20 +1,26 @@
 ---
 name: web-browser-preview
-description: "Open the current working file or project in a Windows browser for visual review, using agent-browser connected to Windows Chrome CDP (WSL environment). Trigger when user says '브라우저에서 확인해', '브라우저로 열어줘', 'browser로 확인해', 'check in browser', or similar requests. Automatically derives the URL from the current working path when possible; asks the user for the URL when the project uses routing. IMPORTANT: In WSL environments, always use this skill instead of invoking agent-browser directly. This skill supersedes agent-browser for all browser preview tasks in WSL — it resolves the Windows Host IP and derives the correct URL before delegating browser commands to agent-browser."
+description: "Open the current project in Windows Chrome for visual review, using agent-browser over CDP from native Windows or WSL. Trigger when user says '브라우저에서 확인해', '브라우저로 열어줘', 'browser로 확인해', 'check in browser', or similar requests. Resolves the correct CDP and application host for the active platform before delegating browser commands to agent-browser."
 ---
 
 # Web Browser Preview
 
-Open the current project in a Windows browser from WSL for visual review. This skill handles URL resolution and WSL→Windows CDP connection. Actual browser commands follow the **agent-browser skill**.
+Open the current project in Windows Chrome from native Windows or WSL. This skill resolves the platform-specific application host and CDP endpoint. Actual navigation and capture commands follow the **agent-browser skill**.
 
-> **Priority over agent-browser**: Even if the `agent-browser` skill is installed, always invoke this skill first for any browser preview request in a WSL environment. This skill resolves the WSL→Windows IP and derives the correct URL, then delegates the actual browser interaction to `agent-browser`.
+> **Priority over agent-browser**: Invoke this skill first for Windows/WSL preview requests, then invoke `agent-browser` by skill name for browser operations.
 
 ## Prerequisites (Step 0)
 
-Check if the `agent-browser` skill is installed. If not, confirm with the user and install:
+Check whether the `agent-browser` skill and CLI are available. Report their state; do not install packages automatically.
 
 ```bash
-npx skills add vercel-labs/agent-browser --skill agent-browser
+command -v agent-browser || echo "agent-browser missing — npm install -g agent-browser"
+```
+
+```powershell
+if (-not (Get-Command agent-browser -ErrorAction SilentlyContinue)) {
+  Write-Host 'agent-browser missing — npm install -g agent-browser'
+}
 ```
 
 All browser navigation, snapshot, and screenshot commands are defined in the agent-browser skill — refer to it for those operations.
@@ -33,12 +39,26 @@ Inspect the project to decide whether the URL can be auto-derived or must be req
 - `/var/www/html/myapp/` → `http://<host>/myapp/`
 - `/var/www/html/myapp/pages/users.php` → `http://<host>/myapp/pages/users.php`
 
-Replace `<host>` with the `WINDOWS_HOST` resolved in Step 2. A web server running in WSL (Apache/nginx/php -S) is not reachable via `localhost` from Windows Chrome — the WSL IP must be used.
+On native Windows use `127.0.0.1` unless the project declares another host. In WSL replace `<host>` with `WINDOWS_HOST` from Step 2.
 
 If a routing framework is detected (e.g., Laravel, Slim in `composer.json`), stop and ask the user for the URL:
 > "A routing framework was detected. Please provide the URL you want to open in the browser."
 
-## Step 2: Resolve Windows Host IP (WSL)
+## Step 2: Select the platform endpoint
+
+### Native Windows
+
+Use `http://127.0.0.1:9333` as the CDP endpoint. Chrome 136+ requires remote debugging to use a non-default user-data directory. Never use the user's default Chrome profile and do not launch Chrome automatically. If Chrome is not ready, report this exact safe setup command for the user to run:
+
+```powershell
+$chrome = "$env:ProgramFiles\Google\Chrome\Application\chrome.exe"
+$cdpProfile = Join-Path $env:LOCALAPPDATA 'claude-code-skills\chrome-cdp-profile'
+& $chrome --remote-debugging-port=9333 --user-data-dir="$cdpProfile"
+```
+
+Connect with `agent-browser connect http://127.0.0.1:9333`.
+
+### WSL
 
 Windows host IP is not fixed — resolve it at runtime:
 
@@ -54,22 +74,23 @@ If both return empty, ask the user to provide the Windows host IP directly.
 
 ## Step 3: Connect and Open
 
-With the host IP resolved:
+With the platform endpoint resolved:
 
-1. **Apply WINDOWS_HOST to the URL**: Replace the `<host>` placeholder from Step 1 with `${WINDOWS_HOST}`.
+1. **Apply the application host to the URL**: use `127.0.0.1` on native Windows or `${WINDOWS_HOST}` for a server running in WSL.
    - Example: `http://${WINDOWS_HOST}/myapp/pages/users.php`
 2. **Connect CDP and open the page** — follow the agent-browser skill:
-   - Connect: `agent-browser connect http://${WINDOWS_HOST}:9333`
-   - Open: `agent-browser open http://${WINDOWS_HOST}/<path>`
+   - Native Windows connect: `agent-browser connect http://127.0.0.1:9333`
+   - WSL connect: `agent-browser connect http://${WINDOWS_HOST}:9333`
+   - Open the application URL resolved in Step 1.
 3. Take a snapshot or screenshot to report the current state
 
 ## Error Handling
 
 **CDP connection fails**:
-Windows Chrome must be running with remote debugging enabled. Inform the user:
+Report whether Chrome and agent-browser were detected. Chrome must be running with remote debugging and a dedicated profile. Inform the user without launching or installing anything:
 ```
 Please launch Chrome with remote debugging enabled:
-  chrome.exe --remote-debugging-port=9333
+  chrome.exe --remote-debugging-port=9333 --user-data-dir=<dedicated-cdp-profile>
 ```
 
 **URL returns 404 / connection refused**:

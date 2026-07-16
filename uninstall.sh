@@ -18,6 +18,9 @@ NC='\033[0m'
 # --- 경로 설정 ---
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 HOOK_CONFIG_TOOL="$SCRIPT_DIR/hooks/workflow_hook_config.py"
+COMPONENT_CATALOG="$SCRIPT_DIR/components.json"
+CATALOG_TOOL="$SCRIPT_DIR/scripts/catalog.py"
+MANIFEST_TOOL="$SCRIPT_DIR/scripts/manifest.py"
 
 # 제거 범위 (ask_uninstall_scope에서 결정)
 UNINSTALL_SCOPE="global"    # "global" | "project"
@@ -28,35 +31,21 @@ CLAUDE_SKILLS_DIR="$HOME/.claude/skills"
 CLAUDE_AGENTS_DIR="$HOME/.claude/agents"
 CLAUDE_HOOKS_DIR="$HOME/.claude/hooks"
 CLAUDE_SETTINGS_FILE="$HOME/.claude/settings.json"
-CODEX_SKILLS_DIR="$HOME/.codex/skills/local"
+CODEX_SKILLS_DIR="$HOME/.agents/skills"
 CODEX_AGENTS_DIR="$HOME/.codex/agents"
 CODEX_HOOKS_DIR="$HOME/.codex/hooks"
 CODEX_HOOKS_FILE="$HOME/.codex/hooks.json"
 
 # 설치 소유권 추적 매니페스트 (set_manifest_path에서 스코프 기준으로 확정)
 MANIFEST_DIR="$HOME/.claude-code-skills"
-MANIFEST_FILE="$MANIFEST_DIR/manifest.tsv"
-MANIFEST_HEADER="#claude-code-skills-manifest v1"
+MANIFEST_FILE="$MANIFEST_DIR/manifest.json"
+LEGACY_MANIFEST_FILE="$MANIFEST_DIR/manifest.tsv"
 
 # 제거 대상 스킬 목록
-ALL_SKILLS=(
-    "use-context7"
-    "plan-and-build"
-    "systematic-debugging"
-    "web-security-review"
-    "web-parallel-dispatch"
-    "web-browser-preview"
-    "codex-delegate"
-    "code-quality-review"
-    "branch-merge-review"
-)
+ALL_SKILLS=()
 
 # 제거 대상 에이전트 목록
-ALL_AGENTS=(
-    "php-backend-developer"
-    "frontend-developer"
-    "security-auditor"
-)
+ALL_AGENTS=()
 
 # =============================================================================
 # 유틸 함수
@@ -105,7 +94,26 @@ ask_yn_default_no() {
 # 스코프(INSTALL_BASE_DIR) 기준으로 매니페스트 경로 확정
 set_manifest_path() {
     MANIFEST_DIR="$INSTALL_BASE_DIR/.claude-code-skills"
-    MANIFEST_FILE="$MANIFEST_DIR/manifest.tsv"
+    MANIFEST_FILE="$MANIFEST_DIR/manifest.json"
+    LEGACY_MANIFEST_FILE="$MANIFEST_DIR/manifest.tsv"
+    python3 "$MANIFEST_TOOL" import-v1 --manifest "$MANIFEST_FILE" \
+        --legacy "$LEGACY_MANIFEST_FILE" --scope "$UNINSTALL_SCOPE" 2>/dev/null || \
+        warn "v1 매니페스트를 읽을 수 없습니다: $LEGACY_MANIFEST_FILE"
+    mapfile -t ALL_SKILLS < <(catalog_names skill claude)
+    mapfile -t ALL_AGENTS < <(catalog_names agent claude)
+}
+
+catalog_names() {
+    python3 "$CATALOG_TOOL" "$COMPONENT_CATALOG" --kind "$1" --client "$2" --platform posix
+}
+
+manifest_hash() {
+    python3 "$MANIFEST_TOOL" lookup --manifest "$MANIFEST_FILE" --target "$1" 2>/dev/null | \
+        python3 -c 'import json,sys; print(json.load(sys.stdin).get("hash", "-"))' 2>/dev/null || true
+}
+
+manifest_has_entry() {
+    [[ -f "$MANIFEST_FILE" ]] && python3 "$MANIFEST_TOOL" lookup --manifest "$MANIFEST_FILE" --target "$1" >/dev/null 2>&1
 }
 
 # 파일/디렉터리 내용 지문(해시). 실패 시 "-". 항상 0 반환.
@@ -128,10 +136,8 @@ classify_ownership() {
     local target="$1" name="$2"
     if [[ ! -e "$target" && ! -L "$target" ]]; then echo "none"; return; fi
 
-    local mline=""
-    if [[ -f "$MANIFEST_FILE" ]]; then
-        mline="$(awk -F'\t' -v p="$target" '!/^#/ && $2==p {print; exit}' "$MANIFEST_FILE" 2>/dev/null || true)"
-    fi
+    local rec_hash=""
+    [[ -f "$MANIFEST_FILE" ]] && rec_hash="$(manifest_hash "$target")"
 
     if [[ -L "$target" ]]; then
         local dest; dest="$(readlink -f "$target" 2>/dev/null || true)"
@@ -145,9 +151,8 @@ classify_ownership() {
     fi
 
     # 실제 파일/디렉터리: 매니페스트는 힌트일 뿐 — 현재 내용 해시로 확증
-    if [[ -n "$mline" ]]; then
-        local rec_hash cur_hash
-        rec_hash="$(printf '%s' "$mline" | awk -F'\t' '{print $5}')"
+    if [[ -n "$rec_hash" ]]; then
+        local cur_hash
         cur_hash="$(content_hash "$target")"
         if [[ "$rec_hash" != "-" && "$rec_hash" == "$cur_hash" ]]; then echo "ours"; return; fi
         echo "legacy-unverified"; return
@@ -168,17 +173,7 @@ classify_ownership() {
 manifest_prune() {
     local abs="$1"
     [[ -f "$MANIFEST_FILE" ]] || return 0
-    local tmp; tmp="$(mktemp "${MANIFEST_DIR}/.manifest.XXXXXX" 2>/dev/null)" || return 0
-    {
-        printf '%s\n' "$MANIFEST_HEADER"
-        awk -F'\t' -v p="$abs" '!/^#/ && $2!=p' "$MANIFEST_FILE" 2>/dev/null || true
-    } > "$tmp" 2>/dev/null || { rm -f "$tmp"; return 0; }
-    mv "$tmp" "$MANIFEST_FILE" 2>/dev/null || { rm -f "$tmp"; return 0; }
-    # 비-헤더 라인이 하나도 없으면 매니페스트 정리 (grep -vq: 비주석 라인 존재 시 0)
-    if ! grep -vq '^#' "$MANIFEST_FILE" 2>/dev/null; then
-        rm -f "$MANIFEST_FILE" 2>/dev/null || true
-        rmdir "$MANIFEST_DIR" 2>/dev/null || true
-    fi
+    python3 "$MANIFEST_TOOL" prune --manifest "$MANIFEST_FILE" --target "$abs" 2>/dev/null || true
 }
 
 # =============================================================================
@@ -201,7 +196,7 @@ ask_uninstall_scope() {
                 CLAUDE_AGENTS_DIR="$HOME/.claude/agents"
                 CLAUDE_HOOKS_DIR="$HOME/.claude/hooks"
                 CLAUDE_SETTINGS_FILE="$HOME/.claude/settings.json"
-                CODEX_SKILLS_DIR="$HOME/.codex/skills/local"
+                CODEX_SKILLS_DIR="$HOME/.agents/skills"
                 CODEX_AGENTS_DIR="$HOME/.codex/agents"
                 CODEX_HOOKS_DIR="$HOME/.codex/hooks"
                 CODEX_HOOKS_FILE="$HOME/.codex/hooks.json"
@@ -227,7 +222,7 @@ ask_uninstall_scope() {
                 CLAUDE_AGENTS_DIR="$project_dir/.claude/agents"
                 CLAUDE_HOOKS_DIR="$project_dir/.claude/hooks"
                 CLAUDE_SETTINGS_FILE="$project_dir/.claude/settings.json"
-                CODEX_SKILLS_DIR="$project_dir/.codex/skills"
+                CODEX_SKILLS_DIR="$project_dir/.agents/skills"
                 CODEX_AGENTS_DIR="$project_dir/.codex/agents"
                 CODEX_HOOKS_DIR="$project_dir/.codex/hooks"
                 CODEX_HOOKS_FILE="$project_dir/.codex/hooks.json"
@@ -264,7 +259,8 @@ remove_skill() {
         local link_dest; link_dest="$(readlink "$target" 2>/dev/null || true)"
         if [[ "$own" == "legacy-unverified" ]]; then
             warn "${skill} 링크의 소유를 확증할 수 없습니다 (깨진 링크 등): ${target}"
-            if ! ask_yn_default_no "  링크를 제거할까요?"; then skip "${skill} 건너뜀"; return; fi
+            skip "미확인 링크를 보존합니다. 필요한 경우 수동으로 정리하세요."
+            return
         fi
         rm "$target"
         manifest_prune "$target"
@@ -276,15 +272,9 @@ remove_skill() {
             manifest_prune "$target"
             removed "${skill} 디렉토리 삭제"
         else
-            # legacy-unverified — 기본 N
+            # legacy-unverified — 항상 보존
             warn "${skill} 은 복사 방식으로 설치되어 있으나 이 저장소 소유로 확증할 수 없습니다: ${target}"
-            if ask_yn_default_no "  그래도 디렉토리를 삭제하시겠습니까?"; then
-                rm -rf "$target"
-                manifest_prune "$target"
-                removed "${skill} 디렉토리 삭제"
-            else
-                skip "${skill} 건너뜀"
-            fi
+            skip "미확인 디렉터리를 보존합니다. 필요한 경우 수동으로 정리하세요."
         fi
 
     else
@@ -320,7 +310,7 @@ remove_skill_set() {
         own="$(classify_ownership "$base_dir/$skill" "$skill" skill)"
         case "$own" in
             ours)              echo -e "    ${GREEN}[내 것]${NC}     $skill"; has_removable=true ;;
-            legacy-unverified) echo -e "    ${YELLOW}[미검증]${NC}    $skill (개별 확인, 기본 N)"; has_removable=true ;;
+            legacy-unverified) echo -e "    ${YELLOW}[미검증·보존]${NC} $skill (자동 제거하지 않음)" ;;
             foreign)           echo -e "    ${CYAN}[외부·보호]${NC} $skill (제거하지 않음)" ;;
             *)                 echo -e "    ${CYAN}[?]${NC}        $skill" ;;
         esac
@@ -353,24 +343,6 @@ remove_claude_skills() {
 }
 
 # =============================================================================
-# 섹션 1.5: agent-browser 스킬 제거 (install.sh가 전역 설치하는 외부 스킬)
-# =============================================================================
-
-remove_agent_browser() {
-    # install.sh는 전역 모드에서만 ~/.claude/skills/agent-browser 를 설치한다.
-    [[ "$UNINSTALL_SCOPE" == "global" ]] || return
-
-    local target="$CLAUDE_SKILLS_DIR/agent-browser"
-    [[ -L "$target" || -d "$target" ]] || return
-
-    section "agent-browser 스킬 제거 (${target})"
-    info "vercel-labs/agent-browser — install.sh가 web-browser-preview용으로 설치하는 외부 스킬입니다."
-    # remove_skill이 소유권을 판정한다: 이 스크립트가 설치한 내용과 해시가 일치하면(ours) 자동 제거,
-    # 그렇지 않으면(미검증/외부) 기본 N 확인 또는 보호. 안전검사(경계/자기경로)도 재사용한다.
-    remove_skill "agent-browser" "$CLAUDE_SKILLS_DIR"
-}
-
-# =============================================================================
 # 섹션 2: Codex 스킬 제거
 # =============================================================================
 
@@ -378,21 +350,12 @@ remove_codex_skills() {
     section "Codex 스킬 제거 (${CODEX_SKILLS_DIR})"
 
     if [[ ! -d "$CODEX_SKILLS_DIR" ]]; then
-        skip "~/.codex/skills/local/ 디렉토리 없음 — 건너뜁니다."
+        skip "Codex 스킬 디렉토리 없음 — 건너뜁니다: $CODEX_SKILLS_DIR"
         return
     fi
 
-    # install.sh의 Codex 설치 목록과 일치시켜야 함 (codex-delegate만 제외)
-    local codex_skills=(
-        "use-context7"
-        "plan-and-build"
-        "systematic-debugging"
-        "web-security-review"
-        "web-parallel-dispatch"
-        "code-quality-review"
-        "branch-merge-review"
-        "web-browser-preview"
-    )
+    local codex_skills=()
+    mapfile -t codex_skills < <(catalog_names skill codex)
 
     remove_skill_set "$CODEX_SKILLS_DIR" "Codex" "${codex_skills[@]}"
 }
@@ -407,6 +370,13 @@ remove_workflow_hook() {
     local settings_file="$3"
 
     section "개발 워크플로우 리마인더 훅 제거 (${client})"
+
+    local catalog_client="claude"
+    [[ "$client" == "Codex" ]] && catalog_client="codex"
+    if ! catalog_names hook "$catalog_client" | grep -qx 'workflow-reminder'; then
+        skip "카탈로그에서 ${client} POSIX 훅 지원을 찾을 수 없습니다."
+        return
+    fi
 
     local target="$hooks_dir/claude-code-skills-workflow.py"
     local configured=false
@@ -474,10 +444,21 @@ remove_workflow_hook() {
                 return 1
             fi
         fi
+
+        local target_ownership
+        target_ownership="$(classify_ownership "$target" "claude-code-skills-workflow.py" hook)"
+        if [[ "$target_ownership" != "ours" ]]; then
+            warn "훅 파일 소유를 확증할 수 없어 설정과 파일을 모두 보존합니다: $target"
+            return
+        fi
     fi
 
     if [[ ! -e "$target" && ! -L "$target" ]] && ! $configured && ! $config_invalid; then
         skip "개발 워크플로우 훅 없음 — 건너뜁니다."
+        return
+    fi
+    if [[ ! -e "$target" && ! -L "$target" ]] && $configured && ! manifest_has_entry "$target"; then
+        warn "매니페스트 소유 기록이 없어 훅 설정을 보존합니다: $settings_file"
         return
     fi
 
@@ -509,107 +490,10 @@ remove_workflow_hook() {
                 manifest_prune "$target"
                 removed "워크플로우 훅 파일 제거"
                 ;;
-            foreign)
-                warn "훅 파일이 이 저장소 소유가 아니므로 보존합니다: $target"
-                ;;
-            *)
-                warn "훅 파일 소유를 확증할 수 없습니다: $target"
-                if ask_yn_default_no "  그래도 파일을 제거할까요?"; then
-                    rm "$target"
-                    manifest_prune "$target"
-                    removed "워크플로우 훅 파일 제거"
-                else
-                    skip "워크플로우 훅 파일 보존"
-                fi
-                ;;
+            *) warn "훅 파일 소유를 확증할 수 없어 보존합니다: $target" ;;
         esac
     fi
     rmdir "$hooks_dir" 2>/dev/null || true
-}
-
-# =============================================================================
-# 섹션 4: context7 MCP 설정 제거
-# =============================================================================
-
-remove_context7_mcp() {
-    section "context7 MCP 설정 제거"
-
-    if [[ "$UNINSTALL_SCOPE" == "project" ]]; then
-        skip "프로젝트 제거 모드 — context7 MCP는 전역 설정입니다. 건너뜁니다."
-        return
-    fi
-
-    local settings_file="$HOME/.claude/settings.json"
-
-    if [[ ! -f "$settings_file" ]] || ! grep -q "context7" "$settings_file" 2>/dev/null; then
-        skip "context7 MCP 설정 없음 — 건너뜁니다."
-        return
-    fi
-
-    echo
-    if ! ask_yn "~/.claude/settings.json 에서 context7 MCP 설정을 제거하시겠습니까?"; then
-        skip "context7 MCP 설정 유지"
-        return
-    fi
-
-    python3 - "$settings_file" <<'PYEOF'
-import json, sys
-
-path = sys.argv[1]
-with open(path) as f:
-    data = json.load(f)
-
-removed = data.get("mcpServers", {}).pop("context7", None)
-if removed is None:
-    print("context7 항목을 찾을 수 없습니다.")
-    sys.exit(0)
-
-# mcpServers가 비면 키 자체를 제거
-if "mcpServers" in data and not data["mcpServers"]:
-    del data["mcpServers"]
-
-with open(path, "w") as f:
-    json.dump(data, f, indent=2, ensure_ascii=False)
-    f.write("\n")
-PYEOF
-    ok "context7 MCP 설정 제거 완료"
-}
-
-# =============================================================================
-# 섹션 4.5: Claude Code Codex 플러그인 제거
-# =============================================================================
-
-remove_codex_cc_plugin() {
-    section "Claude Code Codex 플러그인 제거"
-
-    local plugin="codex@openai-codex"
-
-    if [[ "$UNINSTALL_SCOPE" == "project" ]]; then
-        skip "프로젝트 제거 모드 — Codex 플러그인은 전역 설정입니다. 건너뜁니다."
-        return
-    fi
-
-    if ! command -v claude &>/dev/null; then
-        skip "claude CLI 없음 — Codex 플러그인 제거 건너뜁니다."
-        return
-    fi
-
-    if ! claude plugin list 2>/dev/null | grep -q "${plugin}"; then
-        skip "Codex 플러그인이 설치되어 있지 않습니다 (${plugin})."
-        return
-    fi
-
-    echo
-    if ! ask_yn "Claude Code에서 Codex 플러그인(${plugin})을 제거하시겠습니까?"; then
-        skip "Codex 플러그인 유지"
-        return
-    fi
-
-    if claude plugin uninstall "${plugin}"; then
-        removed "Codex 플러그인 제거 완료 (${plugin})"
-    else
-        warn "Codex 플러그인 제거 실패. 수동으로 제거하세요: claude plugin uninstall ${plugin}"
-    fi
 }
 
 # =============================================================================
@@ -630,7 +514,8 @@ remove_agent_file() {
     fi
     if [[ "$own" != "ours" ]]; then
         warn "${agent}.${label} 의 소유를 확증할 수 없습니다 (레거시/수정됨): ${f}"
-        if ! ask_yn_default_no "  그래도 제거할까요?"; then skip "${agent}.${label} 건너뜀"; return; fi
+        skip "미확인 에이전트를 보존합니다. 필요한 경우 수동으로 정리하세요."
+        return
     fi
     rm "$f"
     manifest_prune "$f"
@@ -640,9 +525,14 @@ remove_agent_file() {
 remove_agents() {
     section "에이전트 제거 (Claude + Codex)"
 
+    local claude_agent_names=()
+    local codex_agent_names=()
+    mapfile -t claude_agent_names < <(catalog_names agent claude)
+    mapfile -t codex_agent_names < <(catalog_names agent codex)
+
     # --- Claude 에이전트 ---
     local claude_installed=()
-    for agent in "${ALL_AGENTS[@]}"; do
+    for agent in "${claude_agent_names[@]}"; do
         local f="$CLAUDE_AGENTS_DIR/${agent}.md"
         [[ -L "$f" || -f "$f" ]] && claude_installed+=("$agent")
     done
@@ -674,7 +564,7 @@ remove_agents() {
     fi
 
     local codex_installed=()
-    for agent in "${ALL_AGENTS[@]}"; do
+    for agent in "${codex_agent_names[@]}"; do
         local f="$CODEX_AGENTS_DIR/${agent}.toml"
         [[ -L "$f" || -f "$f" ]] && codex_installed+=("$agent")
     done
@@ -711,18 +601,15 @@ main() {
     echo "╚══════════════════════════════════════════════════╝"
     echo -e "${NC}"
     info "프로그램·패키지(phpstan, codex 등)는 제거하지 않습니다."
-    info "스킬/훅/에이전트 링크·파일과 MCP 설정만 제거합니다."
+    info "이 저장소가 소유한 스킬/훅/에이전트 링크·파일만 제거합니다."
 
     ask_uninstall_scope
     set_manifest_path
     remove_claude_skills
     remove_workflow_hook "Claude Code" "$CLAUDE_HOOKS_DIR" "$CLAUDE_SETTINGS_FILE"
-    remove_agent_browser
     remove_codex_skills
     remove_workflow_hook "Codex" "$CODEX_HOOKS_DIR" "$CODEX_HOOKS_FILE"
     remove_agents
-    remove_context7_mcp
-    remove_codex_cc_plugin
 
     echo
     echo -e "${BOLD}${GREEN}══════════════════════════════════════════════════${NC}"

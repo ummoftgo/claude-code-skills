@@ -7,6 +7,10 @@ description: "Perform security review for PHP backend + vanilla JS/jQuery/Svelte
 
 Security review skill for PHP backend + vanilla JS / jQuery / Svelte / HTMX frontend stack.
 
+## Platform command selection
+
+Use `rg` for audit searches on both POSIX and Windows whenever available. If it is missing, use the documented `grep` expressions on POSIX and translate them to `Get-ChildItem -Recurse -Filter <pattern> | Select-String -Pattern <regex>` on Windows PowerShell. Do not require Bash for a Windows-native review.
+
 > **Read-only mode (priority rule).** If the user asked to review **without changing anything** ("수정하지 말고", "read-only", or a read-only sandbox), do not write to the workspace: **do not create the report file** under `.tasks/reports/` and **do not install** any tooling. Emit the full report **inline** in your response instead. Write files only when the user has not restricted writes.
 
 ## Reference Files

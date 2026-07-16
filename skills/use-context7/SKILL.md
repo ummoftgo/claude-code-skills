@@ -79,6 +79,8 @@ Do not batch into a single query — separate queries yield more focused results
 
 If Context7 MCP tools are not available, use the `ctx7` CLI:
 
+The `npx` commands work in both POSIX shells and PowerShell. In PowerShell, keep topics containing `$state` or other dollar-prefixed identifiers in single quotes so they are not expanded as variables.
+
 ```bash
 # Resolve library ID
 npx ctx7 library htmx

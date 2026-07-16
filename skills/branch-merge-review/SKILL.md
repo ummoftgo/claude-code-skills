@@ -7,6 +7,10 @@ description: "Review all changes between the current branch and main/master befo
 
 Review all diff changes against main/master using a 3-person parallel reviewer team. Produces a consolidated report with cross-validated findings.
 
+## Platform command selection
+
+Invoke installed skills by name (`code-quality-review`, `web-security-review`); never open them through a hard-coded `~/.claude/skills` path. Git commands work in Bash and PowerShell. For searches, prefer cross-platform `rg`; when it is unavailable use `grep` on POSIX or `Get-ChildItem -Recurse | Select-String` on Windows PowerShell. Translate the Bash collection block in Step 1 to PowerShell arrays and `ForEach-Object` when the active shell is PowerShell instead of requiring Git Bash.
+
 > **Read-only mode (priority rule).** Reviewers never modify code regardless. Additionally, if the user asked to review **without writing anything** ("수정하지 말고", "read-only", or a read-only sandbox), the team leader must **not create the consolidated report file** under `.tasks/reports/` — emit it **inline** instead — and must tell each spawned reviewer to run read-only (no tool installs, no report files). Write the file only when the user has not restricted writes.
 
 ---
@@ -78,6 +82,36 @@ if [ -z "$ALL_TOUCHED" ]; then
 fi
 ```
 
+Native Windows PowerShell equivalent (keeps the same branch-only scope and restores the caller's error preference):
+
+```powershell
+$previousErrorPreference = $ErrorActionPreference
+try {
+  $ErrorActionPreference = 'Stop'
+  $candidates = @('origin/main', 'origin/master', 'origin/develop', 'main', 'master', 'develop')
+  $baseRef = $null
+  foreach ($candidate in $candidates) {
+    git rev-parse --verify --quiet $candidate 2>$null
+    if ($LASTEXITCODE -eq 0) { $baseRef = $candidate; break }
+  }
+  if (-not $baseRef) { throw 'Could not detect base branch; ask the user to specify one.' }
+
+  $baseLabel = $baseRef -replace '^origin/', ''
+  $current = (git rev-parse --abbrev-ref HEAD).Trim()
+  $mergeBase = (git merge-base $baseRef HEAD).Trim()
+  $allTouched = @(git log "$baseRef..HEAD" --no-merges --name-only --format='' |
+    Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Sort-Object -Unique)
+  $changedQa = @($allTouched | ForEach-Object {
+    git diff --name-only --diff-filter=ACMR $mergeBase HEAD -- $_
+  } | Sort-Object -Unique)
+  $changedSec = @($allTouched | ForEach-Object {
+    git diff --name-only --diff-filter=ACMRD $mergeBase HEAD -- $_
+  } | Sort-Object -Unique)
+} finally {
+  $ErrorActionPreference = $previousErrorPreference
+}
+```
+
 **How the file list is determined**:
 - `git log "$BASE_REF"..HEAD --no-merges` collects only the developer's own commits — mid-branch merges from main are excluded, so files that changed only due to an upstream merge never enter the review scope.
 - `MERGE_BASE` is used solely as the diff base when generating patch content (current state vs. divergence point).
@@ -146,7 +180,7 @@ You are conducting a READ-ONLY code review. Your constraints are absolute:
 
 **Persona**: You are a senior PHP backend developer with 10 years of experience. You care deeply about maintainable, performant, well-structured PHP code.
 
-**Skill to use**: Load and follow `~/.claude/skills/code-quality-review/SKILL.md` and its reference file `references/php-quality.md`. Use only the audit/review steps — do not run the "Offer Fixes" step.
+**Skill to use**: Invoke `code-quality-review` by name and follow its `php-quality.md` reference. Use only the audit/review steps — do not run the "Offer Fixes" step.
 
 **Scope**: Backend files from Step 1 (PHP, composer.json, composer.lock).
 
@@ -159,7 +193,7 @@ You are a senior PHP backend developer (10 years experience) conducting a backen
 Workspace root: [absolute path to project root]
 Base branch: [BASE_LABEL]  Merge base: [MERGE_BASE]  Current branch: [CURRENT]
 
-Load and follow: ~/.claude/skills/code-quality-review/SKILL.md (php-quality.md reference).
+Invoke and follow: `code-quality-review` (php-quality.md reference).
 Use only Steps 1–4 (detect stack → run CLI tools → manual review → report).
 Skip Step 5 (Offer Fixes) — this is a read-only review.
 
@@ -189,7 +223,7 @@ Return a structured quality report following the code-quality-review report form
 
 **Persona**: You are a web application security expert specializing in OWASP Top 10 vulnerabilities, with deep knowledge of PHP backend and JavaScript frontend attack surfaces.
 
-**Skill to use**: Load and follow `~/.claude/skills/web-security-review/SKILL.md` and both its reference files (`references/php-backend-security.md`, `references/web-frontend-security.md`). Use only the audit steps — do not run "Offer to Fix".
+**Skill to use**: Invoke `web-security-review` by name and follow both reference files (`references/php-backend-security.md`, `references/web-frontend-security.md`). Use only the audit steps — do not run "Offer to Fix".
 
 **Scope**: ALL changed files including deleted (Backend + Frontend + Style + Config + Deleted).
 
@@ -202,7 +236,7 @@ You are a web application security expert (OWASP Top 10 specialist) conducting a
 Workspace root: [absolute path to project root]
 Base branch: [BASE_LABEL]  Merge base: [MERGE_BASE]  Current branch: [CURRENT]
 
-Load and follow: ~/.claude/skills/web-security-review/SKILL.md (both reference files).
+Invoke and follow: `web-security-review` (both reference files).
 Use only the audit/review steps. Skip the "Offer to Fix" step — this is a read-only review.
 
 Your scope — review ALL of these changed files (including deleted):
@@ -232,7 +266,7 @@ Include file:line references and evidence snippets (max 3 lines; mask any secret
 
 **Persona**: You are a senior frontend developer specializing in Svelte, jQuery, and HTMX with 8 years of experience building complex interactive UIs.
 
-**Skill to use**: Load and follow `~/.claude/skills/code-quality-review/SKILL.md` and its reference files `references/js-quality.md` (especially Section 7 on Svelte lifecycle) and `references/css-quality.md`. Use only the audit/review steps — do not run "Offer Fixes".
+**Skill to use**: Invoke `code-quality-review` by name and follow `references/js-quality.md` (especially Section 7 on Svelte lifecycle) and `references/css-quality.md`. Use only the audit/review steps — do not run "Offer Fixes".
 
 **Scope**: Frontend + Style files from Step 1 (JS, TS, Svelte, HTML, CSS, SCSS, SASS).
 
@@ -245,7 +279,7 @@ You are a senior frontend developer (Svelte / jQuery / HTMX specialist, 8 years 
 Workspace root: [absolute path to project root]
 Base branch: [BASE_LABEL]  Merge base: [MERGE_BASE]  Current branch: [CURRENT]
 
-Load and follow: ~/.claude/skills/code-quality-review/SKILL.md (js-quality.md and css-quality.md references).
+Invoke and follow: `code-quality-review` (js-quality.md and css-quality.md references).
 Use only Steps 1–4 (detect stack → run CLI tools → manual review → report).
 Skip Step 5 (Offer Fixes) — this is a read-only review.
 
@@ -348,6 +382,28 @@ grep -rn "\.subscribe(" --include="*.svelte" <implicated_files>
 
 # CSS issues
 grep -rn "!important" --include="*.css" --include="*.scss" <implicated_files>
+```
+
+On native Windows, cross-validate only the implicated files with `rg` or this PowerShell fallback; do not scan the whole repository:
+
+```powershell
+$implicatedFiles = @('path\to\flagged-file.php', 'src\Flagged.svelte')
+$patternFamilies = [ordered]@{
+  SqlInjection = @('query\s*\(\s*["''].*\$', '\.\s*\$_(?:GET|POST|REQUEST|COOKIE)')
+  Xss = @('echo\s+\$_(?:GET|POST|REQUEST|COOKIE|SERVER)', 'innerHTML\s*=', '\.html\(', '\.append\(', '\.prepend\(', '\{@html')
+  Csrf = @('\$_POST\[') # manually confirm that no CSRF validation protects the endpoint
+  Session = @('session_start', 'session_regenerate_id')
+  Upload = @('move_uploaded_file', '\$_FILES')
+  Secrets = @('password\s*=\s*["''][^"'']{3,}', 'api_key', 'secret_key', 'access_token')
+  BrowserStorage = @('localStorage', 'sessionStorage')
+  BackendQuality = @('foreach', 'for\s*\(', 'query', 'prepare', 'execute', 'for.*count\(', 'SELECT\s+\*')
+  FrontendQuality = @('\.subscribe\(', '!important')
+}
+$files = Get-ChildItem -LiteralPath $implicatedFiles -File -ErrorAction SilentlyContinue
+foreach ($family in $patternFamilies.GetEnumerator()) {
+  $files | Select-String -Pattern $family.Value -CaseSensitive:$false |
+    ForEach-Object { '[{0}] {1}:{2}: {3}' -f $family.Key, $_.Path, $_.LineNumber, $_.Line.Trim() }
+}
 ```
 
 **4c. Mark each Critical/High finding**:

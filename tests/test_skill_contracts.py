@@ -29,10 +29,28 @@ class SkillContractTest(unittest.TestCase):
         self.assertIn("Add regression protection", skill)
 
     def test_systematic_debugging_is_registered_for_install_and_uninstall(self) -> None:
+        catalog = self.read("components.json")
         install = self.read("install.sh")
         uninstall = self.read("uninstall.sh")
-        self.assertGreaterEqual(install.count('"systematic-debugging"'), 2)
-        self.assertGreaterEqual(uninstall.count('"systematic-debugging"'), 2)
+        self.assertIn('"name": "systematic-debugging"', catalog)
+        self.assertIn("catalog_names skill claude", install)
+        self.assertIn("catalog_names skill codex", install)
+        self.assertIn("catalog_names skill claude", uninstall)
+        self.assertIn("catalog_names skill codex", uninstall)
+
+    def test_windows_supported_complex_skills_include_concrete_powershell(self) -> None:
+        branch_review = self.read("skills/branch-merge-review/SKILL.md")
+        codex_delegate = self.read("skills/codex-delegate/SKILL.md")
+        for expected in (
+            "```powershell", "try {", "finally {", "Select-String",
+            "SqlInjection", "Csrf", "Secrets", "BackendQuality",
+        ):
+            self.assertIn(expected, branch_review)
+        for expected in (
+            "```powershell", "$env:TEMP", "Start-Process", "Wait-Process",
+            "try {", "finally {", "[version]$numericPrefix",
+        ):
+            self.assertIn(expected, codex_delegate)
 
 
 if __name__ == "__main__":

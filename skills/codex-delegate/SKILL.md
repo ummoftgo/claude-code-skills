@@ -13,6 +13,8 @@ Before anything else, decide how Codex will be invoked. If OpenAI's official Cla
 
 Detect the plugin (marketplace `openai-codex`, plugin `codex`):
 
+Choose the detection command for the active platform. Do not require Git Bash on native Windows.
+
 ```bash
 # Prints "plugin" if the official Codex plugin is installed, otherwise "cli".
 # Cheap filesystem check (a few stats) — NOT a readiness probe. Do NOT run
@@ -27,6 +29,20 @@ else
   echo cli
 fi
 ```
+
+```powershell
+# Native Windows PowerShell equivalent.
+$pluginBase = Join-Path $env:USERPROFILE '.claude\plugins\cache\openai-codex\codex'
+$pluginRoot = Get-ChildItem -LiteralPath $pluginBase -Directory -ErrorAction SilentlyContinue |
+  Sort-Object @{ Expression = {
+    $numericPrefix = [regex]::Match($_.Name, '^\d+(?:\.\d+){1,3}').Value
+    if ($numericPrefix) { [version]$numericPrefix } else { [version]'0.0' }
+  } }, Name | Select-Object -Last 1
+$companion = if ($pluginRoot) { Join-Path $pluginRoot.FullName 'scripts\codex-companion.mjs' } else { $null }
+if ($companion -and (Test-Path -LiteralPath $companion -PathType Leaf)) { 'plugin' } else { 'cli' }
+```
+
+All `node` and `codex` foreground invocations below work in PowerShell too. Bash-only subshells, traps, `$!`, background `&`, and `/tmp` paths must be replaced with PowerShell `try/finally`, `Start-Job` or `Start-Process`, and files under `$env:TEMP`. Preserve the same read-only/write sandbox flags and restoration guarantees.
 
 **Fallback policy** — only the *absence* of the plugin sends you to the CLI path:
 
@@ -135,6 +151,22 @@ Create one file per agent when dispatching parallel sub-agents.
 > )                                                    # trap restores orig_ref here
 > ```
 >
+> Native Windows PowerShell equivalent (foreground only, with unconditional HEAD restoration):
+>
+> ```powershell
+> git status --short --untracked-files=all
+> $originalRef = (git symbolic-ref --quiet --short HEAD 2>$null)
+> if (-not $originalRef) { $originalRef = (git rev-parse --verify HEAD).Trim() }
+> try {
+>   git checkout --detach <sha>
+>   if ($LASTEXITCODE -ne 0) { throw 'Could not detach onto the requested commit.' }
+>   node $companion review --wait --base '<sha>^'
+>   if ($LASTEXITCODE -ne 0) { throw 'Codex review failed.' }
+> } finally {
+>   git checkout --quiet $originalRef
+> }
+> ```
+>
 > Two reasons this must run with `--wait` (foreground): (1) the trap restores `HEAD` only *after* the review returns, and (2) the companion `review` runs foreground regardless of any `--background` flag (see the recipe note above) — so there is no safe way to background it here. Capturing `orig_ref` via `symbolic-ref || rev-parse HEAD` also keeps the restore correct even if you started from an already-detached HEAD (where `git branch --show-current` would be empty).
 
 **If only the CLI is available**, dispatch 4 Codex CLI sub-agents in parallel — 2 for code quality, 2 for security.
@@ -207,6 +239,33 @@ PID2=$!
 
 # Wait for all background jobs to complete (preferred over polling)
 wait $PID1 $PID2
+```
+
+Native Windows PowerShell 5.1 equivalent — keep context and result files under `$env:TEMP`, start every reviewer before waiting, and always clean up temporary files:
+
+```powershell
+$runDirectory = Join-Path $env:TEMP ('codex-delegate-' + [guid]::NewGuid().ToString('N'))
+New-Item -ItemType Directory -Path $runDirectory | Out-Null
+$processes = @()
+try {
+  $tasks = @(
+    @{ Name = 'quality'; Prompt = '코드 품질 검토. Context: .agent-works/QUALITY.md' },
+    @{ Name = 'security'; Prompt = '보안 검토. Context: .agent-works/SECURITY.md' }
+  )
+  foreach ($task in $tasks) {
+    $result = Join-Path $runDirectory ($task.Name + '.txt')
+    $stderr = Join-Path $runDirectory ($task.Name + '.stderr.txt')
+    $arguments = @('-a', 'never', 'exec', '-s', 'read-only', '-o', ('"' + $result + '"'), ('"' + $task.Prompt + '"')) -join ' '
+    $processes += Start-Process -FilePath 'codex' -ArgumentList $arguments -PassThru -RedirectStandardError $stderr
+  }
+  $processes | Wait-Process
+  foreach ($process in $processes) {
+    if ($process.ExitCode -ne 0) { Write-Warning "Codex reviewer failed with exit code $($process.ExitCode)." }
+  }
+  Get-ChildItem -LiteralPath $runDirectory -Filter '*.txt' -File | Get-Content
+} finally {
+  Remove-Item -LiteralPath $runDirectory -Recurse -Force -ErrorAction SilentlyContinue
+}
 ```
 
 > **Key rules**:

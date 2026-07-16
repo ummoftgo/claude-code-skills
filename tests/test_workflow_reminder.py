@@ -1,4 +1,5 @@
 import json
+import shutil
 import subprocess
 import sys
 import unittest
@@ -7,6 +8,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 HOOK = ROOT / "hooks" / "workflow-reminder.py"
+POWERSHELL_HOOK = ROOT / "hooks" / "workflow-reminder.ps1"
 
 
 def run_hook(
@@ -112,6 +114,33 @@ class WorkflowReminderTest(unittest.TestCase):
                 result = run_hook("", raw_input=raw_input)
                 self.assertEqual(result.returncode, 0, result.stderr)
                 self.assertEqual(result.stdout, "")
+
+    def test_powershell_hook_matches_python_fixtures_when_available(self) -> None:
+        executable = shutil.which("pwsh") or shutil.which("powershell.exe")
+        if executable is None:
+            self.skipTest("PowerShell runtime is not available in this environment")
+
+        fixtures = (
+            {"user_prompt": "새 사용자 인증 기능을 구현해줘"},
+            {"prompt": "Review the existing implementation without changing code."},
+            {"user_prompt": "버튼 문구의 오타 한 글자만 수정해줘"},
+        )
+        for fixture in fixtures:
+            with self.subTest(fixture=fixture):
+                payload = json.dumps(fixture, ensure_ascii=False)
+                python_result = subprocess.run(
+                    [sys.executable, str(HOOK)], input=payload, text=True,
+                    capture_output=True, check=False,
+                )
+                powershell_result = subprocess.run(
+                    [executable, "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(POWERSHELL_HOOK)],
+                    input=payload, text=True, capture_output=True, check=False,
+                )
+                self.assertEqual(powershell_result.returncode, 0, powershell_result.stderr)
+                self.assertEqual(
+                    json.loads(powershell_result.stdout) if powershell_result.stdout else None,
+                    json.loads(python_result.stdout) if python_result.stdout else None,
+                )
 
 
 if __name__ == "__main__":

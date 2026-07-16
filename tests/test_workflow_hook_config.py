@@ -435,6 +435,66 @@ setup_workflow_hook "Claude Code" {hooks_dir} {settings} claude-hook
         self.assertFalse((hooks_dir / "claude-code-skills-workflow.py").exists())
         self.assertFalse((self.root / ".claude-code-skills" / "manifest.tsv").exists())
 
+    def test_install_script_rolls_back_hook_and_settings_on_manifest_failure(self) -> None:
+        hooks_dir = self.root / ".claude" / "hooks"
+        settings = self.root / ".claude" / "settings.json"
+        settings.parent.mkdir(parents=True)
+        original = json.dumps({"keep": {"value": True}}, indent=2) + "\n"
+        settings.write_text(original, encoding="utf-8")
+
+        command = f"""
+source {ROOT / 'install.sh'}
+INSTALL_BASE_DIR={self.root}
+HOOKS_DIR={ROOT / 'hooks'}
+HOOK_CONFIG_TOOL={ROOT / 'hooks' / 'workflow_hook_config.py'}
+set_manifest_path
+ask_yn() {{ return 0; }}
+manifest_record_required() {{ return 1; }}
+setup_workflow_hook "Claude Code" {hooks_dir} {settings} claude-hook
+"""
+        result = subprocess.run(
+            ["bash", "-c", command], text=True, capture_output=True, check=False
+        )
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertFalse((hooks_dir / "claude-code-skills-workflow.py").exists())
+        self.assertEqual(settings.read_text(encoding="utf-8"), original)
+
+    def test_manifest_rollback_preserves_snapshot_when_settings_restore_fails(self) -> None:
+        hooks_dir = self.root / ".claude" / "hooks"
+        settings = self.root / ".claude" / "settings.json"
+        temporary = self.root / "tmp"
+        settings.parent.mkdir(parents=True)
+        temporary.mkdir()
+        settings.write_text('{"keep": true}\n', encoding="utf-8")
+
+        command = f"""
+source {ROOT / 'install.sh'}
+INSTALL_BASE_DIR={self.root}
+HOOKS_DIR={ROOT / 'hooks'}
+HOOK_CONFIG_TOOL={ROOT / 'hooks' / 'workflow_hook_config.py'}
+TMPDIR={temporary}
+set_manifest_path
+ask_yn() {{ return 0; }}
+manifest_record_required() {{ return 1; }}
+cp() {{
+    if [[ "$2" == "$TMPDIR"/workflow-settings.*/settings ]]; then
+        return 1
+    fi
+    command cp "$@"
+}}
+set +e
+setup_workflow_hook "Claude Code" {hooks_dir} {settings} claude-hook
+set -e
+find "$TMPDIR" -path '*/workflow-settings.*/settings' -type f | grep -q .
+"""
+        result = subprocess.run(
+            ["bash", "-c", command], text=True, capture_output=True, check=False
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+        self.assertIn("스냅샷을 보존합니다", result.stdout)
+
     def test_shell_install_uninstall_round_trip_preserves_foreign_hook(self) -> None:
         hooks_dir = self.root / ".codex" / "hooks"
         settings = self.root / ".codex" / "hooks.json"
@@ -527,12 +587,12 @@ setup_workflow_hook "Codex" {hooks_dir} {settings} codex-hook {config}
         )
 
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("비활성화", result.stdout)
+        self.assertIn("자동 변경하지 않습니다", result.stdout)
         self.assertIn("hooks = false", config.read_text(encoding="utf-8"))
         self.assertFalse((hooks_dir / "claude-code-skills-workflow.py").exists())
         self.assertFalse(settings.exists())
 
-    def test_codex_install_enables_hooks_when_user_accepts(self) -> None:
+    def test_posix_codex_install_never_changes_disabled_hooks(self) -> None:
         hooks_dir = self.root / ".codex" / "hooks"
         settings = self.root / ".codex" / "hooks.json"
         config = self.root / ".codex" / "config.toml"
@@ -557,10 +617,10 @@ setup_workflow_hook "Codex" {hooks_dir} {settings} codex-hook {config}
         )
 
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("Codex 훅 기능을 활성화했습니다", result.stdout)
-        self.assertIn("hooks = true", config.read_text(encoding="utf-8"))
-        self.assertTrue((hooks_dir / "claude-code-skills-workflow.py").exists())
-        self.assertTrue(settings.exists())
+        self.assertIn("자동 변경하지 않습니다", result.stdout)
+        self.assertIn("hooks = false", config.read_text(encoding="utf-8"))
+        self.assertFalse((hooks_dir / "claude-code-skills-workflow.py").exists())
+        self.assertFalse(settings.exists())
 
     def test_project_codex_install_inherits_user_disabled_hooks(self) -> None:
         project_root = self.root / "project"
@@ -594,7 +654,7 @@ setup_workflow_hook "Codex" {hooks_dir} {settings} codex-hook {project_config} {
         self.assertFalse((hooks_dir / "claude-code-skills-workflow.py").exists())
         self.assertFalse(settings.exists())
 
-    def test_project_codex_install_enables_project_override_when_accepted(self) -> None:
+    def test_posix_project_codex_install_preserves_inherited_disabled_hooks(self) -> None:
         project_root = self.root / "project"
         project_root.mkdir()
         hooks_dir = project_root / ".codex" / "hooks"
@@ -624,8 +684,8 @@ setup_workflow_hook "Codex" {hooks_dir} {settings} codex-hook {project_config} {
 
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(user_config.read_text(encoding="utf-8"), user_original)
-        self.assertIn("hooks = true", project_config.read_text(encoding="utf-8"))
-        self.assertTrue((hooks_dir / "claude-code-skills-workflow.py").exists())
+        self.assertFalse(project_config.exists())
+        self.assertFalse((hooks_dir / "claude-code-skills-workflow.py").exists())
 
     def test_install_defaults_to_skip_for_outside_scope_hook_directory(self) -> None:
         project_root = self.root / "project"
