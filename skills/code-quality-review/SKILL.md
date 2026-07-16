@@ -123,9 +123,17 @@ Tools don't catch evaluation order. Flag manually:
 
 See reference files for language-specific examples.
 
+### Documented Intent — Downgrade Rule
+
+Before finalizing any finding, check the flagged line and its enclosing function for a comment that explicitly acknowledges the behavior as intentional (states the why — e.g., `// 의도적 중복: A/B 테스트 종료 후 제거 예정`, `// full fetch 필요: 후속 배치에서 전체 row 사용`). If such a comment exists, **downgrade the finding to Informational**, keep it in the report, and cite the comment (mark it `문서화된 의도`).
+
+**Exception — never downgrade** findings that imply data corruption or silent data loss, race/idempotency defects with irreversible effects, or any security risk (injection, XSS, CSRF, SSRF, path traversal, secrets exposure, auth bypass, RCE/unsafe deserialization), regardless of comments. Note the comment's existence but keep the original severity.
+
+The comment must address the specific flagged behavior; a generic nearby comment does not qualify. Intentional-looking behavior without a comment is reported at normal severity with a recommendation to add an explanatory comment.
+
 ## Step 4: Produce Report
 
-**Language**: Write the report in the same language the user used when requesting the review. If the user wrote in Korean, write the report in Korean. If in English, write in English.
+**Language**: Write the report in the same language the user used when requesting the review. If the user wrote in Korean, write the report in Korean. If in English, write in English. **When running as a subagent** (e.g., dispatched by branch-merge-review), the invoking prompt's `OUTPUT LANGUAGE` directive takes precedence over the prompt's own language — an English dispatch prompt does NOT mean the report should be in English. Keep code identifiers, file paths, and evidence snippets as-is; write all prose in the designated language.
 
 Save the report to: `.tasks/reports/{yyyy-mm-dd}-{hh-mm}-{slug}-quality.md` **(skip this in read-only mode — emit the report inline instead).**
 

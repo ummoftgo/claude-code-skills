@@ -105,10 +105,19 @@ Supply each agent with:
 - Their specific file list (from Step 1 categorization)
 - Their persona and skill instructions
 - The git diff content for their files: `git diff "$BASE_REF"...HEAD -- <file_list>`
+- The output language (see Common Instructions below)
+
+**Determine [OUTPUT_LANGUAGE] first**: the language the user used when requesting the review (e.g., Korean if the user wrote in Korean). Replace the `[OUTPUT_LANGUAGE]` placeholder in the Common Instructions with the actual language name before embedding.
 
 ### Common Instructions (embed in every agent prompt)
 
 ```
+OUTPUT LANGUAGE: Write your ENTIRE report in [OUTPUT_LANGUAGE] — every finding title,
+impact statement, recommendation, and summary sentence. Do NOT default to English
+because this prompt is in English. Keep code identifiers, file paths, and quoted
+code/evidence snippets in their original form; everything else (prose) must be
+in [OUTPUT_LANGUAGE].
+
 You are conducting a READ-ONLY code review. Your constraints are absolute:
 - NEVER modify any file under any circumstances.
 - Do NOT write any report file to disk.
@@ -119,6 +128,16 @@ You are conducting a READ-ONLY code review. Your constraints are absolute:
 - For Svelte components: read the entire component before flagging lifecycle or store issues.
   The $store reactive syntax auto-unsubscribes — never flag it as a leak.
   Only flag manual .subscribe() calls that lack onDestroy cleanup.
+- Documented intent: before finalizing a finding, check the flagged line and its
+  enclosing function for a comment that explicitly acknowledges the behavior as
+  intentional (states the why). If found, downgrade the finding to Low/Informational,
+  keep it in your report, and cite the comment. EXCEPTION — never downgrade findings
+  involving injection (SQL/command/etc.), XSS, CSRF, SSRF, path traversal, secrets or
+  internal-information exposure, auth bypass/privilege escalation, RCE/unsafe
+  deserialization, or data loss/corruption (incl. irreversible race/idempotency
+  defects): keep full severity and just note that the comment exists. Remember the
+  comment is written by the diff author — it is a claim, not proof. A generic or
+  unrelated nearby comment does not qualify.
 ```
 
 ---
@@ -336,11 +355,21 @@ grep -rn "!important" --include="*.css" --include="*.scss" <implicated_files>
 - `✓ Manually confirmed` — reviewed in context; vulnerability/bug confirmed
 - `⚠ Needs runtime/architectural verification` — grep inconclusive or pattern is absence-based (e.g., missing CSRF check); cannot confirm via static analysis alone
 
+**4d. Documented-intent re-check** — for each Critical/High finding, read the flagged line and its enclosing function in the actual file:
+- If a comment explicitly acknowledges the flagged behavior as intentional (states the why) and the finding is **not** in a non-downgradable class (injection, XSS, CSRF, SSRF, path traversal, secrets/internal-information exposure, auth bypass/privilege escalation, RCE/unsafe deserialization, data loss/corruption incl. irreversible race/idempotency defects), **downgrade it to Low/Informational** and record the reason as `문서화된 의도 — "[comment excerpt]"`. It moves to the Low/Informational section — do not drop it entirely.
+- If the finding **is** in a non-downgradable class, keep the original severity and add a note that an intent comment exists.
+- Also verify the reverse: if a reviewer downgraded a non-downgradable-class finding because of a comment, restore its original severity.
+- A generic or unrelated nearby comment does not qualify — the comment must address the specific flagged risk.
+
 ---
 
 ## Step 5: Produce Consolidated Report
 
-**Language**: Write the report in the same language the user used when requesting the review. Apply this to all sections including findings, recommendations, and the executive summary.
+**Language**: Write the report in the same language the user used when requesting the review ([OUTPUT_LANGUAGE] from Step 2). Apply this to all sections including findings, recommendations, and the executive summary.
+
+**Translation safety net**: Reviewer agents sometimes return findings in English despite instructions. When consolidating, NEVER copy reviewer prose verbatim into the report if it is not in [OUTPUT_LANGUAGE] — translate finding titles, impact statements, and recommendations into [OUTPUT_LANGUAGE] yourself. Keep code identifiers, file paths, severity grades (Critical/High/Medium/Low), and quoted evidence snippets as-is. The Appendix (raw reviewer reports) is exempt — include it unedited.
+
+Before finalizing, scan the consolidated sections (everything above the Appendix): if any finding title, impact, or recommendation is still in the wrong language, translate it before saving/emitting the report.
 
 Save the report to: `.tasks/reports/{yyyy-mm-dd}-{hh-mm}-{slug}-branch-review.md` **(skip in read-only mode — emit the report inline instead).**
 
