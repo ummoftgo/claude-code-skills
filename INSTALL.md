@@ -187,3 +187,17 @@ bash uninstall.sh
 ### 수정한 스킬이 제거되지 않음
 
 정상적인 보호 동작입니다. 제거기는 설치 당시 해시와 달라진 복사본을 삭제하지 않습니다. 필요한 내용을 백업한 뒤 수동 정리하세요.
+
+### 기존 Codex 스킬이 이전되지 않음
+
+새 `.agents/skills` 대상 충돌, 매니페스트 유실, 내용 변경, 외부 링크 중 하나일 수 있습니다. 설치기 경고를 확인하고 두 위치를 수동 비교하세요.
+
+### 훅 설치 중 JSON/TOML 오류
+
+잘못된 기존 설정은 덮어쓰지 않습니다. 설치기는 훅 파일과 설정 변경을 원복합니다. 기존 파일을 유효한 JSON/TOML로 고친 뒤 다시 실행하세요.
+
+### Windows 훅이 보이지 않음
+
+새 Codex 세션을 시작한 뒤 `/hooks`에서 신뢰 상태를 확인하세요. Claude는 처음 디렉터리가 생성된 설치였다면 Desktop을 한 번 재시작하세요.
+
+공식 참고: [Codex skills](https://learn.chatgpt.com/docs/build-skills), [Codex hooks](https://learn.chatgpt.com/docs/hooks), [Codex Windows](https://developers.openai.com/codex/app/windows), [Claude hooks](https://code.claude.com/docs/en/hooks), [Claude Desktop](https://code.claude.com/docs/en/desktop), [Chrome remote debugging](https://developer.chrome.com/blog/remote-debugging-port).
