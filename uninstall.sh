@@ -463,7 +463,7 @@ remove_workflow_hook() {
     fi
 
     echo
-    if ! ask_yn "${client}의 plan-and-build UserPromptSubmit 훅을 제거하시겠습니까?"; then
+    if ! ask_yn "${client}의 개발 워크플로우 UserPromptSubmit 리마인더 훅을 제거하시겠습니까?"; then
         skip "${client} 개발 워크플로우 훅 유지"
         return
     fi

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Safe Checkpoint"
+  short_description: "Create scoped commits and resumable handoffs safely"
+  default_prompt: "Use $safe-checkpoint to checkpoint only the intended changes and leave a verified handoff."

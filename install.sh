@@ -453,8 +453,8 @@ setup_workflow_hook() {
     local codex_base_config_file="${6:-}"
 
     section "개발 워크플로우 리마인더 훅 (${client})"
-    info "새 프로젝트·기능 구현 요청에서 plan-and-build 스킬을 가볍게 상기시킵니다."
-    info "작은 수정, 리뷰, 설명 요청에는 동작하지 않습니다."
+    info "구현 계획, 명시적 읽기 전용 검토, 안전 체크포인트 요청에 맞는 스킬을 상기시킵니다."
+    info "안내만 제공하며 명령이나 Git 작업은 실행하지 않습니다."
 
     if ! command -v python3 &>/dev/null; then
         warn "python3가 없어 워크플로우 훅을 설치할 수 없습니다."
@@ -462,7 +462,7 @@ setup_workflow_hook() {
     fi
 
     echo
-    if ! ask_yn "${client}에 plan-and-build UserPromptSubmit 훅을 설치하시겠습니까?"; then
+    if ! ask_yn "${client}에 개발 워크플로우 UserPromptSubmit 리마인더 훅을 설치하시겠습니까?"; then
         skip "${client} 개발 워크플로우 훅 건너뜀"
         return
     fi

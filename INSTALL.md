@@ -10,6 +10,26 @@
 
 Windows 설치기는 WSL 경로를 대상으로 하지 않습니다. WSL 모드를 쓰는 앱에는 배포판 내부 설치기를 별도로 실행하세요.
 
+설치 대상은 [`components.json`](./components.json)이 단일 기준입니다. POSIX와 Windows 설치기·제거기는 이 카탈로그에서 각 클라이언트와 플랫폼이 지원하는 컴포넌트를 읽습니다.
+
+### 공용 스킬과 트리거
+
+| 스킬 | Claude | Codex | 대표 요청 |
+|---|:---:|:---:|---|
+| `use-context7` | ✓ | ✓ | “Svelte 5 컴포넌트 만들어줘” |
+| `plan-and-build` | ✓ | ✓ | “새 인증 기능을 구현해줘” |
+| `evidence-first-review` | ✓ | ✓ | “컨텍스트 문서부터 읽고 수정 없이 재검토해줘” |
+| `safe-checkpoint` | ✓ | ✓ | “해당 변경만 커밋하고 내일 재개할 인수인계를 남겨줘” |
+| `systematic-debugging` | ✓ | ✓ | “원인이 불명확한 오류를 분석하고 고쳐줘” |
+| `web-security-review` | ✓ | ✓ | “보안 검토해줘” |
+| `web-parallel-dispatch` | ✓ | ✓ | “API 계약대로 백엔드와 프론트엔드를 병렬 구현해줘” |
+| `code-quality-review` | ✓ | ✓ | “코드 품질 검토해줘” |
+| `branch-merge-review` | ✓ | ✓ | “머지 전에 브랜치 리뷰해줘” |
+| `web-browser-preview` | ✓ | ✓ | “브라우저에서 확인해줘” |
+| `codex-delegate` | ✓ | — | “Codex에게 검토를 위임해줘” |
+
+`evidence-first-review`는 명시적인 읽기 전용 검토, 이전 지적 재검토, 최종 승인 검토에 사용합니다. 일반적인 최초 PR·브랜치 머지 검토는 `branch-merge-review`가 담당합니다.
+
 ## 2. Windows 네이티브 설치
 
 PowerShell 5.1 이상에서 저장소 루트로 이동합니다.
@@ -74,6 +94,14 @@ Codex `config.toml`에서 훅이 비활성화되어 있으면 Bash 설치기는 
 
 ## 4. 훅 설정
 
+개발 워크플로우 리마인더 훅은 `UserPromptSubmit`에서 요청을 분류하고 필요한 안내만 하나의 `additionalContext`에 실행 순서대로 결합합니다.
+
+- 큰 구현 요청: `plan-and-build`
+- 명시적인 읽기 전용·무수정 검토: `evidence-first-review`
+- 선택적 커밋·체크포인트·인수인계·재개: `safe-checkpoint`
+
+명시적인 무수정 제약은 구현 관련 단어가 있어도 `plan-and-build`를 억제합니다. 평범한 코드·보안·브랜치 리뷰, 체크포인트나 인수인계의 의미를 묻는 설명 요청, 단순한 퇴근 인사에는 동작하지 않습니다. 훅은 안내만 제공하며 명령, 파일 변경, staging, commit, push를 실행하지 않습니다. malformed JSON이나 지원하지 않는 입력도 프롬프트 처리를 막지 않습니다.
+
 ### Claude Desktop Code
 
 Windows 훅은 `workflow-reminder.ps1`을 복사하고 다음 exec 형태를 `UserPromptSubmit`에 병합합니다.
@@ -89,11 +117,15 @@ Windows 훅은 `workflow-reminder.ps1`을 복사하고 다음 exec 형태를 `Us
 
 다른 이벤트와 외부 훅은 유지됩니다. 기존 `skills`/`agents` 디렉터리가 없어서 새로 만든 경우에만 Claude Desktop 재시작 안내가 표시됩니다.
 
+POSIX 설치에서는 같은 역할의 `workflow-reminder.py`를 복사하고 기존 `settings.json`을 보존하면서 `UserPromptSubmit` 항목을 병합합니다.
+
 ### Codex
 
 Windows 훅 항목에는 필수 `command`와 Windows 전용 `commandWindows`가 모두 들어갑니다. 같은 `config.toml`에 인라인 훅이 있으면 기본적으로 건너뜁니다. `[features] hooks = false` 또는 이전 `codex_hooks = false`가 적용되면 활성화할지 별도로 확인합니다.
 
 설치기가 활성화 값을 바꾼 경우 매니페스트에 이전 키/값과 설치 후 값을 기록합니다. 제거기는 현재 값이 여전히 설치 후 값일 때만 이전 `false` 상태를 복원합니다. 사용자가 이후 값을 변경했다면 그대로 둡니다.
+
+POSIX 설치기는 `config.toml`을 자동 변경하지 않습니다. 같은 설정 계층에 인라인 훅이 있거나 훅 기능이 비활성화되어 있으면 이유와 수동 조치만 안내합니다.
 
 설치 후 새 Codex 세션에서 다음을 수행합니다.
 
@@ -138,31 +170,20 @@ bash uninstall.sh
 - 새 세션에서 `/skills`를 열어 선택한 스킬이 보이는지 확인
 - `~/.codex/agents` 또는 프로젝트 `.codex/agents`의 에이전트가 인식되는지 확인
 - 전역 설치라면 `/hooks`에서 훅을 검토하고 신뢰 승인
-- 큰 구현 프롬프트에는 계획 리마인더가 나오고 리뷰/설명/작은 수정에는 조용한지 확인
+- 큰 구현 프롬프트에서 `plan-and-build` 안내 확인
+- “수정 없이 재검토” 요청에서 `evidence-first-review` 안내 확인
+- “해당 변경만 커밋” 또는 인수인계 요청에서 `safe-checkpoint` 안내 확인
+- 평범한 리뷰·설명·작은 수정·단순 퇴근 인사에는 조용한지 확인
 
 ### Claude Desktop Code
 
 - Code 탭에서 스킬 목록 확인
 - 설치한 에이전트 선택/호출 확인
-- 큰 구현 프롬프트에서 훅 리마인더 확인
-- 기존 외부 훅과 settings.json의 다른 키가 유지되는지 확인
+- 위 세 종류의 워크플로우 리마인더와 무응답 사례 확인
+- 기존 외부 훅과 `settings.json`의 다른 키가 유지되는지 확인
 
 ## 8. 문제 해결
 
 ### 수정한 스킬이 제거되지 않음
 
 정상적인 보호 동작입니다. 제거기는 설치 당시 해시와 달라진 복사본을 삭제하지 않습니다. 필요한 내용을 백업한 뒤 수동 정리하세요.
-
-### 기존 Codex 스킬이 이전되지 않음
-
-새 `.agents/skills` 대상 충돌, 매니페스트 유실, 내용 변경, 외부 링크 중 하나일 수 있습니다. 설치기 경고를 확인하고 두 위치를 수동 비교하세요.
-
-### 훅 설치 중 JSON/TOML 오류
-
-잘못된 기존 설정은 덮어쓰지 않습니다. 설치기는 훅 파일과 설정 변경을 원복합니다. 기존 파일을 유효한 JSON/TOML로 고친 뒤 다시 실행하세요.
-
-### Windows 훅이 보이지 않음
-
-새 Codex 세션을 시작한 뒤 `/hooks`에서 신뢰 상태를 확인하세요. Claude는 처음 디렉터리가 생성된 설치였다면 Desktop을 한 번 재시작하세요.
-
-공식 참고: [Codex skills](https://learn.chatgpt.com/docs/build-skills), [Codex hooks](https://learn.chatgpt.com/docs/hooks), [Codex Windows](https://developers.openai.com/codex/app/windows), [Claude hooks](https://code.claude.com/docs/en/hooks), [Claude Desktop](https://code.claude.com/docs/en/desktop), [Chrome remote debugging](https://developer.chrome.com/blog/remote-debugging-port).

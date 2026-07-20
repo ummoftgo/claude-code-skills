@@ -1,0 +1,4 @@
+interface:
+  display_name: "Evidence-First Review"
+  short_description: "Read-only reviews grounded in current evidence"
+  default_prompt: "Use $evidence-first-review to verify this review against current code and source data."

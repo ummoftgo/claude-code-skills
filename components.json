@@ -15,6 +15,18 @@
     },
     {
       "kind": "skill",
+      "name": "evidence-first-review",
+      "source": "skills/evidence-first-review",
+      "support": {"claude": {"posix": true, "windows": true}, "codex": {"posix": true, "windows": true}}
+    },
+    {
+      "kind": "skill",
+      "name": "safe-checkpoint",
+      "source": "skills/safe-checkpoint",
+      "support": {"claude": {"posix": true, "windows": true}, "codex": {"posix": true, "windows": true}}
+    },
+    {
+      "kind": "skill",
       "name": "systematic-debugging",
       "source": "skills/systematic-debugging",
       "support": {"claude": {"posix": true, "windows": true}, "codex": {"posix": true, "windows": true}}

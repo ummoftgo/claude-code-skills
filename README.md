@@ -72,6 +72,8 @@ Windows 프로젝트 범위는 스킬과 에이전트만 설치합니다. Window
 |---|:---:|:---:|---|
 | `use-context7` | ✓ | ✓ | 외부 라이브러리 코드 전 최신 문서 조회 |
 | `plan-and-build` | ✓ | ✓ | 기능 사양·계획·TDD·병렬화 판단 |
+| `evidence-first-review` | ✓ | ✓ | 컨텍스트와 현재 코드·원본 데이터에 근거한 읽기 전용 검토 |
+| `safe-checkpoint` | ✓ | ✓ | 요청 범위와 쓰기 권한을 확인하는 커밋·인수인계 체크포인트 |
 | `systematic-debugging` | ✓ | ✓ | 재현과 증거 기반 디버깅 |
 | `web-security-review` | ✓ | ✓ | PHP/프론트엔드 보안 검토 |
 | `web-parallel-dispatch` | ✓ | ✓ | 승인 기반 병렬 구현 분할 |
@@ -79,6 +81,18 @@ Windows 프로젝트 범위는 스킬과 에이전트만 설치합니다. Window
 | `branch-merge-review` | ✓ | ✓ | 머지 전 다중 리뷰 |
 | `web-browser-preview` | ✓ | ✓ | Windows/WSL Chrome CDP 미리보기 |
 | `codex-delegate` | ✓ | — | Claude에서 Codex로 위임 |
+
+### 트리거 예시
+
+| 요청 예시 | 스킬 |
+|---|---|
+| “새 인증 기능을 구현해줘” | `plan-and-build` |
+| “컨텍스트 문서부터 읽고 수정 없이 이전 지적을 재검토해줘” | `evidence-first-review` |
+| “해당 변경만 커밋하고 내일 재개할 인수인계를 남겨줘” | `safe-checkpoint` |
+| “원인이 불명확한 오류를 분석하고 고쳐줘” | `systematic-debugging` |
+| “머지 전에 브랜치 리뷰해줘” | `branch-merge-review` |
+
+일반적인 최초 PR·브랜치 머지 검토는 `branch-merge-review`가 담당합니다. `evidence-first-review`는 명시적인 무수정 검토, 이전 지적 재검토, 최종 승인 검토처럼 현재 파일과 원본 증거를 독립 검증하는 요청에 사용합니다.
 
 ### 에이전트
 
@@ -90,7 +104,13 @@ Windows 프로젝트 범위는 스킬과 에이전트만 설치합니다. Window
 
 ## 훅과 재시작
 
-워크플로우 훅은 큰 구현 요청에서 `plan-and-build`를 상기시키며 오류가 나도 프롬프트를 차단하지 않습니다.
+개발 워크플로우 리마인더 훅은 요청에 따라 다음 안내를 실행 순서대로 결합하며, 오류가 나도 프롬프트를 차단하지 않습니다.
+
+- 큰 구현 요청: `plan-and-build`
+- 명시적인 읽기 전용·무수정 검토: `evidence-first-review`
+- 선택적 커밋·체크포인트·인수인계·재개: `safe-checkpoint`
+
+명시적인 무수정 제약이 있으면 구현 관련 단어가 포함되어도 `plan-and-build`를 억제합니다. 평범한 코드·보안·브랜치 리뷰, 체크포인트에 관한 설명 요청, 단순한 퇴근 인사에는 동작하지 않습니다. 훅은 안내만 제공하며 명령, 파일 변경, staging, commit, push를 실행하지 않습니다.
 
 - Claude: Windows에서는 `powershell.exe`와 `args`를 사용하는 exec 훅으로 등록합니다. 처음으로 `skills` 또는 `agents` 디렉터리를 만든 경우에만 Claude Desktop을 한 번 재시작하라는 안내가 표시됩니다.
 - Codex: `command`와 `commandWindows`를 함께 등록합니다. 새 Codex 세션을 시작하고 `/hooks`에서 경로와 내용을 검토한 뒤 신뢰를 승인해야 합니다.
