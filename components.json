@@ -63,6 +63,12 @@
     },
     {
       "kind": "skill",
+      "name": "report-output",
+      "source": "skills/report-output",
+      "support": {"claude": {"posix": true, "windows": true}, "codex": {"posix": true, "windows": true}}
+    },
+    {
+      "kind": "skill",
       "name": "codex-delegate",
       "source": "skills/codex-delegate",
       "support": {"claude": {"posix": true, "windows": true}, "codex": {"posix": false, "windows": false}}

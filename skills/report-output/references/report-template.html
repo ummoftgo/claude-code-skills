@@ -1,0 +1,330 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- script-src는 아래 인라인 스크립트의 SHA-256 해시로 고정 — 스크립트를 수정하면 반드시 재계산 (SKILL.md Step 3B) -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'sha256-adF/FWrDQ8/y01he6jrRB6a2m1XVnzqKK84OyAtTlFo='; img-src data:; form-action 'none'; base-uri 'none'">
+<title>{{REPORT_TITLE}}</title>
+<style>
+  :root {
+    --bg: #f6f7f9; --surface: #ffffff; --text: #1a202c; --text-dim: #5a6472;
+    --border: #dde2e8; --accent: #2563eb; --accent-tint: #eff4ff;
+    --code-bg: #f0f2f5; --shadow: 0 1px 3px rgba(0,0,0,.08);
+    /* 전경/tint 쌍은 WCAG AA 4.5:1 이상으로 검증됨 — 색을 바꾸면 대비를 재계산할 것 */
+    --sev-critical: #b91c1c; --sev-critical-tint: #fee9e9;
+    --sev-high: #96430a;     --sev-high-tint: #fdeedd;
+    --sev-medium: #7c4d06;   --sev-medium-tint: #fdf4d7;
+    --sev-low: #33518f;      --sev-low-tint: #e8eefb;
+    --ok: #116232; --ok-tint: #e3f4e8;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #14171c; --surface: #1d222a; --text: #e6e9ee; --text-dim: #9aa4b2;
+      --border: #323a45; --accent: #7ba3f7; --accent-tint: #1e2940;
+      --code-bg: #161a20; --shadow: 0 1px 3px rgba(0,0,0,.4);
+      --sev-critical: #f28b8b; --sev-critical-tint: #3a2022;
+      --sev-high: #f0a868;     --sev-high-tint: #392a1c;
+      --sev-medium: #e2c664;   --sev-medium-tint: #35301a;
+      --sev-low: #93b0e8;      --sev-low-tint: #1f2940;
+      --ok: #7fce9a; --ok-tint: #1c3324;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 16px/1.65 system-ui, -apple-system, 'Segoe UI', 'Malgun Gothic', sans-serif;
+  }
+  main { max-width: 60rem; margin: 0 auto; padding: 1.5rem 1.25rem 4rem; }
+  h1 { font-size: 1.6rem; margin: .2rem 0; }
+  h2 { font-size: 1.2rem; margin: 2.2rem 0 .8rem; padding-top: .5rem; }
+  a { color: var(--accent); }
+  code, pre { font-family: ui-monospace, 'Cascadia Code', Consolas, monospace; font-size: .875em; }
+  code { background: var(--code-bg); padding: .1em .35em; border-radius: 4px; }
+  pre { background: var(--code-bg); border: 1px solid var(--border); border-radius: 8px;
+        padding: .8rem 1rem; overflow-x: auto; }
+  pre code { background: none; padding: 0; }
+  table { border-collapse: collapse; width: 100%; }
+  .table-wrap { overflow-x: auto; }
+  th, td { border: 1px solid var(--border); padding: .45rem .7rem; text-align: left; }
+  th { background: var(--code-bg); }
+
+  header.report { border-bottom: 2px solid var(--border); padding-bottom: 1rem; }
+  .meta-line { color: var(--text-dim); font-size: .9rem; display: flex; flex-wrap: wrap; gap: .4rem 1.2rem; }
+  .badges { display: flex; flex-wrap: wrap; gap: .4rem; margin-top: .7rem; }
+  .badge { font-size: .78rem; font-weight: 600; padding: .15rem .6rem; border-radius: 999px; }
+  .b-critical { color: var(--sev-critical); background: var(--sev-critical-tint); }
+  .b-high     { color: var(--sev-high);     background: var(--sev-high-tint); }
+  .b-medium   { color: var(--sev-medium);   background: var(--sev-medium-tint); }
+  .b-low      { color: var(--sev-low);      background: var(--sev-low-tint); }
+  .b-ok       { color: var(--ok);           background: var(--ok-tint); }
+
+  .summary { background: var(--accent-tint); border: 1px solid var(--accent);
+             border-radius: 10px; padding: 1rem 1.2rem; margin: 1.4rem 0; }
+  .summary strong:first-child { display: block; margin-bottom: .3rem; }
+
+  nav.toc { background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+            padding: .8rem 1.2rem; box-shadow: var(--shadow); font-size: .92rem; }
+  nav.toc ol { margin: .3rem 0 0; padding-left: 1.2rem; }
+
+  .finding { background: var(--surface); border: 1px solid var(--border);
+             border-left: 4px solid var(--border); border-radius: 8px;
+             padding: .9rem 1.1rem; margin: .9rem 0; box-shadow: var(--shadow); }
+  .finding h3 { margin: 0 0 .5rem; font-size: 1.02rem; display: flex; align-items: center; gap: .55rem; flex-wrap: wrap; }
+  .finding dl { margin: 0; display: grid; grid-template-columns: max-content 1fr; gap: .3rem .9rem; }
+  .finding dt { color: var(--text-dim); font-size: .85rem; font-weight: 600; }
+  .finding dd { margin: 0; min-width: 0; }
+  .f-critical { border-left-color: var(--sev-critical); }
+  .f-high     { border-left-color: var(--sev-high); }
+  .f-medium   { border-left-color: var(--sev-medium); }
+  .f-low      { border-left-color: var(--sev-low); }
+  .hidden { display: none; }
+
+  .filters { display: flex; gap: .4rem; flex-wrap: wrap; margin: .8rem 0; }
+  .filters button, .copy-md {
+    font: inherit; font-size: .85rem; cursor: pointer; border-radius: 8px;
+    border: 1px solid var(--border); background: var(--surface); color: var(--text);
+    padding: .3rem .8rem;
+  }
+  .filters button[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); background: var(--accent-tint); }
+  .copy-md { border-color: var(--accent); color: var(--accent); }
+
+  details { border: 1px solid var(--border); border-radius: 8px; padding: .6rem 1rem; margin: .8rem 0; background: var(--surface); }
+  summary { cursor: pointer; font-weight: 600; }
+  figure { margin: 1.2rem 0; text-align: center; }
+  figure svg { max-width: 100%; height: auto; color: var(--text); }
+  figcaption { color: var(--text-dim); font-size: .85rem; margin-top: .4rem; }
+  footer.report { margin-top: 3rem; padding-top: 1rem; border-top: 1px solid var(--border);
+                  color: var(--text-dim); font-size: .85rem; }
+  dialog.md-dialog { background: var(--surface); color: var(--text); border: 1px solid var(--border);
+                     border-radius: 10px; padding: 1rem; width: min(44rem, calc(100vw - 2rem)); }
+  dialog.md-dialog::backdrop { background: rgba(0,0,0,.45); }
+  .md-copy-panel textarea { width: 100%; height: 16rem; font-family: ui-monospace, Consolas, monospace;
+                            font-size: .85rem; background: var(--code-bg); color: var(--text);
+                            border: 1px solid var(--border); border-radius: 8px; padding: .6rem;
+                            resize: vertical; margin: .6rem 0; }
+  .md-inline { margin: .8rem 0; padding: .8rem 1rem; background: var(--surface);
+               border: 1px solid var(--border); border-radius: 10px; flex-basis: 100%; }
+  @media (max-width: 640px) { .finding dl { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<main>
+  <header class="report">
+    <h1>{{REPORT_TITLE}}</h1>
+    <div class="meta-line">
+      <span>생성: {{DATE_TIME}}</span>
+      <span>범위: {{SCOPE}}</span>
+      <span>출처: {{SOURCES}}</span>
+    </div>
+    <div class="badges">
+      <!-- 심각도별 건수 배지: 해당 없는 등급은 삭제 -->
+      <span class="badge b-critical">Critical {{N}}</span>
+      <span class="badge b-high">High {{N}}</span>
+      <span class="badge b-medium">Medium {{N}}</span>
+      <span class="badge b-low">Low {{N}}</span>
+      <span class="badge b-ok">통과 {{N}}</span>
+    </div>
+  </header>
+
+  <section class="summary" id="summary">
+    <strong>요약</strong>
+    {{2~4문장: 무엇을 검토/분석했고, 핵심 결과가 무엇이며, 권장 조치는 무엇인지.
+      여기까지만 읽어도 결론을 알 수 있어야 한다.}}
+  </section>
+
+  <nav class="toc" aria-label="목차">
+    <strong>목차</strong>
+    <ol>
+      <li><a href="#findings">발견 사항</a></li>
+      <li><a href="#detail">상세 분석</a></li>
+      <li><a href="#appendix">부록: 원본 데이터</a></li>
+    </ol>
+  </nav>
+
+  <h2 id="findings">발견 사항</h2>
+  <div class="filters" role="group" aria-label="심각도 필터">
+    <button data-sev="all" aria-pressed="true">전체</button>
+    <button data-sev="critical" aria-pressed="false">Critical</button>
+    <button data-sev="high" aria-pressed="false">High</button>
+    <button data-sev="medium" aria-pressed="false">Medium</button>
+    <button data-sev="low" aria-pressed="false">Low</button>
+    <button class="copy-md" id="copy-md" type="button">Markdown으로 복사</button>
+  </div>
+
+  <!-- 발견 사항 카드: data-sev와 f-{sev} 클래스, 배지 텍스트를 함께 유지(색상만으로 전달 금지) -->
+  <article class="finding f-high" data-sev="high">
+    <h3><span class="badge b-high">High</span> {{발견 사항 제목 한 줄}}</h3>
+    <dl>
+      <dt>위치</dt><dd><code>{{path/to/file.php:42}}</code></dd>
+      <dt>증거</dt><dd><pre><code>{{≤3줄, HTML 이스케이프(& < >) + 시크릿 마스킹 필수}}</code></pre></dd>
+      <dt>영향</dt><dd>{{무엇이 잘못될 수 있는지 한 문장}}</dd>
+      <dt>권장</dt><dd>{{구체적 방향}}</dd>
+    </dl>
+  </article>
+
+  <h2 id="detail">상세 분석</h2>
+  <p>{{중요도 순으로 서술. 다이어그램이 내용 이해를 돕는다면 인라인 SVG(figure + figcaption) 사용.
+     30줄 초과 코드는 details로 접기.}}</p>
+
+  <h2 id="appendix">부록: 원본 데이터</h2>
+  <details>
+    <summary>{{원본 도구/에이전트 출력 이름}}</summary>
+    <pre><code>{{원본 — HTML 이스케이프(& < >), 시크릿·PII 마스킹, bidi/비가시 제어문자 치환(\u202E 표기)은 필수. 그 외에는 무편집}}</code></pre>
+  </details>
+
+  <footer class="report">
+    <!-- {{GENERATOR}}: 실제 실행 클라이언트를 기록 (예: Claude Code, Codex). 확인 불가 시 클라이언트명 생략 -->
+    Generated by {{GENERATOR}} · report-output skill · {{DATE_TIME}}
+  </footer>
+</main>
+
+<script>
+(function () {
+  'use strict';
+  // 심각도 필터
+  var buttons = document.querySelectorAll('.filters button[data-sev]');
+  buttons.forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      buttons.forEach(function (b) { b.setAttribute('aria-pressed', String(b === btn)); });
+      var sev = btn.dataset.sev;
+      document.querySelectorAll('.finding').forEach(function (card) {
+        card.classList.toggle('hidden', sev !== 'all' && card.dataset.sev !== sev);
+      });
+    });
+  });
+
+  // ---- Markdown 직렬화 (에이전트 재투입용 폐루프) ----
+  // 코드/diff(<pre>)는 줄바꿈·들여쓰기를 보존한 fenced block으로 감싸고,
+  // 산문 필드는 공백 축약 + Markdown 제어문자 이스케이프를 적용한다.
+  // 이스케이프가 없으면 HTML에서 안전하게 표시되던 텍스트(<img ...>, <!--, [링크] 등)가
+  // 복사본에서 다시 raw HTML/Markdown으로 활성화된다.
+  function escapeMd(text) {
+    return text
+      .replace(/[\\`*_\[\]<>|!&#~]/g, '\\$&')
+      // GFM 자동 링크 무력화: bare URL·www.·이메일이 복사본에서 클릭 가능한 링크로 되살아나지 않게 한다
+      .replace(/:\/\//g, '\\://')
+      .replace(/(www)\./gi, '$1\\.')
+      .replace(/@/g, '\\@');
+  }
+  function fenceFor(text) {
+    var runs = text.match(/`{3,}/g);
+    var len = 3;
+    if (runs) runs.forEach(function (r) { if (r.length >= len) len = r.length + 1; });
+    return new Array(len + 1).join('`');
+  }
+  function proseText(node) { return escapeMd(node.textContent.replace(/\s+/g, ' ').trim()); }
+  function serializeField(label, dd, lines) {
+    var pre = dd.querySelector('pre');
+    if (pre) {
+      // 증거 노드는 <pre> 안의 단일 <code> — 그 textContent의 모든 문자(선두 개행·말미
+      // 공백·EOF 개행 포함)가 증거이며 바이트 단위로 보존한다. <pre> 직속의 서식 개행이나
+      // 줄번호 gutter는 증거가 아니므로 <code>만 직렬화한다. 구조가 예상과 다르면
+      // 조용히 추측하지 않고 경고를 남긴 채 <pre> 전체로 폴백한다.
+      var codes = pre.querySelectorAll('code');
+      var structureWarning = null;
+      var code;
+      if (codes.length === 1) {
+        code = codes[0].textContent;
+      } else {
+        structureWarning = '(경고: 증거 구조 비정상 — pre 안의 code 노드 ' + codes.length + '개, pre 전체를 직렬화함)';
+        code = pre.textContent;
+      }
+      // CommonMark fenced block은 EOF 개행을 항상 1개로 재파싱한다(0개·2개 이상을 표현할 수 없다).
+      // 무손실을 위해 말미 개행 run을 분리하고, 개수가 1이 아닐 때만 fence 밖에 명시한다.
+      var trail = (code.match(/\n*$/) || [''])[0].length;
+      var body = trail ? code.slice(0, code.length - trail) : code;
+      var fence = fenceFor(body);
+      lines.push('- **' + escapeMd(label) + '**:', '');
+      if (structureWarning) lines.push(structureWarning, '');
+      lines.push(fence, body, fence);
+      if (trail !== 1) lines.push('(EOF 개행 ' + trail + '개)');
+      lines.push('');
+    } else {
+      lines.push('- **' + escapeMd(label) + '**: ' + proseText(dd));
+    }
+  }
+  function buildMarkdown() {
+    var lines = ['# ' + escapeMd(document.title.trim()), ''];
+    var summary = document.getElementById('summary');
+    if (summary) lines.push('## 요약', proseText(summary), '');
+    var findings = document.querySelectorAll('.finding');
+    if (findings.length) lines.push('## 발견 사항', '');
+    findings.forEach(function (card) {
+      var h = card.querySelector('h3');
+      lines.push('### ' + (h ? proseText(h) : '(제목 없음)'));
+      card.querySelectorAll('dl > dt').forEach(function (dt) {
+        var dd = dt.nextElementSibling;
+        if (dd) serializeField(dt.textContent.trim(), dd, lines);
+      });
+      lines.push('');
+    });
+    return lines.join('\n');
+  }
+
+  // 클립보드 실패 폴백: 네이티브 <dialog>.showModal() — 포커스 트랩·aria-modal·Escape 닫기를
+  // 브라우저가 제공하고, 닫힐 때 호출 버튼으로 포커스를 복원한다.
+  function showFallback(md, returnFocusTo) {
+    var panel = document.createElement('div');
+    panel.className = 'md-copy-panel';
+    var p = document.createElement('label');
+    p.htmlFor = 'md-copy-text';
+    p.textContent = '클립보드 접근이 차단되었습니다. 아래 내용을 직접 복사하세요.';
+    var ta = document.createElement('textarea');
+    ta.id = 'md-copy-text';
+    ta.value = md;
+    ta.readOnly = true;
+    var close = document.createElement('button');
+    close.type = 'button';
+    close.className = 'copy-md';
+    close.textContent = '닫기 (Esc)';
+    panel.appendChild(p); panel.appendChild(ta); panel.appendChild(close);
+
+    function restoreFocus() { if (returnFocusTo) returnFocusTo.focus(); }
+
+    if (typeof HTMLDialogElement === 'function') {
+      var dlg = document.createElement('dialog');
+      dlg.className = 'md-dialog';
+      dlg.setAttribute('aria-label', 'Markdown 수동 복사');
+      dlg.appendChild(panel);
+      close.addEventListener('click', function () { dlg.close(); });
+      dlg.addEventListener('click', function (e) { if (e.target === dlg) dlg.close(); });
+      dlg.addEventListener('close', function () { dlg.remove(); restoreFocus(); });
+      document.body.appendChild(dlg);
+      dlg.showModal();
+      ta.focus(); ta.select();
+    } else {
+      // <dialog> 미지원 구형 브라우저: 모달 대신 복사 버튼 아래 인라인 영역으로 표시.
+      // 인라인 콘텐츠이므로 포커스 트랩이 필요 없다.
+      var region = document.createElement('div');
+      region.className = 'md-inline';
+      region.setAttribute('role', 'region');
+      region.setAttribute('aria-label', 'Markdown 수동 복사');
+      region.appendChild(panel);
+      close.addEventListener('click', function () { region.remove(); restoreFocus(); });
+      returnFocusTo.insertAdjacentElement('afterend', region);
+      ta.focus(); ta.select();
+    }
+  }
+
+  var copyBtn = document.getElementById('copy-md');
+  if (copyBtn) copyBtn.addEventListener('click', function () {
+    var md = buildMarkdown();
+    var btn = this;
+    function flash(text) {
+      btn.textContent = text;
+      setTimeout(function () { btn.textContent = 'Markdown으로 복사'; }, 2000);
+    }
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(md).then(
+        function () { flash('복사됨 ✓'); },
+        function () { showFallback(md, btn); }
+      );
+    } else {
+      showFallback(md, btn);
+    }
+  });
+})();
+</script>
+</body>
+</html>

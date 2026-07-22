@@ -80,6 +80,7 @@ Windows 프로젝트 범위는 스킬과 에이전트만 설치합니다. Window
 | `code-quality-review` | ✓ | ✓ | 코드 품질·성능 검토 |
 | `branch-merge-review` | ✓ | ✓ | 머지 전 다중 리뷰 |
 | `web-browser-preview` | ✓ | ✓ | Windows/WSL Chrome CDP 미리보기 |
+| `report-output` | ✓ | ✓ | 리포트 출력 시 md/HTML 포맷 선택과 자체 완결형 HTML 리포트 생성 |
 | `codex-delegate` | ✓ | — | Claude에서 Codex로 위임 |
 
 ### 트리거 예시
@@ -91,6 +92,7 @@ Windows 프로젝트 범위는 스킬과 에이전트만 설치합니다. Window
 | “해당 변경만 커밋하고 내일 재개할 인수인계를 남겨줘” | `safe-checkpoint` |
 | “원인이 불명확한 오류를 분석하고 고쳐줘” | `systematic-debugging` |
 | “머지 전에 브랜치 리뷰해줘” | `branch-merge-review` |
+| “분석 결과를 리포트로 출력해줘” | `report-output` |
 
 일반적인 최초 PR·브랜치 머지 검토는 `branch-merge-review`가 담당합니다. `evidence-first-review`는 명시적인 무수정 검토, 이전 지적 재검토, 최종 승인 검토처럼 현재 파일과 원본 증거를 독립 검증하는 요청에 사용합니다.
 
