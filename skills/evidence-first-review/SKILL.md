@@ -1,6 +1,6 @@
 ---
 name: evidence-first-review
-description: "Perform evidence-grounded read-only reviews that lock user-supplied context and scope before independently verifying current designs, code, diffs, files, raw JSON/CSV/database data, and runtime results. Use for context-first design/code/data reviews, explicit no-change audits, rechecks of prior findings, second or final reviews, final approval decisions, and direct inspection of non-Git directories. Do not use for an ordinary first-time PR or branch merge review; use branch-merge-review instead."
+description: "Perform evidence-grounded read-only reviews that lock the user's context and scope, then independently verify current designs, code, diffs, files, raw JSON/CSV/database data, and runtime results. Work mode decides before scope: use this skill whenever the request is a recheck of prior findings, a second or final review, a final approval or sign-off decision, evidence-first verification of specific claims, or direct inspection of raw data or a non-Git directory — including when the scope is a PR, branch, or merge diff ('이 PR의 이전 지적을 재검토하고 최종 승인해줘'), because branch-merge-review has no recheck or approval mode. Only for an ordinary first-time review does scope decide: a PR, branch, or merge diff belongs to branch-merge-review. A read-only or no-changes constraint selects neither skill; it only constrains how the selected one runs, so '수정하지 말고 브랜치 리뷰해줘' runs branch-merge-review read-only."
 ---
 
 # Evidence-First Review
@@ -19,7 +19,7 @@ Before evaluating claims:
 
 Do not let a context document prove its own claims. Verify it independently against the current code, diff, source data, configuration, or runtime behavior.
 
-For an ordinary initial PR or branch merge review, stop and use `branch-merge-review`. Use this skill when evidence-first, explicit read-only, historical-finding, raw-data, non-Git, or approval-oriented behavior is central to the request.
+Work mode decides before scope. When the request is a `recheck` of prior findings, a `final-approval` verdict, or evidence-first verification of specific claims, raw data, or a non-Git directory, use this skill even if the scope is a PR, branch, or merge diff: `branch-merge-review` has no such mode and would return newly discovered findings instead of the per-finding statuses and approval verdict the user asked for. Only when the mode is `initial` does scope decide — then an ordinary first-time PR or branch merge review belongs to `branch-merge-review`, so stop and use it. A read-only or no-changes constraint changes neither axis; it only constrains how the selected skill runs, so '수정하지 말고 브랜치 리뷰해줘' is a first-time branch-scoped review that runs `branch-merge-review` read-only.
 
 ## 2. Select one review mode
 

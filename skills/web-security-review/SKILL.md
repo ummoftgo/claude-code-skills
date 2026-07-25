@@ -1,6 +1,6 @@
 ---
 name: web-security-review
-description: "Perform security review for PHP backend + vanilla JS/jQuery/Svelte/HTMX frontend web applications. Use when: (1) user explicitly requests a security review or audit, (2) a new web feature is complete and needs security sign-off, (3) writing new authentication, file upload, form handling, or API endpoint code and want secure-by-default patterns. Produces severity-classified findings report."
+description: "Perform security review for PHP backend + vanilla JS/jQuery/Svelte/HTMX frontend web applications. Use when: (1) user explicitly requests a security review or audit, (2) a new web feature is complete and needs security sign-off, (3) writing new authentication, file upload, form handling, or API endpoint code and want secure-by-default patterns. Produces severity-classified findings report. Do not use for a pre-merge review of a whole branch or PR (use branch-merge-review, which dispatches this skill as its security reviewer) or for a non-security quality review (use code-quality-review)."
 ---
 
 # Web Security Review
@@ -11,7 +11,7 @@ Security review skill for PHP backend + vanilla JS / jQuery / Svelte / HTMX fron
 
 Use `rg` for audit searches on both POSIX and Windows whenever available. If it is missing, use the documented `grep` expressions on POSIX and translate them to `Get-ChildItem -Recurse -Filter <pattern> | Select-String -Pattern <regex>` on Windows PowerShell. Do not require Bash for a Windows-native review.
 
-> **Read-only mode (priority rule).** If the user asked to review **without changing anything** ("수정하지 말고", "read-only", or a read-only sandbox), do not write to the workspace: **do not create the report file** under `.tasks/reports/` and **do not install** any tooling. Emit the full report **inline** in your response instead. Write files only when the user has not restricted writes.
+> **Read-only mode (priority rule).** If the user asked to review **without changing anything** ("수정하지 말고", "read-only", or a read-only sandbox), do not write to the workspace: **do not install** any tooling, **do not modify code**, and **do not change worktree or Git state**. No file may be written, report files included — inline output is the default anyway (Workflow steps 5–6), and under this constraint it is the only option even if the user asks for a file; say that a report file needs write permission.
 
 ## Reference Files
 
@@ -41,12 +41,19 @@ When the user asks for a security review, scan, or audit:
 2. **Read references**: Load `references/php-backend-security.md` and/or `references/web-frontend-security.md`.
 3. **Scan codebase**: Search for patterns listed in the reference files. Use Grep for sinks, dangerous functions, and missing protections.
 4. **Classify findings**: Assign severity (Critical / High / Medium / Low) per the reference file guidance.
-5. **Write report**: Save to `.tasks/reports/{yyyy-mm-dd}-{hh-mm}-{slug}-security.md`. Create `.tasks/reports/` if it does not exist. Slug is a short kebab-case identifier from the user's request or target scope (e.g., `file-upload`, `user-login`). Write in the same language the user used when requesting the review. **When running as a subagent** (e.g., dispatched by branch-merge-review), the invoking prompt's `OUTPUT LANGUAGE` directive takes precedence over the prompt's own language — an English dispatch prompt does NOT mean the report should be in English. Keep code identifiers, file paths, and evidence snippets as-is; write all prose in the designated language. **(Read-only mode: skip writing the file — emit the report inline instead.)**
-6. **Summarize**: Report findings to the user inline in the same language, offer to fix.
+5. **Produce the report**: Follow the Report Format below. Write in the same language the user used when requesting the review. **When running as a subagent** (e.g., dispatched by branch-merge-review), the invoking prompt's `OUTPUT LANGUAGE` directive takes precedence over the prompt's own language — an English dispatch prompt does NOT mean the report should be in English. Keep code identifiers, file paths, and evidence snippets as-is; write all prose in the designated language.
+6. **Deliver — inline by default**: Emit the report in your response. Do **not** create `.tasks/reports/` and do not write a report file: a review request must not change the working tree or add commit candidates. Then offer to fix.
+
+**Writing a file requires an explicit request** — "리포트로 만들어줘", "보고서로 출력해줘", "리포트 파일로 저장해줘", "output as a report", or an equivalent explicit ask. In that case do not choose a path or write the file here — **delegate to the `report-output` skill** and pass the finished report body plus:
+
+- **slug**: short kebab-case identifier from the user's request or target scope with the `-security` suffix — e.g. `file-upload-security`, `user-login-security`;
+- **recommended format**: Markdown (mention HTML as an option only if the user asks).
+
+`report-output` owns path selection, name-collision avoidance, and atomic publishing — this skill never writes under `.tasks/reports/` itself. If `report-output` is not installed, say so and keep the report inline rather than improvising a path.
 
 ## Report Format
 
-Write the report as a Markdown file with this structure:
+Write the report in Markdown with this structure:
 
 ```
 # Security Review Report

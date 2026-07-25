@@ -573,15 +573,161 @@ function Update-HookJson {
     Write-JsonObject -Path $Path -Data $data
 }
 
+# TOML basic string(`"..."`) 키의 이스케이프를 디코딩한다. hooks/workflow_hook_config.py의
+# _decoded_toml_escapes와 같은 규칙이다: 키 이름에 실제로 쓰일 수 있는 `\uXXXX`/`\UXXXXXXXX`와,
+# 그 해석이 어긋나지 않도록 `\\`/`\"` 만 다룬다. `\n`·`\t` 같은 제어문자 이스케이프는 알려진
+# 한계로 남긴다(줄 스캐너에 TOML 문자열 디코더를 통째로 넣지 않는다). 비교 대상 이름이
+# 소문자 ASCII인 `hooks`/`state` 뿐이라 이 한계가 판정을 바꾸지는 못한다. Unicode 스칼라가 아닌
+# 값(surrogate, > U+10FFFF)은 애초에 유효한 TOML이 아니므로 쓰인 그대로 둔다.
+# literal string(`'...'`)은 TOML 규칙상 이스케이프를 해석하지 않으므로 이 함수를 거치지 않는다.
+function ConvertFrom-TomlStringEscape {
+    param([string]$Text)
+    if ($Text.IndexOf('\') -lt 0) { return $Text }
+    $builder = New-Object Text.StringBuilder
+    $position = 0
+    while ($position -lt $Text.Length) {
+        $character = $Text[$position]
+        if ($character -ne '\' -or $position -eq ($Text.Length - 1)) {
+            [void]$builder.Append($character)
+            $position++
+            continue
+        }
+        $marker = $Text[$position + 1]
+        $digits = 0
+        if ($marker -ceq 'u') { $digits = 4 } elseif ($marker -ceq 'U') { $digits = 8 }
+        if ($digits -gt 0 -and ($position + 2 + $digits) -le $Text.Length) {
+            $hex = $Text.Substring($position + 2, $digits)
+            if ($hex -cmatch '^[0-9A-Fa-f]+$') {
+                $codePoint = [Convert]::ToInt64($hex, 16)
+                if ($codePoint -le 0x10FFFF -and -not ($codePoint -ge 0xD800 -and $codePoint -le 0xDFFF)) {
+                    [void]$builder.Append([char]::ConvertFromUtf32([int]$codePoint))
+                    $position += 2 + $digits
+                    continue
+                }
+            }
+        }
+        if ($marker -eq '\' -or $marker -eq '"') {
+            [void]$builder.Append($marker)
+            $position += 2
+            continue
+        }
+        # 처리하지 않는 이스케이프는 쓰인 그대로 둔다(위 주석의 알려진 한계).
+        [void]$builder.Append($character)
+        [void]$builder.Append($marker)
+        $position += 2
+    }
+    return $builder.ToString()
+}
+
+# 붙잡은 TOML 키를 TOML 자신이 만들어낼 키 이름으로 정규화한다. bare key `state`,
+# basic string `"state"`, 이스케이프를 쓴 basic string `"\u0073tate"`는 모두 같은 키
+# `state`지만 literal string `'\u0073tate'`는 아니다 — literal string은 이스케이프를
+# 해석하지 않으므로 그 키 이름은 문자 그대로 `\u0073tate`(10자)다.
+# https://toml.io/en/v1.0.0#keys
+function ConvertTo-NormalizedTomlKey {
+    param([string]$Key)
+    if ([string]::IsNullOrEmpty($Key) -or $Key.Length -lt 2) { return $Key }
+    $first = $Key[0]
+    $last = $Key[$Key.Length - 1]
+    if ($first -eq '"' -and $last -eq '"') {
+        return (ConvertFrom-TomlStringEscape -Text $Key.Substring(1, $Key.Length - 2))
+    }
+    if ($first -eq "'" -and $last -eq "'") { return $Key.Substring(1, $Key.Length - 2) }
+    return $Key
+}
+
+# 주석이 제거된 줄이 여는 `[`/`{` 의 순증가량. 단일행 문자열 안의 괄호는 세지 않는다.
+# hooks/workflow_hook_config.py의 _toml_bracket_delta와 같은 규칙이다.
+function Get-TomlBracketDelta {
+    param([string]$CodeLine)
+    $delta = 0
+    $inSingleQuote = $false
+    $inDoubleQuote = $false
+    $escaped = $false
+    foreach ($character in $CodeLine.ToCharArray()) {
+        if ($inDoubleQuote) {
+            if ($escaped) { $escaped = $false; continue }
+            if ($character -eq '\') { $escaped = $true; continue }
+            if ($character -eq '"') { $inDoubleQuote = $false }
+            continue
+        }
+        if ($inSingleQuote) {
+            if ($character -eq "'") { $inSingleQuote = $false }
+            continue
+        }
+        if ($character -eq '"') { $inDoubleQuote = $true; continue }
+        if ($character -eq "'") { $inSingleQuote = $true; continue }
+        if ($character -eq '[' -or $character -eq '{') { $delta++ }
+        elseif ($character -eq ']' -or $character -eq '}') { $delta-- }
+    }
+    return $delta
+}
+
+# hooks/workflow_hook_config.py의 _fallback_has_inline_hooks와 같은 줄 단위 규칙이다:
+# `hooks` 아래에 state 이외의 선언이 보이면 인라인 훅으로 본다. `hooks.state`는 Codex가
+# 훅 신뢰 상태를 저장하는 곳이므로 훅 선언이 아니다(테이블 헤더든 점 표기 대입이든).
+# 두 정규식은 TOML이 허용하는 점 주변 공백(`[[ hooks . SessionEnd ]]`)을 받아들이고,
+# quoted key를 bare key와 동등하게 본다(`hooks."SessionEnd"`, `"hooks".SessionEnd`,
+# `hooks.'state'`). 루트 키도 quoted 로 쓸 수 있어 텍스트로 고정하지 않고 일반 키로
+# 붙잡아 ConvertTo-NormalizedTomlKey 로 정규화한 뒤 비교한다. https://toml.io/en/v1.0.0#keys
+# 점 표기 대입은 값의 모양을 가리지 않는다(`hooks.SessionEnd = [{ ... }]`도 감지).
+# 단 점 없는 단독 `hooks` 키는 `= {` 로 제한한다 — `[features]` 섹션의 기능 플래그
+# `hooks = true`(및 `"hooks" = true`)를 인라인 훅으로 오탐하면 정상 설치를 막기 때문이다.
+# 점 표기 대입은 루트 테이블(어떤 `[table]` 헤더보다 앞) 에서만 훅 선언이다. `[other]` 안의
+# `hooks.SessionEnd = []`는 `other.hooks.SessionEnd`이므로 감지하면 안 된다. 테이블 헤더는
+# 절대 경로라 컨텍스트가 필요 없고, `[hooks]`/`[hooks.Event]`는 헤더 줄에서 이미 답이 난다.
+# TOML 키는 대소문자를 구분하므로 비교는 반드시 대소문자 구분 연산자(-cmatch/-ceq/-cne)로 한다:
+# `hooks.State`는 면제 대상이 아니고(감지), `Hooks.UserPromptSubmit`은 다른 키다(미감지).
+# PowerShell 5.1에는 TOML 파서가 없어 구조 파싱(Python tomllib 경로 = 정답)과 다음 경우가 다르다.
+# 셋 다 정답은 미감지지만 줄 단위로는 감지가 되며, 이는 경고를 한 번 더 띄우는 안전한 방향이다:
+#   - 내용이 없는 `[hooks]` 헤더, `hooks = {}`
+#   - `hooks = { state = { ... } }` 처럼 면제 키가 루트 인라인 테이블 본문에 있는 경우
+# 억지로 파서를 흉내내지 않고 Python 폴백과 동일하게 보수적으로 두며, 알려진 차이는
+# tests/fixtures/codex_inline_hooks.json에 lineBased/knownDivergence 기대값으로 고정돼 있다.
+# 또한 이 함수는 $true/$false 만 돌려주는 계약이라(install.ps1이 그렇게 쓴다) 깨진 TOML을
+# 알릴 통로가 없다. Python 폴백은 알아볼 수 있는 구조 오류를 ConfigError로 올리지만 여기서는
+# 그럴 수 없고, 그 차이도 위 fixture의 invalidToml 절에 기록돼 있다.
 function Test-CodexInlineHooks {
     param([string]$Path)
     if (-not (Test-Path -LiteralPath $Path)) { return $false }
+    $rootKey = 'hooks'
+    $stateKey = 'state'
+    # Python 폴백의 CODEX_TOML_KEY / CODEX_HOOK_TABLE / CODEX_HOOK_INLINE_TABLE /
+    # CODEX_TOML_TABLE_HEADER와 같은 조각이다.
+    $anyKey = '(?:[A-Za-z0-9_-]+|"(?:[^"\\]|\\.)*"|''[^'']*'')'
+    $tablePattern = "^\s*\[\[?\s*($anyKey)\s*(?:\.\s*($anyKey)\s*)?(?:\.|\])"
+    $assignmentPattern = "^($anyKey)\s*(?:\.\s*($anyKey)\s*[.=]|=\s*\{)"
+    $headerPattern = "^\[\[?\s*$anyKey(?:\s*\.\s*$anyKey)*\s*\]\]?`$"
+    $atRootTable = $true
+    $depth = 0
     foreach ($line in Get-TomlCodeLines -Path $Path) {
         $lineWithoutComment = $line.Text.Trim()
-        if ($lineWithoutComment -match '^\s*\[\[?\s*hooks(?:\.([A-Za-z][A-Za-z0-9]*))?(?:\.|\s*\])') {
-            if ([string]::IsNullOrEmpty($Matches[1]) -or $Matches[1] -ne 'state') { return $true }
+        # 깊이 검사가 모든 분기를 감싼다(헤더 분기만이 아니다): 중첩 깊이 0의 줄만 무언가를
+        # 선언할 수 있다. 닫히지 않은 배열 안의 `[...]` 줄은 원소이지 헤더가 아니므로
+        # `values = [`+`["hooks"]`+`]` 를 `[hooks]` 테이블 헤더로 읽어선 안 된다
+        # (Python 폴백의 _fallback_has_inline_hooks / 구조 검사와 같은 규칙. 테이블 정규식을
+        # 이 검사보다 먼저 적용하면 바로 그 모양을 오탐했다).
+        if ($depth -eq 0 -and -not [string]::IsNullOrEmpty($lineWithoutComment)) {
+            if ($lineWithoutComment -cmatch $tablePattern) {
+                # 두 그룹을 먼저 붙잡는다: 정규화 함수가 내부에서 -cmatch 를 쓰므로
+                # $Matches 를 건드릴 여지를 남기지 않는다.
+                $rawRoot = $Matches[1]
+                $rawKey = $Matches[2]
+                $matchedRoot = ConvertTo-NormalizedTomlKey -Key $rawRoot
+                $matchedKey = ConvertTo-NormalizedTomlKey -Key $rawKey
+                if ($matchedRoot -ceq $rootKey -and $matchedKey -cne $stateKey) { return $true }
+            }
+            if ($lineWithoutComment -cmatch $headerPattern) {
+                $atRootTable = $false
+            } elseif ($atRootTable -and ($lineWithoutComment -cmatch $assignmentPattern)) {
+                $rawRoot = $Matches[1]
+                $rawKey = $Matches[2]
+                $matchedRoot = ConvertTo-NormalizedTomlKey -Key $rawRoot
+                $matchedKey = ConvertTo-NormalizedTomlKey -Key $rawKey
+                if ($matchedRoot -ceq $rootKey -and $matchedKey -cne $stateKey) { return $true }
+            }
         }
-        if ($lineWithoutComment -match '^hooks(?:\.[A-Za-z][A-Za-z0-9]*)?\s*=\s*\{') { return $true }
+        $depth = [Math]::Max(0, $depth + (Get-TomlBracketDelta -CodeLine $line.Text))
     }
     return $false
 }
@@ -610,20 +756,39 @@ function Remove-TomlComment {
     return $Line
 }
 
+# 다중행 문자열 본문이 닫히는 위치. hooks/workflow_hook_config.py의 _multiline_closing과
+# 같은 규칙이다: TOML은 닫는 구분자 바로 앞에 따옴표 한두 개를 문자열 내용으로 허용하므로
+# (`ml-basic-body = *mlb-content *( mlb-quotes 1*mlb-content ) [ mlb-quotes ]`,
+# `mlb-quotes = 1*2quotation-mark`, 리터럴 쪽도 `mll-quotes = 1*2apostrophe`)
+# 연속된 따옴표는 먼저 끝까지 소비한 뒤 그 중 **마지막 세 개**만 구분자로 본다.
+# `"""a""""` 는 `a"`, `"""a"""""` 는 `a""` 이며 `''''That,' she said, ...''''` 도 같은 규칙이다
+# (https://toml.io/en/v1.0.0#string). 앞의 세 개를 구분자로 잡으면 나머지 줄이 문자열 안으로
+# 숨어 유효한 TOML을 깨진 것으로 오판한다.
+# 여섯 개 이상 연속된 따옴표는 다중행 문자열 본문에 존재할 수 없다(본문 문자 자체는 따옴표가
+# 될 수 없고 mlb-quotes/mll-quotes 는 최대 두 개다). 그래서 -2(CODEX_MULTILINE_INVALID_RUN)를
+# 돌려주는데, Test-CodexInlineHooks 는 $true/$false 계약이라 오류를 알릴 통로가 없으므로
+# 호출부의 `-lt 0` 검사가 이를 "닫히지 않음"과 같이 취급한다. Python 폴백은 같은 신호를
+# ConfigError 로 올린다(무효한 TOML 이므로 어느 쪽이든 훅 판정은 무의미하다).
+# `\` 이스케이프는 basic 다중행 문자열에만 있다.
 function Find-TomlMultilineClosing {
     param([string]$Text, [string]$Delimiter, [int]$StartIndex)
-    $searchFrom = $StartIndex
-    while ($searchFrom -lt $Text.Length) {
-        $candidate = $Text.IndexOf($Delimiter, $searchFrom, [StringComparison]::Ordinal)
-        if ($candidate -lt 0) { return -1 }
-        if ($Delimiter -ne '"""') { return $candidate }
-
-        $backslashes = 0
-        for ($cursor = $candidate - 1; $cursor -ge 0 -and $Text[$cursor] -eq '\'; $cursor--) {
-            $backslashes++
+    $quote = $Delimiter[0]
+    $interpretsEscapes = ($Delimiter -eq '"""')
+    $position = $StartIndex
+    while ($position -lt $Text.Length) {
+        if ($interpretsEscapes -and $Text[$position] -eq '\') {
+            $position += 2
+            continue
         }
-        if (($backslashes % 2) -eq 0) { return $candidate }
-        $searchFrom = $candidate + 1
+        if ($Text[$position] -ne $quote) {
+            $position++
+            continue
+        }
+        $runStart = $position
+        while ($position -lt $Text.Length -and $Text[$position] -eq $quote) { $position++ }
+        $runLength = $position - $runStart
+        if ($runLength -gt 5) { return -2 }
+        if ($runLength -ge 3) { return ($runStart + $runLength - 3) }
     }
     return -1
 }

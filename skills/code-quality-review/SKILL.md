@@ -1,6 +1,6 @@
 ---
 name: code-quality-review
-description: "Review code for quality and performance issues. Trigger when user asks for code quality review, refactoring advice, or code cleanup. Covers: (1) unnecessary or misleading comments, (2) style inconsistencies vs project conventions, (3) duplicated/redundant code, (4) performance inefficiencies — especially evaluation order (cheap checks before expensive ones). Runs CLI tools automatically (PHPStan/phpcs/phpmd/phpcpd for PHP; ESLint/Biome/svelte-check/knip for JS; Stylelint for CSS/SCSS). Adapts per detected language and framework."
+description: "Review code for quality and performance issues. Trigger when user asks for code quality review, refactoring advice, or code cleanup. Covers: (1) unnecessary or misleading comments, (2) style inconsistencies vs project conventions, (3) duplicated/redundant code, (4) performance inefficiencies — especially evaluation order (cheap checks before expensive ones). Runs CLI tools automatically (PHPStan/phpcs/phpmd/phpcpd for PHP; ESLint/Biome/svelte-check/knip for JS; Stylelint for CSS/SCSS). Adapts per detected language and framework. Do not use when the request names security as the subject (use web-security-review) or when the scope is a whole branch/PR before merge (use branch-merge-review)."
 ---
 
 # Code Quality Review
@@ -13,9 +13,10 @@ Detect the active shell before using a snippet. On POSIX use `command -v`, `[ -f
 
 > **Read-only mode (priority rule).** If the user asked for a review **without changing anything** (e.g. "수정하지 말고 검토만", "read-only", review delegated under a read-only sandbox), then this skill must not write to the workspace:
 > - **Do not install** missing tools (no `npm install`, `composer require`, PHAR downloads, etc.). Run only the tools already present; for each missing tool, record it as **`skipped (not installed)`** in the report.
-> - **Do not create the report file.** Emit the report **inline** in your response instead of writing to `.tasks/reports/`.
+> - **Do not modify code** and do not change worktree or Git state — findings and recommendations only.
+> - **Do not write any file**, report files included. (Inline output is the default anyway — see Step 4; under a read-only constraint it is the *only* option, even if the user asks for a file. Say that a report file needs write permission.)
 >
-> Only perform installs and file writes when the user has not restricted writes. When in doubt, treat the request as read-only and ask before installing or writing.
+> When in doubt, treat the request as read-only and ask before installing or writing.
 
 ## Reference Files
 
@@ -139,14 +140,17 @@ The comment must address the specific flagged behavior; a generic nearby comment
 
 **Language**: Write the report in the same language the user used when requesting the review. If the user wrote in Korean, write the report in Korean. If in English, write in English. **When running as a subagent** (e.g., dispatched by branch-merge-review), the invoking prompt's `OUTPUT LANGUAGE` directive takes precedence over the prompt's own language — an English dispatch prompt does NOT mean the report should be in English. Keep code identifiers, file paths, and evidence snippets as-is; write all prose in the designated language.
 
-Save the report to: `.tasks/reports/{yyyy-mm-dd}-{hh-mm}-{slug}-quality.md` **(skip this in read-only mode — emit the report inline instead).**
+**Delivery — inline by default.** Emit the report in your response. Do **not** create `.tasks/reports/` and do not write a report file: a review request must not change the working tree or add commit candidates.
 
-- **Path**: Create `.tasks/reports/` if it does not exist.
-- **Date/time**: Current local date and time (e.g., `2026-03-30-14-05`).
-- **Slug**: Short identifier in kebab-case derived from the user's request or the target — e.g., feature name, file name, or a keyword from the request. Max ~30 chars.
-- **Example**: `.tasks/reports/2026-03-30-14-05-user-auth-quality.md`
+**Write a file only on an explicit request** — "리포트로 만들어줘", "보고서로 출력해줘", "리포트 파일로 저장해줘", "output as a report", "write this up as a report", or an equivalent explicit ask for a saved report. In that case do not choose a path or write the file here — **delegate to the `report-output` skill** and pass:
 
-Merge tool output and manual findings into this file.
+- the finished report body (the structure below) and its language;
+- **slug**: short kebab-case identifier from the user's request or the target, max ~30 chars, with the `-quality` suffix — e.g. `user-auth-quality`;
+- **recommended format**: Markdown (mention HTML as an option only if the user asks).
+
+`report-output` owns path selection, name-collision avoidance, and atomic publishing — this skill never writes under `.tasks/reports/` itself. If `report-output` is not installed, say so and keep the report inline rather than improvising a path.
+
+Merge tool output and manual findings into this structure.
 
 ```
 # Code Quality Report

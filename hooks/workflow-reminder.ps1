@@ -1,6 +1,21 @@
 ﻿$ErrorActionPreference = 'Stop'
 Set-StrictMode -Version 2.0
 
+# Inject non-blocking workflow reminders for Claude Code and Codex prompts.
+#
+# Skill selection principle (invariant): this hook reminds only about workflows whose
+# cost of being missed is high — authority, work state, and structural decision
+# boundaries (plan-and-build, evidence-first-review, safe-checkpoint). Skills that are
+# "how to carry out the work" methodologies, such as systematic-debugging, are left to
+# description-based automatic skill selection; their trigger phrasing ("fix this") is
+# indistinguishable from ordinary requests, so hooking them produces false positives.
+# Adding a workflow here requires clearing that bar, not just being useful.
+#
+# The regexes below are validated by the true-positive and false-positive cases in
+# tests/test_workflow_reminder.py. Do not edit them casually: any change here must be
+# accompanied by an update to that suite, which is the authoritative record of the
+# coverage rather than a count quoted in this comment.
+
 $utf8 = New-Object System.Text.UTF8Encoding($false)
 [Console]::InputEncoding = $utf8
 [Console]::OutputEncoding = $utf8
@@ -125,12 +140,21 @@ $planReminder = 'This appears to be substantial implementation work. Invoke the 
     'If inspection proves the change is small and localized, exit the workflow and proceed ' +
     'directly.'
 
-$evidenceReviewReminder = 'This request explicitly requires a non-mutating review. Invoke the ' +
-    'evidence-first-review skill before reviewing. Lock the user-supplied context and scope ' +
-    'first, then independently verify claims against current files, relevant diffs, raw data, ' +
-    'and runtime evidence. Respect the read-only boundary: do not modify or create files, ' +
-    'install tools, create checkouts or worktrees, stage changes, or save a report. Return ' +
-    'the evidence-backed result in the user''s language as a message only.'
+$evidenceReviewReminder = 'This request explicitly requires a non-mutating review. Route by work mode first, then ' +
+    'by scope. Work mode wins: if the request re-examines earlier findings, decides a final ' +
+    'approval verdict, or verifies specific claims against raw data or a non-Git directory, ' +
+    'invoke the evidence-first-review skill even when the scope is a PR, branch, or merge ' +
+    'diff — branch-merge-review has no recheck or approval mode and would return newly ' +
+    'discovered findings instead of the per-finding statuses and verdict that were asked ' +
+    'for. Only for a first-time review does scope decide: a PR, branch, or merge diff goes ' +
+    'to the branch-merge-review skill in read-only mode, and a narrower scope goes to the ' +
+    'security or quality review skill that matches the subject. A read-only constraint alone ' +
+    'changes neither choice; it only constrains how the selected skill runs. Either way, ' +
+    'lock the user-supplied context and scope first, then independently verify claims ' +
+    'against current files, relevant diffs, raw data, and runtime evidence. Respect the ' +
+    'read-only boundary: do not modify or create files, install tools, create checkouts or ' +
+    'worktrees, stage changes, or save a report. Return the evidence-backed result in the ' +
+    'user''s language as a message only.'
 
 $safeCheckpointReminder = 'This request appears to need a scoped checkpoint or resumable handoff. Invoke the ' +
     'safe-checkpoint skill before any Git or handoff write. Inspect branch, upstream, status, ' +

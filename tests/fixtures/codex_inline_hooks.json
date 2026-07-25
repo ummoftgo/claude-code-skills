@@ -1,0 +1,499 @@
+{
+  "description": "Codex config.toml inline-hook detection contract shared by every implementation. `expected` is the authoritative answer (hooks/workflow_hook_config.py structural tomllib path): true only when `hooks` declares something other than `hooks.state`, which is where Codex stores hook trust state. `lineBased` is the answer required from the line-oriented detectors that cannot parse TOML - the Python 3.10 fallback (_fallback_has_inline_hooks) and PowerShell 5.1 (Test-CodexInlineHooks in scripts/Installer.Common.psm1); both must agree with each other on every case. When lineBased differs from expected the case carries knownDivergence=true plus a note, and the divergence may only ever be an over-detection (lineBased=true where expected=false) - the fixture shape test enforces that direction, because over-detection merely makes install.ps1/install.sh warn and skip once more than needed. Under-detecting a case listed here is a bug and never a documented divergence: missing an inline hook that already exists makes the installer add a second hook source (hooks.json), which Codex reports as a merge warning at startup. Five rounds of real defects have been fixed and are pinned below, so the direction is a tested property rather than a claim: (1) the line-based regexes handled only bare keys, so every quoted spelling TOML treats as equivalent in a dotted assignment was missed (`hooks.\"UserPromptSubmit\" = [...]`, `\"hooks\".UserPromptSubmit = [...]`, and bare keys starting with a digit) - they now accept bare, basic-string and literal-string keys alike, including for the `state` exemption (`hooks.\"state\"`, `hooks.'state'`); (2) Test-CodexInlineHooks compared with the case-insensitive `-match`/`-ne`, which under-detected `hooks.State` (a real event key, not the exempt `state`) and over-detected `Hooks.UserPromptSubmit` (a different root key entirely) - it now uses `-cmatch`/`-ceq`/`-cne` so TOML's case sensitivity holds in both directions; (3) both line-based detectors stripped the quotes off a basic-string key without decoding its escapes, which broke in both directions - under-detecting `\"\\u0068ooks\".SessionEnd = []` (really the root `hooks` table) and over-detecting `hooks.\"\\u0073tate\"` (really the exempt trust store, so the false positive blocked a working install). They now decode `\\uXXXX` and `\\UXXXXXXXX` (plus `\\\\` and `\\\"`, so a literal backslash is never read as the start of one) in basic strings only: a literal-string key interprets no escapes, which is why `hooks.'\\u0073tate'` is a key named `\\u0073tate` and stays detected. Other escapes (`\\n`, `\\t`, `\\r`, `\\f`, `\\b`) are left as written - a documented limitation that cannot change a verdict, since the only names compared against are the lowercase-ASCII `hooks` and `state` and `\\u`/`\\U` are the only escapes able to produce those characters; (4) both line-based detectors judged a dotted assignment without knowing which table it sat in, so `[other]` followed by `hooks.SessionEnd = []` (really `other.hooks.SessionEnd`) or by `hooks = { ... }` was over-detected - the same family of false positive as the `[features] hooks = true` flag, which the `= {` restriction alone does not cover. The dotted-assignment branch now fires only in the root table, i.e. before the first `[table]` header, and a `[...]` line counts as that header only at bracket depth 0 so an array element such as `[\"a\"]` cannot end the root context early. Table headers are absolute, so the header branch needs no context. (5) Two more, both of which blocked a working install rather than merely warning. First, the line scanners resolved a multi-line string's closing delimiter to the FIRST `\"\"\"`/`'''` they found, but TOML lets one or two quotes sit just inside the closing delimiter (`mlb-quotes = 1*2quotation-mark`, `mll-quotes = 1*2apostrophe`), so the delimiter is the LAST three of a run: `\"\"\"a\"\"\"\"` is the string `a\"`. Closing early swallowed the rest of the line as string content, and valid configs such as `x = [\"\"\"a\"\"\"\", 1]` were rejected as `unterminated array or inline table` - stopping the Python 3.10 installer on a file tomllib parses fine. A run of six or more is impossible in a body and is now reported as damage in its own right, so the fix tightens rather than loosens the invalid-TOML contract. Second, both line-based detectors applied the table-header regex before consulting the current nesting depth, so an array element like `[\"hooks\"]` inside a multi-line array was read as a `[hooks]` table header; the depth test now gates every branch. Pinned as multiline-basic-string-*, nested-array-element-quoting-hooks and invalidToml.detectedByLineBased.impossible-quote-run. Both line-based detectors also accept the whitespace TOML allows around dots (`[[ hooks . SessionEnd ]]`) and treat a dotted assignment as a declaration whatever its value (`hooks.SessionEnd = [{ ... }]`). One shape stays deliberately undetected and is the single reason the no-under-detection rule is scoped to the cases listed here: a bare root `hooks` key whose value is not an inline table. The structural path answers true for all of them, because a non-table `hooks` value is not a trust store either (`hooks = true`, `hooks = false`, `hooks = []`, `hooks = \"x\"` -> expected true, line-based false); the line-based branch is restricted to `= {` so that the `hooks = true` feature flag inside [features] can never be mistaken for a hook declaration - that false positive would block a working install, a worse failure than a duplicate-hook warning. Since round (4) the root-context rule guards the flag as well, but the `= {` restriction is kept as the independent backstop for the case that matters most, and none of those spellings are valid Codex hook configuration anyway. This is a knowingly accepted under-detection, not an oversight, and it cannot be listed below because the shape test would reject it.",
+  "consumers": [
+    "tests/test_workflow_hook_config.py (CodexInlineHookFixtureTest) - checks `expected` against the structural tomllib path (skipped when the interpreter has no tomllib), `lineBased` against _fallback_has_inline_hooks with the module's tomllib forced to None, and both answers through the inline-status CLI (the fallback run re-invokes main() with tomllib patched out, so the exit-code contract is pinned on any interpreter)",
+    "tests/windows/run-installer-tests.ps1 - wired up: it enumerates `cases` by iteration rather than by name or count, writes each `toml` (or `tomlFile`) to a temp config and asserts Test-CodexInlineHooks equals `lineBased`"
+  ],
+  "exitCodes": {
+    "description": "python3 hooks/workflow_hook_config.py inline-status <config.toml> contract used by install.sh.",
+    "detected": 0,
+    "notDetected": 1,
+    "error": 2
+  },
+  "invalidToml": {
+    "description": "Invalid TOML is a third outcome rather than a bool, and the implementations do not share a contract for it - only a partial overlap. The structural path parses the file, so anything tomllib rejects raises ConfigError and inline-status exits with exitCodes.error. The Python 3.10 fallback performs no TOML validation at all. It reports only the damage a line scanner can prove without reading values - an unterminated multi-line string, an impossible run of six or more adjacent quotes inside one, a line that opens a table header but is not one, and brackets that never close - and those, listed under detectedByLineBased, are the cases where the two paths happen to agree on exit code 2. Every other kind of invalid TOML is invisible to it, so it answers a bool where the structural path errors: the cases under missedByLineBased pin that gap, where the same file exits 2 on 3.11+ and 0 or 1 on 3.10. That difference is real behaviour for 3.10 users, not an implementation detail, and it cannot be closed without shipping a TOML parser for 3.10 - out of scope here, so it is pinned case by case instead of claimed fixed. The `lineBased` field on those cases is the bool the fallback actually returns, not an endorsement of it. PowerShell's Test-CodexInlineHooks appears in neither list: install.ps1 depends on its $true/$false contract, so it has no channel to report an error and always answers a bool for broken input, whatever its line scan happens to see. tests/windows/run-installer-tests.ps1 therefore replays `cases` only; the two lists below are exercised by tests/test_workflow_hook_config.py.",
+    "detectedByLineBased": [
+      {
+        "name": "unclosed-table-header",
+        "toml": "[hooks.UserPromptSubmit\ncommand = [\"x\"]\n",
+        "note": "A line at nesting depth 0 that starts with `[` must be a well-formed table header; this one never closes."
+      },
+      {
+        "name": "stray-bracket-header",
+        "toml": "[[[hooks.SessionEnd]]]\ncommand = [\"true\"]\n",
+        "note": "Neither a table nor an array-of-tables header. Note the detection regexes do not match it either, so before the structure check the fallback answered a confident false on a config Codex cannot load."
+      },
+      {
+        "name": "unterminated-multiline-string",
+        "toml": "notes = \"\"\"\n[[hooks.PreToolUse]]\n",
+        "note": "The comment/multiline stripper already tracks the open delimiter, so end-of-input inside a multi-line string is provable."
+      },
+      {
+        "name": "impossible-quote-run",
+        "toml": "x = [\"\"\"a\"\"\"\"\"\", 1]\n",
+        "note": "Six adjacent quotes cannot appear in a multi-line string body: no body character is itself an unescaped quote and `mlb-quotes` caps the run at two, so the longest legal run is two content quotes plus the three-quote delimiter. That makes this provable damage rather than a value-level rule, so the fallback reports it instead of guessing where the string ended. Detected for the apostrophe spelling too. Note this ERROR is intentional and must not be relaxed into the bool the previous scanner accidentally produced for longer runs: fixing multiline-basic-string-closing-with-extra-quote must not turn six-plus quotes into `no inline hooks`."
+      },
+      {
+        "name": "unclosed-root-inline-table",
+        "toml": "hooks = {\n",
+        "note": "Bracket depth never returns to 0. The hook-shaped line would otherwise report true, which is why the structure check runs before detection."
+      },
+      {
+        "name": "unclosed-array-value",
+        "toml": "hooks.SessionEnd = [\n",
+        "note": "Same as unclosed-root-inline-table for the array spelling."
+      }
+    ],
+    "missedByLineBased": [
+      {
+        "name": "invalid-value-after-hook-key",
+        "toml": "hooks.SessionEnd = tru\n",
+        "lineBased": true,
+        "note": "Recognising `tru` as an invalid literal means parsing values. The fallback reports the declaration instead of the error - fail-safe here, since the installer warns and skips."
+      },
+      {
+        "name": "duplicate-key",
+        "toml": "title = \"a\"\ntitle = \"b\"\n",
+        "lineBased": false,
+        "note": "Duplicate-key detection needs a symbol table across the whole document."
+      },
+      {
+        "name": "leading-zero-integer",
+        "toml": "x = 01\n",
+        "lineBased": false,
+        "note": "Every value-format rule is out of reach for a line scanner; the config is broken but hook-free, so the answer is at least not misleading about hooks."
+      },
+      {
+        "name": "table-header-inside-an-array",
+        "toml": "v = [\n  [[hooks.A]]\n]\n",
+        "lineBased": false,
+        "note": "An array-of-tables header cannot be an array element, so tomllib rejects this. Recognising it means parsing the element as a value, which is out of reach here: the line sits at bracket depth 1, where the scanner correctly refuses to read `[...]` as a table header (that refusal is what fixes nested-array-element-quoting-hooks), so nothing is left to prove the damage. Pinned because the answer moved from true to false when the depth test was extended to the header branch - within this already-documented class, not out of it. Harmless in practice: Codex cannot load the file either way, and on 3.11+ the structural path still exits 2."
+      }
+    ]
+  },
+  "cases": [
+    {
+      "name": "event-table-session-end",
+      "toml": "[[hooks.SessionEnd]]\ncommand = [\"true\"]\n",
+      "expected": true,
+      "lineBased": true,
+      "knownDivergence": false
+    },
+    {
+      "name": "event-table-user-prompt-submit",
+      "toml": "[[hooks.UserPromptSubmit]]\nhooks = []\n",
+      "expected": true,
+      "lineBased": true,
+      "knownDivergence": false
+    },
+    {
+      "name": "event-table-unknown-future-event",
+      "toml": "[[hooks.SomeFutureEvent]]\ncommand = [\"true\"]\n",
+      "expected": true,
+      "lineBased": true,
+      "knownDivergence": false
+    },
+    {
+      "name": "event-table-dot-whitespace",
+      "toml": "[[ hooks . SessionEnd ]]\ncommand = [\"true\"]\n",
+      "expected": true,
+      "lineBased": true,
+      "knownDivergence": false,
+      "note": "TOML allows whitespace around the dots in a key (https://toml.io/en/v1.0.0#keys), so this is the same declaration as [[hooks.SessionEnd]]. A line-based detector that anchors the dot straight after `hooks` misses it and the installer then adds a duplicate hooks.json."
+    },
+    {
+      "name": "dotted-assignment-array-of-tables",
+      "toml": "hooks.SessionEnd = [{ command = \"x\" }]\n",
+      "expected": true,
+      "lineBased": true,
+      "knownDivergence": false,
+      "note": "A dotted assignment builds the same structure as [[hooks.SessionEnd]] and loads fine under Codex strict config, so detection must not require the value to be an inline table."
+    },
+    {
+      "name": "dotted-assignment-quoted-event-key",
+      "toml": "hooks.\"UserPromptSubmit\" = [{ hooks = [] }]\n",
+      "expected": true,
+      "lineBased": true,
+      "knownDivergence": false,
+      "note": "REGRESSION GUARD: TOML treats a quoted key in a dotted key as equivalent to the bare spelling (https://toml.io/en/v1.0.0#keys), so this is the same declaration as hooks.UserPromptSubmit. Regexes that accepted only bare keys missed it and the installer then added a duplicate hooks.json."
+    },
+    {
+      "name": "dotted-assignment-quoted-root-key",
+      "toml": "\"hooks\".UserPromptSubmit = []\n",
+      "expected": true,
+      "lineBased": true,
+      "knownDivergence": false,
+      "note": "REGRESSION GUARD: the root key may be quoted too, so the anchor cannot be the literal text `hooks`."
+    },
+    {
+      "name": "dotted-assignment-quoted-root-and-event-key",
+      "toml": "'hooks'.'UserPromptSubmit' = []\n",
+      "expected": true,
+      "lineBased": true,
+      "knownDivergence": false,
+      "note": "REGRESSION GUARD: literal-string keys are equivalent as well, on both sides of the dot."
+    },
+    {
+      "name": "escaped-basic-string-root-key",
+      "toml": "\"\\u0068ooks\".SessionEnd = []\n",
+      "expected": true,
+      "lineBased": true,
+      "knownDivergence": false,
+      "note": "REGRESSION GUARD: TOML decodes the escapes in a basic-string key, so this names the root `hooks` table (https://toml.io/en/v1.0.0#keys). Normalisers that only stripped the quotes compared `\\u0068ooks` with `hooks`, missed the declaration and let the installer add a duplicate hooks.json."
+    },
+    {
+      "name": "escaped-basic-string-root-key-long-form",
+      "toml": "\"\\U00000068ooks\".UserPromptSubmit = []\n",
+      "expected": true,
+      "lineBased": true,
+      "knownDivergence": false,
+      "note": "The 8-digit `\\UXXXXXXXX` spelling of the same escape; both forms are decoded."
+    },
+    {
+      "name": "escaped-basic-string-event-key",
+      "toml": "hooks.\"Session\\u0045nd\" = []\n",
+      "expected": true,
+      "lineBased": true,
+      "knownDivergence": false,
+      "note": "Decoding must not disturb the ordinary answer on the event side: this is hooks.SessionEnd."
+    },
+    {
+      "name": "escaped-basic-string-root-key-decodes-to-another-key",
+      "toml": "\"\\u0048ooks\".SessionEnd = []\n",
+      "expected": false,
+      "lineBased": false,
+      "knownDivergence": false,
+      "note": "`\\u0048` is `H`, so the decoded key is `Hooks` - a different root key, since TOML keys are case sensitive. Decoding and the case-sensitive comparison have to hold together."
+    },
+    {
+      "name": "escaped-basic-string-backslash-is-not-an-escape-marker",
+      "toml": "\"\\\\u0068ooks\".SessionEnd = []\n",
+      "expected": false,
+      "lineBased": false,
+      "knownDivergence": false,
+      "note": "`\\\\` is an escaped backslash, so the key is the literal `\\u0068ooks` and nothing is declared under `hooks`. A decoder that scanned for `\\u` without consuming `\\\\` first would over-detect this."
+    },
+    {
+      "name": "escaped-trust-state-dotted-assignment",
+      "toml": "hooks.\"\\u0073tate\" = { trusted = true }\n",
+      "expected": false,
+      "lineBased": false,
+      "knownDivergence": false,
+      "note": "REGRESSION GUARD: `\\u0073` is `s`, so this is the exempt `hooks.state` trust store spelled with an escape. Undecoded it compared as `\\u0073tate`, was taken for a hook declaration, and a false positive on Codex's own trust state blocks a working install."
+    },
+    {
+      "name": "escaped-trust-state-table-header",
+      "toml": "[hooks.\"\\u0073tate\"]\nenabled = true\n",
+      "expected": false,
+      "lineBased": false,
+      "knownDivergence": false,
+      "note": "The table-header spelling of the same over-detection; the exemption is decoded in both branches."
+    },
+    {
+      "name": "escaped-event-key-decodes-to-capital-state",
+      "toml": "hooks.\"\\u0053tate\" = { x = 1 }\n",
+      "expected": true,
+      "lineBased": true,
+      "knownDivergence": false,
+      "note": "`\\u0053` is `S`: the decoded key is `State`, which is not the exempt `state`. Pairs with dotted-assignment-capitalised-event-key so decoding cannot quietly become case insensitive."
+    },
+    {
+      "name": "literal-string-root-key-keeps-its-escapes",
+      "toml": "'\\u0068ooks'.SessionEnd = []\n",
+      "expected": false,
+      "lineBased": false,
+      "knownDivergence": false,
+      "note": "REGRESSION GUARD for the other half of the escape rule: a literal string never interprets escapes, so this key really is the 10-character `\\u0068ooks` and declares nothing under `hooks`. Decoding literal strings too would turn this into a false positive."
+    },
+    {
+      "name": "literal-string-trust-state-keeps-its-escapes",
+      "toml": "hooks.'\\u0073tate' = { trusted = true }\n",
+      "expected": true,
+      "lineBased": true,
+      "knownDivergence": false,
+      "note": "Same rule at the exemption: the literal key is `\\u0073tate`, not `state`, so this IS a declaration. Decoding literal strings would under-detect it."
+    },
+    {
+      "name": "unhandled-escape-in-event-key",
+      "toml": "hooks.\"Session\\tEnd\" = []\n",
+      "expected": true,
+      "lineBased": true,
+      "knownDivergence": false,
+      "note": "KNOWN LIMITATION, pinned as a no-op: the line-based decoders handle `\\uXXXX`, `\\UXXXXXXXX`, `\\\\` and `\\\"` only, and leave `\\t` (and `\\n`, `\\r`, `\\f`, `\\b`) as written rather than embedding a full TOML string decoder in a line scanner. It cannot change a verdict here, because the only two names these detectors compare against are `hooks` and `state`: both are lowercase ASCII, and `\\u`/`\\U` are the only escapes that can produce those characters. The limitation would start to matter only if the compared names ever stopped being plain ASCII."
+    },
+    {
+      "name": "event-table-quoted-key",
+      "toml": "[[hooks.\"SessionEnd\"]]\ncommand = [\"true\"]\n",
+      "expected": true,
+      "lineBased": true,
+      "knownDivergence": false,
+      "note": "The table-header spelling of the quoted key; already detected before the quoted-key fix, kept so the header branch cannot regress while the assignment branch is edited."
+    },
+    {
+      "name": "dotted-assignment-digit-leading-key",
+      "toml": "hooks.2fa = [{ command = \"x\" }]\n",
+      "expected": true,
+      "lineBased": true,
+      "knownDivergence": false,
+      "note": "REGRESSION GUARD: TOML bare keys are [A-Za-z0-9_-]+, so they may start with a digit. A charset anchored on a leading letter missed this dotted assignment entirely."
+    },
+    {
+      "name": "dotted-assignment-capitalised-event-key",
+      "toml": "hooks.State = { x = 1 }\n",
+      "expected": true,
+      "lineBased": true,
+      "knownDivergence": false,
+      "note": "REGRESSION GUARD for case sensitivity: `State` is not the exempt `state` key, so this is a declaration. PowerShell's case-insensitive -ne exempted it and under-detected."
+    },
+    {
+      "name": "capitalised-root-key-is-a-different-key",
+      "toml": "Hooks.UserPromptSubmit = []\n",
+      "expected": false,
+      "lineBased": false,
+      "knownDivergence": false,
+      "note": "REGRESSION GUARD for case sensitivity in the other direction: `Hooks` is a different root key, so nothing is declared under `hooks`. PowerShell's case-insensitive -match over-detected it."
+    },
+    {
+      "name": "trust-state-quoted-table-header",
+      "toml": "[hooks.\"state\"]\nenabled = true\n",
+      "expected": false,
+      "lineBased": false,
+      "knownDivergence": false,
+      "note": "The `state` exemption must follow the quoted spelling, otherwise widening the key charset turns trust state into a false positive."
+    },
+    {
+      "name": "trust-state-quoted-dotted-assignment",
+      "toml": "hooks.\"state\" = { trusted = true }\n",
+      "expected": false,
+      "lineBased": false,
+      "knownDivergence": false,
+      "note": "Same exemption for the dotted-assignment branch with a basic-string key."
+    },
+    {
+      "name": "trust-state-literal-quoted-dotted-assignment",
+      "toml": "hooks.'state' = { trusted = true }\n",
+      "expected": false,
+      "lineBased": false,
+      "knownDivergence": false,
+      "note": "Same exemption with a literal-string key."
+    },
+    {
+      "name": "trust-state-dot-whitespace-table",
+      "toml": "[hooks . state]\nenabled = true\n",
+      "expected": false,
+      "lineBased": false,
+      "knownDivergence": false,
+      "note": "Guards the widened whitespace tolerance: the `state` exemption must still apply to the spaced spelling, otherwise trust state becomes a false positive."
+    },
+    {
+      "name": "event-table-underscore-key",
+      "toml": "[[hooks.Session_End]]\ncommand = [\"true\"]\n",
+      "expected": true,
+      "lineBased": true,
+      "knownDivergence": false,
+      "note": "Key charset must allow _ and - in every implementation, otherwise the declaration is missed entirely."
+    },
+    {
+      "name": "table-state-lookalike-key",
+      "toml": "[hooks.state_backup]\nenabled = true\n",
+      "expected": true,
+      "lineBased": true,
+      "knownDivergence": false,
+      "note": "Only the exact key `state` is exempt; a prefix match must not exempt anything."
+    },
+    {
+      "name": "root-inline-table-with-event",
+      "toml": "hooks = { UserPromptSubmit = [] }\n",
+      "expected": true,
+      "lineBased": true,
+      "knownDivergence": false
+    },
+    {
+      "name": "root-inline-table-foreign-command",
+      "toml": "hooks = { command = 'foreign.exe' }\n",
+      "expected": true,
+      "lineBased": true,
+      "knownDivergence": false
+    },
+    {
+      "name": "trust-state-table",
+      "toml": "[hooks.state]\n\"/home/user/.codex/hooks.json:user_prompt_submit:0:0\" = { enabled = true }\n",
+      "expected": false,
+      "lineBased": false,
+      "knownDivergence": false
+    },
+    {
+      "name": "trust-state-quoted-subtable",
+      "toml": "[hooks.state.\"/home/user/.codex/hooks.json:user_prompt_submit:0:0\"]\nenabled = true\n",
+      "expected": false,
+      "lineBased": false,
+      "knownDivergence": false,
+      "note": "The shape Codex itself writes; must never be reported as an inline hook."
+    },
+    {
+      "name": "trust-state-dotted-inline-table",
+      "toml": "hooks.state = { trusted = true }\n",
+      "expected": false,
+      "lineBased": false,
+      "knownDivergence": false,
+      "note": "Hand-written equivalent of [hooks.state]; the dotted key must be exempted in the inline-table branch too."
+    },
+    {
+      "name": "no-hooks-section",
+      "toml": "[features]\nhooks = true\n",
+      "expected": false,
+      "lineBased": false,
+      "knownDivergence": false,
+      "note": "features.hooks is the enable flag, not a hook declaration. The most important case in this file: a false positive here makes install.sh/install.ps1 refuse to manage hooks on a perfectly normal config."
+    },
+    {
+      "name": "no-hooks-section-quoted-feature-flag",
+      "toml": "[features]\n\"hooks\" = true\n",
+      "expected": false,
+      "lineBased": false,
+      "knownDivergence": false,
+      "note": "Widening the detectors to quoted keys must not widen them into the feature flag: a bare root `hooks` key still only counts when followed by `= {`, quoted spelling included."
+    },
+    {
+      "name": "dotted-feature-flag",
+      "toml": "features.hooks = true\n",
+      "expected": false,
+      "lineBased": false,
+      "knownDivergence": false,
+      "note": "The dotted spelling of the same flag; the assignment branch is anchored on the root key so `features.hooks` can never reach it."
+    },
+    {
+      "name": "dotted-assignment-inside-another-section",
+      "toml": "[other]\nhooks.SessionEnd = []\n",
+      "expected": false,
+      "lineBased": false,
+      "knownDivergence": false,
+      "note": "REGRESSION GUARD: a dotted key is relative to the table it sits in, so this declares `other.hooks.SessionEnd`, not a root hook. Line-based detectors that judged the line without tracking `[table]` headers over-detected it - the same family of false positive as the `[features] hooks = true` flag, which `= {` alone does not cover."
+    },
+    {
+      "name": "root-inline-table-inside-another-section",
+      "toml": "[other]\nhooks = { UserPromptSubmit = [] }\n",
+      "expected": false,
+      "lineBased": false,
+      "knownDivergence": false,
+      "note": "The inline-table spelling of the same mistake: inside `[other]` this is `other.hooks`."
+    },
+    {
+      "name": "dotted-assignment-inside-trust-state-section",
+      "toml": "[hooks.state]\nhooks.SessionEnd = []\n",
+      "expected": false,
+      "lineBased": false,
+      "knownDivergence": false,
+      "note": "The exempt header does not return an answer by itself, so the assignment below it still has to be judged in context: it is `hooks.state.hooks.SessionEnd`, buried in the trust store, not a hook declaration."
+    },
+    {
+      "name": "dotted-assignment-before-first-table-header",
+      "toml": "hooks.SessionEnd = []\n[other]\nx = 1\n",
+      "expected": true,
+      "lineBased": true,
+      "knownDivergence": false,
+      "note": "The context rule must not swallow the ordinary case: everything before the first header is the root table, so this declaration still counts."
+    },
+    {
+      "name": "dotted-assignment-after-array-element-lookalike",
+      "toml": "args = [\n  [\"a\"]\n]\nhooks.SessionEnd = []\n",
+      "expected": true,
+      "lineBased": true,
+      "knownDivergence": false,
+      "note": "`[\"a\"]` is an array element, not a table header: it sits at bracket depth 1. A root-context tracker that treated any `[...]` line as a header would end the root table here and miss the declaration below. Depth 0 is therefore part of the header rule, the same way _fallback_toml_structure_error applies it."
+    },
+    {
+      "name": "multiline-basic-string-closing-with-extra-quote",
+      "toml": "x = [\"\"\"a\"\"\"\", 1]\n",
+      "expected": false,
+      "lineBased": false,
+      "knownDivergence": false,
+      "note": "REGRESSION GUARD: `\"\"\"a\"\"\"\"` is the valid multi-line basic string `a\"`. TOML lets one or two quotes sit just inside the closing delimiter (`mlb-quotes = 1*2quotation-mark`, https://toml.io/en/v1.0.0#string), so a run of adjacent quotes must be consumed whole and only its LAST three are the delimiter. Line-based scanners that took the FIRST three closed the string early, swallowed the trailing `]` as string content and reported `unterminated array or inline table` - rejecting a perfectly valid config, which stops the installer outright rather than merely warning. Direction matters here: over-detection costs a redundant warning, but refusing valid TOML blocks a working install."
+    },
+    {
+      "name": "multiline-basic-string-closing-with-two-extra-quotes",
+      "toml": "x = [\"\"\"a\"\"\"\"\", 1]\n",
+      "expected": false,
+      "lineBased": false,
+      "knownDivergence": false,
+      "note": "The five-quote spelling of the same rule: `\"\"\"a\"\"\"\"\"` is `a\"\"`, the longest run TOML permits. Six or more adjacent quotes cannot occur at all and are pinned under invalidToml.detectedByLineBased as impossible-quote-run."
+    },
+    {
+      "name": "multiline-basic-string-spec-example-str7",
+      "toml": "str7 = \"\"\"\"This,\" she said, \"is just a pointless statement.\"\"\"\"\n",
+      "expected": false,
+      "lineBased": false,
+      "knownDivergence": false,
+      "note": "The spec's own `str7` example (https://toml.io/en/v1.0.0#string), where the run sits on BOTH sides of the string: four quotes open (delimiter plus a content quote) and four close. Pinned verbatim so the rule is anchored to the specification rather than to a hand-made case."
+    },
+    {
+      "name": "multiline-literal-string-closing-with-extra-apostrophe",
+      "toml": "str = ''''That,' she said, 'is still pointless.''''\n",
+      "expected": false,
+      "lineBased": false,
+      "knownDivergence": false,
+      "note": "The identical rule for multi-line literal strings (`mll-quotes = 1*2apostrophe`), also a verbatim spec example. The earlier scanner returned the first `'''` it found for literal strings without even the escape check, so this half of the rule needs its own guard."
+    },
+    {
+      "name": "hook-declaration-after-multiline-string-with-extra-quote",
+      "toml": "x = [\"\"\"a\"\"\"\", 1]\n[[hooks.SessionEnd]]\ncommand = [\"true\"]\n",
+      "expected": true,
+      "lineBased": true,
+      "knownDivergence": false,
+      "note": "The other direction of the same fix: getting the closing delimiter wrong also mis-tracks where the string ended, so a real declaration after it must still be found rather than hidden inside the string."
+    },
+    {
+      "name": "nested-array-element-quoting-hooks",
+      "toml": "values = [\n  [\"hooks\"]\n]\n",
+      "expected": false,
+      "lineBased": false,
+      "knownDivergence": false,
+      "note": "REGRESSION GUARD: `[\"hooks\"]` here is an array element at bracket depth 1, not a `[hooks]` table header. Both line-based detectors applied the table-header regex BEFORE consulting the current nesting depth and so over-detected it; the depth test now gates every branch, not just the one that ends the root-table context. Consequence of the false positive: install.ps1/install.sh warn about pre-existing inline hooks and their confirmation prompt defaults to No, skipping the workflow hook on a config that never declared one. (The single-line spelling `values = [ [\"hooks\"] ]` never reproduced - both assignment regexes are anchored at the line start, so `values` is the captured root key. Only the multi-line array puts the element on a line of its own.)"
+    },
+    {
+      "name": "hook-shapes-in-comments",
+      "toml": "# [[hooks.PreToolUse]]\n# hooks = { UserPromptSubmit = [] }\n[features]\nhooks = true\n",
+      "expected": false,
+      "lineBased": false,
+      "knownDivergence": false
+    },
+    {
+      "name": "hook-shapes-in-multiline-basic-string",
+      "toml": "notes = \"\"\"\n[[hooks.PreToolUse]]\nhooks = { UserPromptSubmit = [] }\n\"\"\"\n",
+      "expected": false,
+      "lineBased": false,
+      "knownDivergence": false
+    },
+    {
+      "name": "hook-shapes-in-multiline-literal-string",
+      "toml": "notes = '''\n[[hooks.PreToolUse]]\nhooks = { UserPromptSubmit = [] }\n'''\n",
+      "expected": false,
+      "lineBased": false,
+      "knownDivergence": false
+    },
+    {
+      "name": "empty-hooks-table-header",
+      "toml": "[hooks]\n",
+      "expected": false,
+      "lineBased": true,
+      "knownDivergence": true,
+      "note": "KNOWN DIVERGENCE: a bare [hooks] header declares nothing, so the structural answer is false. Line-oriented detectors see the header only and report true. Deciding emptiness would require tracking the whole section body across lines; both line-based implementations deliberately stay conservative and identical instead."
+    },
+    {
+      "name": "empty-root-inline-table",
+      "toml": "hooks = {}\n",
+      "expected": false,
+      "lineBased": true,
+      "knownDivergence": true,
+      "note": "KNOWN DIVERGENCE: same reason as empty-hooks-table-header, for the inline-table spelling."
+    },
+    {
+      "name": "root-inline-table-with-only-state",
+      "toml": "hooks = { state = { trusted = true } }\n",
+      "expected": false,
+      "lineBased": true,
+      "knownDivergence": true,
+      "note": "KNOWN DIVERGENCE: the exempt key sits inside the root inline table, so recognising it means parsing the table body. Neither line-based implementation imitates a TOML parser; both report true."
+    }
+  ]
+}

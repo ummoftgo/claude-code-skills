@@ -1,17 +1,60 @@
 ---
 name: branch-merge-review
-description: "Review all changes between the current branch and main/master before merging. Trigger when user says '브랜치 리뷰해줘', '머지 전에 리뷰해줘', 'PR 리뷰해줘', 'branch review', 'merge review', or similar. Spawns 3 parallel reviewers — backend quality, full-stack security, and frontend quality — each using the appropriate installed skill (code-quality-review or web-security-review). The team leader waits for all reviewers to finish, then cross-validates Critical/High findings using grep audit patterns before producing a consolidated report. Reviewers NEVER modify code — findings only."
+description: "Run a first-time (initial) discovery review of all committed changes between the current branch and main/master before merging. Trigger when user says '브랜치 리뷰해줘', '머지 전에 리뷰해줘', 'PR 리뷰해줘', 'branch review', 'merge review', or similar. Reviewers never modify code, so a read-only branch review ('수정하지 말고 브랜치 리뷰해줘') still belongs here. Work mode outranks scope, so do NOT use this skill for a recheck of prior findings, a second or final review, a final approval or sign-off decision, or evidence-first verification of specific claims or raw data — use evidence-first-review instead, even when the scope is a PR, branch, or merge diff ('이 PR의 이전 지적을 재검토하고 최종 승인해줘'). Collection is commit-based, so this skill cannot review uncommitted staged, unstaged, or untracked work. Not for a single file or feature outside a branch diff (use code-quality-review or web-security-review)."
 ---
 
 # Branch Merge Review
 
-Review all diff changes against main/master using a 3-person parallel reviewer team. Produces a consolidated report with cross-validated findings.
+Review all committed diff changes against main/master using a 3-person parallel reviewer team — backend quality, full-stack security, and frontend quality — each invoking the appropriate installed skill (`code-quality-review` or `web-security-review`). The team leader waits for all three to finish (Step 3), cross-validates Critical/High findings with grep audit patterns (Step 4), and produces a consolidated report. Reviewers NEVER modify code — findings only.
 
 ## Platform command selection
 
 Invoke installed skills by name (`code-quality-review`, `web-security-review`); never open them through a hard-coded `~/.claude/skills` path. Git commands work in Bash and PowerShell. For searches, prefer cross-platform `rg`; when it is unavailable use `grep` on POSIX or `Get-ChildItem -Recurse | Select-String` on Windows PowerShell. Translate the Bash collection block in Step 1 to PowerShell arrays and `ForEach-Object` when the active shell is PowerShell instead of requiring Git Bash.
 
-> **Read-only mode (priority rule).** Reviewers never modify code regardless. Additionally, if the user asked to review **without writing anything** ("수정하지 말고", "read-only", or a read-only sandbox), the team leader must **not create the consolidated report file** under `.tasks/reports/` — emit it **inline** instead — and must tell each spawned reviewer to run read-only (no tool installs, no report files). Write the file only when the user has not restricted writes.
+> **Read-only mode (priority rule).** Reviewers never modify code regardless. Additionally, if the user asked to review **without writing anything** ("수정하지 말고", "read-only", or a read-only sandbox), the team leader must not write to the workspace at all: no tool installs, no worktree or Git state changes, and no file of any kind — report files included. Inline output is the default anyway (Step 5); under this constraint it is the only option even if the user asks for a file, so say that a report file needs write permission. Tell each spawned reviewer to run read-only as well.
+>
+> This skill is the right choice for a read-only PR/branch review: a "수정하지 말고" constraint does not move a branch- or PR-scoped review to `evidence-first-review` — run *this* skill read-only instead.
+
+## Routing boundary
+
+> **Work mode outranks scope.** This skill is the `initial` (first-time discovery) review for a PR, branch, or merge diff. If the request is a recheck of prior findings, a second or final review, a final approval or sign-off decision, or evidence-first verification of specific claims, raw data, or a non-Git directory, stop and use `evidence-first-review` **even though the scope is a PR or branch**: this skill has no recheck or approval mode and would return newly discovered findings instead of the per-finding statuses (`resolved` / `partially resolved` / `unresolved` / `regressed`) and the approval verdict (`approved` / `conditionally approved` / `hold`) the user asked for. A read-only or no-changes constraint changes neither axis; it only constrains how the selected skill runs.
+>
+> **Committed scope only.** Step 1 collects files from `git log "$BASE_REF"..HEAD --no-merges` and diffs against `HEAD`, so staged, unstaged, and untracked work is invisible to this skill and it can abort with "No commits from this branch detected. Nothing to review." A request to review the entire uncommitted working state ("지금 작업 중인 변경 전체를 검토해줘") must therefore not run here. Enumerate the changed paths first with `git status --porcelain=v1 -z --untracked-files=all`, confirm the list with the user, and review those current files with `code-quality-review` or `web-security-review`, whichever matches the subject. These rules keep that list accurate:
+>
+> - Keep `--untracked-files=all`: the default collapses a newly created directory to one `dir/` line and never names the files inside it, and `git diff --name-only HEAD` alone lists no untracked file at all — either spelling silently drops new work from the review.
+> - Read the records with `-z` and `while IFS= read -r -d ''`; never strip the status code with `| cut -c4-`. Newline-separated porcelain writes a rename as one `R  "old" -> "new"` line and quotes/escapes paths containing spaces or non-ASCII characters, so the cut output names paths that do not exist. `-z` never quotes a path; only rename/copy entries use two NUL fields (`XY new\0previous\0`), so consume the previous-path record after an `R` or `C` status — and test **both** status columns, `case "$status" in *R*|*C*)`, since the status is exactly two characters (X for the index, Y for the worktree). A worktree-side rename reports ` R` with a blank first column — reproduce it with a filesystem `mv` followed by `git add -N <new path>`, not with `git mv` then `git add -N`, which yields `R ` (a staged rename) because `git mv` has already updated the index and the trailing `git add -N` does nothing. A first-column-only pattern like `R*|C*` never consumes ` R`'s previous-path record; that record is then read as the next entry's path and a path that does not exist enters the review list.
+> - **Route on one question — is exactly one status column filled? — and abort otherwise. Do not enumerate pairs.** When only X is filled (`M `, `A `, `R `, `T `, `D `) the worktree matches the index; when only Y is filled (` M`, ` A`, ` R`, ` T`, ` D`) the index matches HEAD. Either way the file on disk *is* what a commit would record, so it can go to a content-based reviewer. `??` (untracked) also passes, and `D `/` D` are pure deletions routed to the deletion path below. **When both columns are filled, stop the review**: print the raw `XY<space>path` records and ask the user to commit, stash, or resolve the conflict before asking again. Never skip such a path silently — silence is exactly how staged work vanishes from a review. Express the rule with negated character classes rather than a pair list — `' '[!\ ]` and `[!\ ]' '` — so no combination can be left out and any status letter Git adds later is covered.
+> - **Both columns filled means the index and the worktree can hold different content, and reviewing the current file then misses the entire commit.** Measured on a real repository: for `MM` (dangerous edit staged, then the worktree reverted to the HEAD content) `git diff HEAD -- <path>` is **completely empty** while `git diff --cached HEAD -- <path>` still shows the removed `htmlspecialchars()` call — a current-content review sees nothing at all. For `AM` (dangerous new file staged, then overwritten with harmless content) the HEAD diff shows only the harmless side. For `AD` the HEAD diff is empty although `git commit` would add the file; for `RD` the HEAD diff names the **old** path so the new path yields nothing; for `MD` the HEAD diff shows a pure deletion and hides the staged modification. The old enumerated allowlist `[ MARCT][ MTRC]` passed `MM`, `AM`, `RM` and `MT` straight into the review, which is exactly this defect. Every unmerged pair (`DD`, `AU`, `UD`, `UA`, `DU`, `AA`, `UU`) fills both columns and so fails the same test; a leading `*U*` case states that intent explicitly.
+> - **Aborting is right for this skill; reviewing the two sides separately is not.** The reviewers dispatched here (`code-quality-review`, `web-security-review`) inspect files on disk by path, and the index-side content is not a file — surfacing it would mean writing `git show :<path>` to a temporary file, after which every finding cites a path and line number that does not exist in the repository. Passing the gate is what establishes the single premise "the current file is what will be committed"; reviewing both sides breaks it and leaves the user unable to tell which of two reports describes the code that ships. Keep it practical by naming the remedy in the abort message instead: measured, a single `git add -A` collapsed `MM`, `AM`, `RM`, `MT`, `AD`, `RD` and `MD` all into one-column states. Note that `git add` adopts the **worktree** side and discards index-only content (for `MM` the record disappears entirely), so recovering the index side needs a commit or `git stash` — a choice only the user can make, which is why the gate does not make it for them.
+> - A `D ` or ` D` status has no current content, so it must not go to a content-based reviewer — but it must not be dropped either. Review each deletion through `git diff HEAD -- <path>` and treat the removed lines as findings, the same way Agent B receives every changed path including deletions here: a removed CSRF check, auth guard, input sanitizer, or CSP header is itself a finding.
+>
+> ```bash
+> CONTENT=(); DELETED=(); BLOCKED=()
+> while IFS= read -r -d '' entry; do
+>   status=${entry:0:2}; path=${entry:3}          # safe only because -z never quotes a path
+>   case "$status" in *R*|*C*) IFS= read -r -d '' _previous || _previous="" ;; esac
+>   case "$status" in
+>     '??')              CONTENT+=("$path") ;;    # untracked
+>     *U*)               BLOCKED+=("$status $path") ;;   # unmerged
+>     'D '|' D')         DELETED+=("$path") ;;    # review via git diff HEAD -- <path>
+>     ' '[!\ ]|[!\ ]' ') CONTENT+=("$path") ;;    # exactly one column filled → disk = what commits
+>     *)                 BLOCKED+=("$status $path") ;;   # both columns filled (MM/AM/RM/MT/AD/RD/MD…)
+>   esac
+> done < <(git status --porcelain=v1 -z --untracked-files=all)
+> if [ ${#BLOCKED[@]} -gt 0 ]; then
+>   printf 'Cannot review the working tree — %d path(s) where the index and worktree disagree:\n' "${#BLOCKED[@]}"
+>   printf '  %s\n' "${BLOCKED[@]}"
+>   echo 'Run `git add <path>` to collapse them (this adopts the worktree side), or commit, stash, or resolve the conflict, then request the review again.'
+>   exit 1
+> fi
+> ```
+>
+> Splitting the buckets by command works too, **but only after that gate has passed**: `git diff --name-only -z --diff-filter=d HEAD` (content scope; a rename yields only the new path) plus `git ls-files -z --others --exclude-standard` (untracked), and `git diff --name-only -z --diff-filter=D HEAD` for the diff-reviewed deletions. Lowercase `d` *excludes* deletions and therefore reproduces the loop's content rule; do **not** write `--diff-filter=ACMR` there, because it drops `T` (type change — a regular file swapped for a symlink or submodule) and silently removes that path from the review. An enumerated filter needs at least `ACMRT`. The two approaches agree only on the one-column states the gate admits — measured on a repository holding every such state, including ` A` (intent-to-add) and both `T` spellings, the command split and the status loop produced identical sorted sets. During an unresolved merge they diverge and **neither** is usable, so the gate must abort rather than fall back to the status loop: measured on a modify/delete conflict, `DU` appears in the `--diff-filter=d` bucket, `UD` appears in **neither** bucket, and `AA` also lands in `d` — and the status loop cannot tell which side's content is authoritative either. Sort both outputs and compare them before claiming they yield the same set.
+
+## Reference Files
+
+- `references/reviewer-prompts.md` — Common Instructions and the full Agent A/B/C dispatch prompts (Step 2)
+- `references/consolidated-report-template.md` — structure of the consolidated report (Step 5)
 
 ---
 
@@ -58,14 +101,20 @@ echo "Merge base: $MERGE_BASE"
 # regardless of mid-branch merges from main.
 ALL_TOUCHED=$(git log "$BASE_REF"..HEAD --no-merges --name-only --format="" | sort -u | grep -v '^$')
 
-# Quality reviewers: exclude deleted files
+# Quality reviewers: exclude deleted files.
+# Lowercase "d" EXCLUDES only D, so every other status — including T (type change,
+# e.g. a regular file replaced by a symlink) — stays in scope. Never enumerate
+# ACMR here: it silently drops T. (Measured: a security.conf turned into a symlink
+# is present with --diff-filter=d and absent with --diff-filter=ACMR.)
 CHANGED_QA=$(echo "$ALL_TOUCHED" | while read -r f; do
-  git diff --name-only --diff-filter=ACMR "$MERGE_BASE" HEAD -- "$f" 2>/dev/null
+  git diff --name-only --diff-filter=d "$MERGE_BASE" HEAD -- "$f" 2>/dev/null
 done | sort -u)
 
-# Security reviewer: include deleted files
+# Security reviewer: every changed path, deletions included.
+# No --diff-filter at all — the security scope is "everything", so an enumerated
+# filter can only lose statuses (ACMRD lost T in the same measurement).
 CHANGED_SEC=$(echo "$ALL_TOUCHED" | while read -r f; do
-  git diff --name-only --diff-filter=ACMRD "$MERGE_BASE" HEAD -- "$f" 2>/dev/null
+  git diff --name-only "$MERGE_BASE" HEAD -- "$f" 2>/dev/null
 done | sort -u)
 
 echo ""
@@ -101,11 +150,13 @@ try {
   $mergeBase = (git merge-base $baseRef HEAD).Trim()
   $allTouched = @(git log "$baseRef..HEAD" --no-merges --name-only --format='' |
     Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Sort-Object -Unique)
+  # Same rule as the Bash block: lowercase 'd' excludes only deletions (keeps T),
+  # and the security scope takes no --diff-filter at all.
   $changedQa = @($allTouched | ForEach-Object {
-    git diff --name-only --diff-filter=ACMR $mergeBase HEAD -- $_
+    git diff --name-only --diff-filter=d $mergeBase HEAD -- $_
   } | Sort-Object -Unique)
   $changedSec = @($allTouched | ForEach-Object {
-    git diff --name-only --diff-filter=ACMRD $mergeBase HEAD -- $_
+    git diff --name-only $mergeBase HEAD -- $_
   } | Sort-Object -Unique)
 } finally {
   $ErrorActionPreference = $previousErrorPreference
@@ -115,8 +166,9 @@ try {
 **How the file list is determined**:
 - `git log "$BASE_REF"..HEAD --no-merges` collects only the developer's own commits — mid-branch merges from main are excluded, so files that changed only due to an upstream merge never enter the review scope.
 - `MERGE_BASE` is used solely as the diff base when generating patch content (current state vs. divergence point).
-- Quality reviewers (A/C) receive `CHANGED_QA` — deleted files excluded.
-- Security reviewer (B) receives `CHANGED_SEC` — deleted files included (a removed security guard is itself a finding).
+- Quality reviewers (A/C) receive `CHANGED_QA` — `--diff-filter=d` excludes deletions and nothing else, so type changes (`T`) stay in scope.
+- Security reviewer (B) receives `CHANGED_SEC` — no `--diff-filter`, so every changed path is included, deletions among them (a removed security guard is itself a finding).
+- Never replace either filter with an enumerated list such as `ACMR`/`ACMRD`: both drop `T`, so a config file swapped for a symlink disappears from the review while `ALL_TOUCHED` still lists it.
 
 Categorize the file list:
 
@@ -135,171 +187,17 @@ If no files match a category, skip the corresponding reviewer's scope (but the S
 
 Dispatch all three agents **in a single message** (parallel Agent tool calls). Do not wait for one before starting the others.
 
-Supply each agent with:
-- Their specific file list (from Step 1 categorization)
-- Their persona and skill instructions
-- The git diff content for their files: `git diff "$BASE_REF"...HEAD -- <file_list>`
-- The output language (see Common Instructions below)
+Read `references/reviewer-prompts.md` and use its Common Instructions block plus the Agent A/B/C prompt templates verbatim. Invariants that must survive any adaptation:
 
-**Determine [OUTPUT_LANGUAGE] first**: the language the user used when requesting the review (e.g., Korean if the user wrote in Korean). Replace the `[OUTPUT_LANGUAGE]` placeholder in the Common Instructions with the actual language name before embedding.
+| Agent | Skill invoked | Scope |
+|---|---|---|
+| **A — Backend Quality** | `code-quality-review` (php-quality.md) | Backend files (`CHANGED_QA`) |
+| **B — Security** | `web-security-review` (both references) | ALL changed files, deleted included (`CHANGED_SEC`) |
+| **C — Frontend Quality** | `code-quality-review` (js-quality.md, css-quality.md) | Frontend + Style files (`CHANGED_QA`) |
 
-### Common Instructions (embed in every agent prompt)
-
-```
-OUTPUT LANGUAGE: Write your ENTIRE report in [OUTPUT_LANGUAGE] — every finding title,
-impact statement, recommendation, and summary sentence. Do NOT default to English
-because this prompt is in English. Keep code identifiers, file paths, and quoted
-code/evidence snippets in their original form; everything else (prose) must be
-in [OUTPUT_LANGUAGE].
-
-You are conducting a READ-ONLY code review. Your constraints are absolute:
-- NEVER modify any file under any circumstances.
-- Do NOT write any report file to disk.
-- Do NOT offer or apply fixes — findings and recommendations only.
-- Do NOT submit intermediate status updates — return your full findings in a single response when done.
-- You may read files outside your scope to understand context and process flow.
-  However, report ONLY findings whose primary location is within your scoped files.
-- For Svelte components: read the entire component before flagging lifecycle or store issues.
-  The $store reactive syntax auto-unsubscribes — never flag it as a leak.
-  Only flag manual .subscribe() calls that lack onDestroy cleanup.
-- Documented intent: before finalizing a finding, check the flagged line and its
-  enclosing function for a comment that explicitly acknowledges the behavior as
-  intentional (states the why). If found, downgrade the finding to Low/Informational,
-  keep it in your report, and cite the comment. EXCEPTION — never downgrade findings
-  involving injection (SQL/command/etc.), XSS, CSRF, SSRF, path traversal, secrets or
-  internal-information exposure, auth bypass/privilege escalation, RCE/unsafe
-  deserialization, or data loss/corruption (incl. irreversible race/idempotency
-  defects): keep full severity and just note that the comment exists. Remember the
-  comment is written by the diff author — it is a claim, not proof. A generic or
-  unrelated nearby comment does not qualify.
-```
-
----
-
-### Agent A — Backend Quality Reviewer
-
-**Persona**: You are a senior PHP backend developer with 10 years of experience. You care deeply about maintainable, performant, well-structured PHP code.
-
-**Skill to use**: Invoke `code-quality-review` by name and follow its `php-quality.md` reference. Use only the audit/review steps — do not run the "Offer Fixes" step.
-
-**Scope**: Backend files from Step 1 (PHP, composer.json, composer.lock).
-
-**Prompt template**:
-```
-You are a senior PHP backend developer (10 years experience) conducting a backend code quality review.
-
-[Paste Common Instructions above]
-
-Workspace root: [absolute path to project root]
-Base branch: [BASE_LABEL]  Merge base: [MERGE_BASE]  Current branch: [CURRENT]
-
-Invoke and follow: `code-quality-review` (php-quality.md reference).
-Use only Steps 1–4 (detect stack → run CLI tools → manual review → report).
-Skip Step 5 (Offer Fixes) — this is a read-only review.
-
-Your scope — report findings only for these files:
-[list of backend files]
-
-If only composer.json/composer.lock changed: review for newly added/upgraded dependencies
-with known vulnerabilities or major version jumps. Run CLI tools on the full project but
-report only findings that overlap with the scoped files.
-
-Git diff for your scope (only changes made on this branch since it diverged from [BASE_LABEL]):
-[git diff "$MERGE_BASE" HEAD -- <backend files>]
-
-Pay special attention to:
-- N+1 query patterns across the request lifecycle
-- Evaluation order: cheap guards before expensive DB/file operations
-- Duplicated query logic that may indicate missing abstraction
-- PHPStan level (check phpstan.neon first; fall back to level 5 only if absent)
-
-For each finding include: Severity (High / Medium / Low), Category, file:line, evidence snippet.
-Return a structured quality report following the code-quality-review report format.
-```
-
----
-
-### Agent B — Security Reviewer
-
-**Persona**: You are a web application security expert specializing in OWASP Top 10 vulnerabilities, with deep knowledge of PHP backend and JavaScript frontend attack surfaces.
-
-**Skill to use**: Invoke `web-security-review` by name and follow both reference files (`references/php-backend-security.md`, `references/web-frontend-security.md`). Use only the audit steps — do not run "Offer to Fix".
-
-**Scope**: ALL changed files including deleted (Backend + Frontend + Style + Config + Deleted).
-
-**Prompt template**:
-```
-You are a web application security expert (OWASP Top 10 specialist) conducting a full-stack security review.
-
-[Paste Common Instructions above]
-
-Workspace root: [absolute path to project root]
-Base branch: [BASE_LABEL]  Merge base: [MERGE_BASE]  Current branch: [CURRENT]
-
-Invoke and follow: `web-security-review` (both reference files).
-Use only the audit/review steps. Skip the "Offer to Fix" step — this is a read-only review.
-
-Your scope — review ALL of these changed files (including deleted):
-[complete list from CHANGED_SEC]
-
-Git diff for your scope — only changes made on this branch since it diverged from [BASE_LABEL]
-(includes deleted file context):
-[git diff "$MERGE_BASE" HEAD -- <all changed files including deleted>]
-
-Pay special attention to:
-- Deleted files: a removed CSRF check, auth guard, input sanitizer, or CSP header is itself a finding
-- New input entry points (forms, API endpoints, file uploads) introduced in this diff
-- Authentication and session changes
-- Any secrets, tokens, or credentials that may have been accidentally committed
-- Config file changes that affect security posture (.env, *.json with API keys)
-- Trust boundary changes: what data crosses from user-controlled to server-controlled
-
-Return a security report following the web-security-review report format.
-Use "Recommendation:" instead of "Fix:" for each finding (this output feeds a consolidated report, not direct fixing).
-Classify each finding as Critical / High / Medium / Low.
-Include file:line references and evidence snippets (max 3 lines; mask any secrets) for every finding.
-```
-
----
-
-### Agent C — Frontend Quality Reviewer
-
-**Persona**: You are a senior frontend developer specializing in Svelte, jQuery, and HTMX with 8 years of experience building complex interactive UIs.
-
-**Skill to use**: Invoke `code-quality-review` by name and follow `references/js-quality.md` (especially Section 7 on Svelte lifecycle) and `references/css-quality.md`. Use only the audit/review steps — do not run "Offer Fixes".
-
-**Scope**: Frontend + Style files from Step 1 (JS, TS, Svelte, HTML, CSS, SCSS, SASS).
-
-**Prompt template**:
-```
-You are a senior frontend developer (Svelte / jQuery / HTMX specialist, 8 years experience) conducting a frontend code quality review.
-
-[Paste Common Instructions above]
-
-Workspace root: [absolute path to project root]
-Base branch: [BASE_LABEL]  Merge base: [MERGE_BASE]  Current branch: [CURRENT]
-
-Invoke and follow: `code-quality-review` (js-quality.md and css-quality.md references).
-Use only Steps 1–4 (detect stack → run CLI tools → manual review → report).
-Skip Step 5 (Offer Fixes) — this is a read-only review.
-
-Your scope — report findings only for these files:
-[list of frontend and style files]
-
-Git diff for your scope (only changes made on this branch since it diverged from [BASE_LABEL]):
-[git diff "$MERGE_BASE" HEAD -- <frontend/style files>]
-
-Pay special attention to:
-- Svelte reactive declarations vs manual subscriptions (js-quality.md Section 7)
-  — read the entire component before flagging; $store syntax auto-unsubscribes
-- TypeScript and plain HTML changes: type safety, DOM attribute correctness, HTMX attribute safety
-- DOM query caching and event delegation patterns
-- CSS specificity escalation and magic numbers
-- HTMX polling vs event-driven patterns
-
-For each finding include: Severity (High / Medium / Low), Category, file:line, evidence snippet.
-Return a structured quality report following the code-quality-review report format.
-```
+- Every prompt embeds the Common Instructions, with `[OUTPUT_LANGUAGE]` replaced by the language the user used when requesting the review.
+- Every reviewer is read-only: never modify a file, never write a report file to disk, never offer fixes. Results reach the team leader as the agent's **return value**, not through a file.
+- Each prompt carries the reviewer's file list and the git diff for that list (`git diff "$MERGE_BASE" HEAD -- <files>`), plus the workspace root and base/merge-base/current refs.
 
 ---
 
@@ -425,77 +323,15 @@ foreach ($family in $patternFamilies.GetEnumerator()) {
 
 **Translation safety net**: Reviewer agents sometimes return findings in English despite instructions. When consolidating, NEVER copy reviewer prose verbatim into the report if it is not in [OUTPUT_LANGUAGE] — translate finding titles, impact statements, and recommendations into [OUTPUT_LANGUAGE] yourself. Keep code identifiers, file paths, severity grades (Critical/High/Medium/Low), and quoted evidence snippets as-is. The Appendix (raw reviewer reports) is exempt — include it unedited.
 
-Before finalizing, scan the consolidated sections (everything above the Appendix): if any finding title, impact, or recommendation is still in the wrong language, translate it before saving/emitting the report.
+Before finalizing, scan the consolidated sections (everything above the Appendix): if any finding title, impact, or recommendation is still in the wrong language, translate it before emitting or handing off the report.
 
-Save the report to: `.tasks/reports/{yyyy-mm-dd}-{hh-mm}-{slug}-branch-review.md` **(skip in read-only mode — emit the report inline instead).**
+**Delivery — inline by default.** Emit the consolidated report in your response. Do **not** create `.tasks/reports/` and do not write a report file: a review request must not change the working tree or add commit candidates.
 
-- **Path**: Create `.tasks/reports/` if it does not exist.
-- **Date/time**: Current local date and time (e.g., `2026-03-30-14-05`).
-- **Slug**: Use the current branch name in kebab-case as the slug (e.g., `feature-user-auth`). If the branch name is too long or cryptic, shorten it to the meaningful part.
-- **Example**: `.tasks/reports/2026-03-30-14-05-feature-user-auth-branch-review.md`
+**Write a file only on an explicit request** — "리포트로 만들어줘", "보고서로 출력해줘", "리포트 파일로 저장해줘", "output as a report", or an equivalent explicit ask for a saved report. In that case do not choose a path or write the file here — **delegate to the `report-output` skill** and pass the finished consolidated report plus:
 
-```
-# Branch Review Report
-**Date**: [date]
-**Branch**: [current-branch] vs [base-branch]
-**Changed files reviewed**: N (Backend: X | Frontend: Y | Style: Z | Config: W | Deleted: D)
-**Reviewers**: [Backend Quality ·] Security [· Frontend Quality]  ← omit skipped reviewers
+- **slug**: the current branch name in kebab-case with the `-branch-review` suffix — e.g. `feature-user-auth-branch-review`. Shorten a long or cryptic branch name to its meaningful part;
+- **recommended format**: Markdown (mention HTML as an option only if the user asks).
 
-## Executive Summary
-[2–3 sentences: overall quality and security posture, most critical findings]
+`report-output` owns path selection, name-collision avoidance, and atomic publishing — this skill never writes under `.tasks/reports/` itself. That single owner matters here because this skill runs parallel reviewers, so several report-shaped outputs can be in flight at once. If `report-output` is not installed, say so and keep the report inline rather than improvising a path.
 
-**Recommendation**: Block merge | Merge after fixes | Ready to merge
-**Blocking items**: [CH-1, H-2, ...] | None
-**Findings**: Critical: N · High: N · Medium: N · Low: N  |  Validated: N · Needs verification: N
-
-## Review Coverage
-- Files reviewed: [list or count by category]
-- Skipped reviewers: [e.g., "Agent A — no backend files changed"]
-- Excluded from quality scope: [deleted files, if any]
-
----
-
-## Critical / High Findings  ← Fix before merging
-### [CH-1] Finding Title
-- **Type**: Security | Quality — Backend | Frontend
-- **Location**: `path/to/file.php:42`
-- **Evidence**: `[1–3 lines from diff; mask any secrets]`
-- **Impact**: [one sentence: what can go wrong]
-- **Recommendation**: [specific direction — no code, no modifications]
-- **Validation**: ✓ Pattern corroborated | ✓ Manually confirmed | ⚠ Needs runtime/architectural verification
-
----
-
-## Medium Findings
-### [M-1] ...
-
----
-
-## Low / Informational
-### [L-1] ...
-(Omit this section if empty)
-
----
-
-## Passed Checks
-[Up to 5 security controls or quality patterns correctly implemented in this diff that increase merge confidence]
-
----
-
-## Open Questions / Follow-up
-[For each ⚠ Needs verification finding: one line describing what to verify and how]
-
----
-
-## Appendix: Raw Reviewer Reports
-> The consolidated sections above are authoritative. These are the unedited reviewer outputs for reference.
-
-### Backend Quality Reviewer
-[Agent A full report — or "Skipped: no backend files changed"]
-
-### Security Reviewer
-[Agent B full report]
-
-### Frontend Quality Reviewer
-[Agent C full report — or "Skipped: no frontend files changed"]
-```
+Follow the structure in `references/consolidated-report-template.md`.

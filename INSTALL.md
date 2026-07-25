@@ -18,7 +18,7 @@ Windows 설치기는 WSL 경로를 대상으로 하지 않습니다. WSL 모드�
 |---|:---:|:---:|---|
 | `use-context7` | ✓ | ✓ | “Svelte 5 컴포넌트 만들어줘” |
 | `plan-and-build` | ✓ | ✓ | “새 인증 기능을 구현해줘” |
-| `evidence-first-review` | ✓ | ✓ | “컨텍스트 문서부터 읽고 수정 없이 재검토해줘” |
+| `evidence-first-review` | ✓ | ✓ | “컨텍스트 문서부터 읽고 이전 지적을 재검토해줘” |
 | `safe-checkpoint` | ✓ | ✓ | “해당 변경만 커밋하고 내일 재개할 인수인계를 남겨줘” |
 | `systematic-debugging` | ✓ | ✓ | “원인이 불명확한 오류를 분석하고 고쳐줘” |
 | `web-security-review` | ✓ | ✓ | “보안 검토해줘” |
@@ -28,7 +28,27 @@ Windows 설치기는 WSL 경로를 대상으로 하지 않습니다. WSL 모드�
 | `web-browser-preview` | ✓ | ✓ | “브라우저에서 확인해줘” |
 | `codex-delegate` | ✓ | — | “Codex에게 검토를 위임해줘” |
 
-`evidence-first-review`는 명시적인 읽기 전용 검토, 이전 지적 재검토, 최종 승인 검토에 사용합니다. 일반적인 최초 PR·브랜치 머지 검토는 `branch-merge-review`가 담당합니다.
+리뷰 스킬의 자연어 트리거는 서로 겹칩니다. 겹침 자체를 없애려 하지 않고 **① 작업 모드 → ② 범위 → ③ 주제** 순서로 해소합니다. 앞 단계에서 결론이 나면 뒤 단계는 보지 않습니다.
+
+1. **작업 모드** — 이전 지적 재검토(`recheck`), 최종 승인 판정(`final-approval`), 원본 데이터·비Git 디렉터리 검증이면 → `evidence-first-review`. **범위가 PR·브랜치여도 마찬가지입니다.** 지적별 상태 분류(`resolved`·`partially resolved`·`unresolved`·`regressed`)와 승인 판정(`approved`·`conditionally approved`·`hold`)은 이 스킬에만 있고, `branch-merge-review`는 신규 발견용이라 요청한 산출물이 나오지 않습니다. 두 스킬의 description이 이 경계를 서로 반대 방향에서 명시하므로 상호 배타적입니다.
+2. **범위** — 최초 검토(`initial`)이면 범위가 결정합니다. 범위가 PR·브랜치·머지 diff(커밋된 변경)이면 보안이 함께 명시돼도 `branch-merge-review`를 실행하며, 이 스킬이 `web-security-review`와 `code-quality-review`를 리뷰어로 디스패치합니다.
+3. **주제** — 범위가 브랜치 diff보다 좁을 때만 주제로 갈립니다. 보안이면 `web-security-review`, 품질·성능이면 `code-quality-review`.
+4. **미커밋 작업 전체**(staged·unstaged·untracked)를 스스로 수집하는 리뷰 스킬은 없습니다. `branch-merge-review`는 `git log <base>..HEAD`와 `HEAD` 비교로만 수집하므로 미커밋 변경을 놓칩니다. `git status --porcelain=v1 -z --untracked-files=all`로 경로를 확정한 뒤, 현재 파일 내용을 검사하는 `code-quality-review`·`web-security-review`에 그 목록을 넘기세요. 네 가지를 지켜야 목록이 정확합니다.
+   - `--untracked-files=all`은 생략하지 마세요 — 기본값은 새로 만든 디렉터리를 `dir/` 한 줄로 접어 그 안의 파일을 열거하지 않습니다.
+   - `-z`(NUL 구분)를 쓰고 `| cut -c4-`로 상태 코드를 잘라내지 마세요. 개행 구분 출력은 이름변경을 `R  "old" -> "new"` 한 줄로 쓰고 공백·비ASCII 경로를 큰따옴표로 감싸 이스케이프하므로, 잘라낸 문자열은 존재하지 않는 경로가 됩니다. `-z`는 경로를 인용하지 않으며, 이름변경·복사 항목만 `XY 새경로\0이전경로\0` 두 필드를 쓰므로 읽을 때 이전 경로 레코드를 소비합니다(`while IFS= read -r -d ''`). 이때 **상태 두 칸(X=index, Y=worktree)을 모두 검사**해야 합니다 — `case "$status" in *R*|*C*)`. worktree 쪽 이름변경은 첫 칸이 공백인 ` R`이라 `R*|C*`처럼 첫 칸만 보면 이전 경로 레코드를 소비하지 못하고, 그 레코드가 다음 항목의 경로로 읽혀 존재하지 않는 경로가 목록에 섞입니다.
+   - **통과 조건은 "두 칸 중 정확히 한 칸만 채워졌는가" 하나입니다 — 조합을 열거하지 마세요.** X만 채워졌으면(`M `·`A `·`R `·`T `·`D `) worktree가 index와 같고, Y만 채워졌으면(` M`·` A`·` R`·` T`·` D`) index가 HEAD와 같으므로, 어느 쪽이든 **현재 파일이 곧 커밋될 내용**입니다. `??`(untracked)도 통과하고 `D `·` D`는 순수 삭제라 diff로 검토합니다. **두 칸이 모두 채워졌으면 중단**하세요 — index와 worktree가 서로 다른 내용일 수 있어 현재 파일만으로는 무엇이 커밋될지 알 수 없습니다. 셸에서는 열거 대신 부정 문자 클래스로 그대로 표현합니다: `' '[!\ ]|[!\ ]' '`. 미해결 충돌 쌍(`DD`·`AU`·`UD`·`UA`·`DU`·`AA`·`UU`)은 전부 두 칸이 채워져 이 규칙만으로 중단되지만, 의도를 드러내려고 `*U*`를 앞에 따로 둡니다.
+
+     실측 근거 — 두 칸이 모두 채워진 상태를 통과시키면 `git commit`이 기록할 내용을 놓칩니다. `MM`(위험한 수정 staged 후 worktree를 HEAD로 되돌림)은 `git diff HEAD`가 **완전히 빈 결과**이고 제거된 sanitizer는 `git diff --cached HEAD`에만 있었습니다. `AM`은 `git diff HEAD`가 무해한 worktree 쪽만 보여 주고 위험한 추가는 index에만 있었습니다. `AD`는 HEAD diff가 빈 결과인데 커밋하면 파일이 추가되고, `RD`의 HEAD diff는 **이전 경로**를 삭제로 내놓아 새 경로 diff가 비며, `MD`는 순수 삭제만 보여 staged 수정을 가립니다. 열거식 `[ MARCT][ MTRC]`는 `MM`·`AM`·`RM`·`MT`를 함께 통과시켜 바로 이 누락을 냈습니다.
+
+     중단 메시지에는 해소 명령을 함께 적으세요 — 실측에서 `git add -A` 한 번으로 위 상태 전부가 한 칸만 채워진 상태로 접혔습니다. 단 `git add`는 worktree 쪽을 채택하므로 index에만 있던 내용은 버려집니다(`MM`은 레코드 자체가 사라집니다). index 쪽을 살리려면 커밋하거나 `git stash`를 써야 하고, 그 선택은 사용자만 할 수 있습니다.
+   - 상태가 `D `·` D`인 경로는 현재 내용이 없으므로 내용 기반 리뷰어에 넘기지 말고 **`git diff HEAD -- <path>`로 삭제된 내용을 읽어 검토**하세요. 제거된 인증 가드·검증 함수·CSRF 체크는 그 자체가 findings입니다 — 조용히 건너뛰면 안 됩니다.
+
+   갈래를 명령으로 직접 나눠도 됩니다(단 **위 allowlist 게이트를 통과한 뒤에**): `git diff --name-only -z --diff-filter=d HEAD`(내용 검토 대상, 이름변경은 새 경로만) + `git ls-files -z --others --exclude-standard`(untracked) + `git diff --name-only -z --diff-filter=D HEAD`(삭제, diff 검토 대상). 소문자 `d`는 "삭제만 제외"라는 뜻으로, allowlist를 통과한 상태에서는 위 status 루프와 같은 집합을 냅니다 — **`ACMR`를 쓰면 `T`(type change, 예: 일반 파일 → 심볼릭 링크)가 빠져** 형식이 바뀐 설정 파일이 조용히 검토에서 누락됩니다. 열거식을 쓰려면 최소한 `ACMRT`여야 합니다. 미해결 충돌에서는 두 방식이 어긋납니다 — 실측에서 `DU`는 `--diff-filter=d` 갈래에 들어가고 `UD`만 두 갈래 어디에도 들어가지 않으며(`AA`도 `d` 갈래), status 루프도 대안이 아니므로 게이트가 중단시킵니다. `git diff --name-only HEAD` 단독은 untracked 파일을 출력하지 않으므로 대안이 아닙니다.
+5. 읽기 전용·무수정 제약은 위 세 축 어느 것도 바꾸지 않고 실행 방식만 바꿉니다. "수정하지 말고 브랜치 리뷰해줘"는 여전히 `branch-merge-review`를 읽기 전용으로 실행합니다.
+
+`agents/security-auditor`는 스킬이 아닌 서브에이전트 층입니다. 보안 요청에서 리뷰 스킬과 동시에 매칭될 수 있지만, 어느 스킬을 실행할지는 위 우선순위가 정하고 에이전트는 그 절차 안에서 보안 점검을 수행하는 실행 단위로 쓰입니다.
+
+자세한 라우팅 기준과 다중 매칭 예시는 [README.md](./README.md)의 "리뷰 스킬 라우팅"을 참고하세요.
 
 ## 2. Windows 네이티브 설치
 
@@ -97,7 +117,7 @@ Codex `config.toml`에서 훅이 비활성화되어 있으면 Bash 설치기는 
 개발 워크플로우 리마인더 훅은 `UserPromptSubmit`에서 요청을 분류하고 필요한 안내만 하나의 `additionalContext`에 실행 순서대로 결합합니다.
 
 - 큰 구현 요청: `plan-and-build`
-- 명시적인 읽기 전용·무수정 검토: `evidence-first-review`
+- 명시적인 읽기 전용·무수정 검토: "작업 모드 먼저, 그다음 범위" 라우팅 안내 (이전 지적 재검토·최종 승인 판정·원본 데이터·비Git 점검이면 범위가 PR·브랜치여도 `evidence-first-review`, 최초 검토이면서 범위가 PR·브랜치·머지 diff이면 `branch-merge-review`를 읽기 전용으로)
 - 선택적 커밋·체크포인트·인수인계·재개: `safe-checkpoint`
 
 명시적인 무수정 제약은 구현 관련 단어가 있어도 `plan-and-build`를 억제합니다. 평범한 코드·보안·브랜치 리뷰, 체크포인트나 인수인계의 의미를 묻는 설명 요청, 단순한 퇴근 인사에는 동작하지 않습니다. 훅은 안내만 제공하며 명령, 파일 변경, staging, commit, push를 실행하지 않습니다. malformed JSON이나 지원하지 않는 입력도 프롬프트 처리를 막지 않습니다.
@@ -171,7 +191,12 @@ bash uninstall.sh
 - `~/.codex/agents` 또는 프로젝트 `.codex/agents`의 에이전트가 인식되는지 확인
 - 전역 설치라면 `/hooks`에서 훅을 검토하고 신뢰 승인
 - 큰 구현 프롬프트에서 `plan-and-build` 안내 확인
-- “수정 없이 재검토” 요청에서 `evidence-first-review` 안내 확인
+- “수정하지 말고 브랜치 리뷰해줘” 요청에서 안내가 `branch-merge-review`를 읽기 전용으로 실행하도록 라우팅하는지 확인 (최초 검토 + PR 범위)
+- “수정하지 말고 이전 지적을 근거와 함께 재검토해줘” 요청에서 `evidence-first-review` 안내 확인
+- “이 PR의 이전 지적을 재검토하고 최종 승인해줘” 요청이 `evidence-first-review`로 라우팅되는지 확인. 무수정 제약 표현이 없으면 훅은 침묵하는 것이 정상이며, 이때는 스킬 description 자동 매칭이 재검토·승인 요청을 `branch-merge-review`가 아니라 `evidence-first-review`로 보내는지 확인 — `branch-merge-review`의 description도 재검토·승인 요청을 제외하고 있어야 함(양쪽 description이 상호 배타적인지 확인)
+- “이 PR의 이전 보안 지적을 재검토하고 최종 승인해줘”처럼 스킬 셋 이상과 `security-auditor`까지 동시에 걸리는 요청에서, ①작업 모드가 먼저 적용돼 `evidence-first-review` 하나로 수렴하는지 확인
+- “지금 작업 중인 변경 전체를 검토해줘”(미커밋 staged·unstaged·untracked) 요청에서 `branch-merge-review`로 직행하지 않고, 변경 경로를 먼저 열거한 뒤 주제에 맞는 `code-quality-review`·`web-security-review`로 가는지 확인. “검토할 커밋 없음”으로 끝나면 잘못된 라우팅
+- 같은 요청에서 경로 열거가 `-z`(NUL 구분)를 쓰는지 확인. 이름변경 항목이 `old -> new` 한 줄로, 공백·한글 경로가 `"\355\225\234..."` 형태로 리뷰어에게 넘어가면 잘못된 수집. 삭제(`D`) 경로를 조용히 건너뛰지 않고 `git diff HEAD -- <path>`로 제거된 내용을 검토하는지도 확인
 - “해당 변경만 커밋” 또는 인수인계 요청에서 `safe-checkpoint` 안내 확인
 - 평범한 리뷰·설명·작은 수정·단순 퇴근 인사에는 조용한지 확인
 

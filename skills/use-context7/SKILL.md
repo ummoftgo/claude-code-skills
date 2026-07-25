@@ -19,44 +19,39 @@ Before writing code that relies on an external library or framework, query its l
 - The operation is pure language syntax (vanilla PHP loops, basic JS array methods)
 - You already queried this library in the current session and the docs are still in context
 - The API is trivially obvious and version-independent (e.g., `console.log`, `echo`)
+- A `find-docs` skill is also installed in this environment and has already retrieved Context7 documentation for the same library in this session — reuse those results instead of running a duplicate Context7 lookup
 
 ## Workflow
 
 ### Step 1: Resolve Library ID
 
-Call `mcp__context7__resolve-library-id` with the library name.
+Call `mcp__context7__resolve-library-id` with the library name and the question you need answered.
 
 ```
-mcp__context7__resolve-library-id({ libraryName: "svelte" })
-mcp__context7__resolve-library-id({ libraryName: "htmx" })
-mcp__context7__resolve-library-id({ libraryName: "laravel" })
-```
-
-Pick the most relevant result. Prefer the official library over wrappers or tutorials.
-
-### Step 2: Query Relevant Docs
-
-Call `mcp__context7__query-docs` with the resolved ID and a focused topic string.
-
-```
-mcp__context7__query-docs({
-  context7CompatibleLibraryID: "/sveltejs/svelte",
-  topic: "runes $state $derived reactivity",
-  tokens: 5000
+mcp__context7__resolve-library-id({
+  libraryName: "Svelte",
+  query: "how do $state and $derived runes replace stores in Svelte 5?"
 })
 ```
 
-**Topic guidance by stack:**
+Use the library's official spelling and punctuation — `"Next.js"`, `"Three.js"`, `"HTMX"` — not `nextjs` or `threejs`.
 
-| Stack | Example topic strings |
-|-------|----------------------|
-| PHP (PDO) | `"PDO prepared statements bindParam execute"` |
-| PHP (sessions) | `"session_start session_regenerate_id cookie options"` |
-| Svelte 5 | `"$state $derived $effect runes component lifecycle"` |
-| HTMX | `"hx-post hx-swap hx-trigger hx-target response swapping"` |
-| jQuery | `"ajax .on() .html() event delegation deferred"` |
+Pick the most relevant result (IDs look like `/org/project`). Prefer the official library over wrappers or tutorials, and weigh exact name match, description relevance, snippet count, source reputation, and benchmark score.
 
-Adjust `tokens` based on complexity: 3000 for simple lookups, 8000 for architecture-level questions.
+### Step 2: Query Relevant Docs
+
+Call `mcp__context7__query-docs` with the resolved ID and the same concrete question.
+
+```
+mcp__context7__query-docs({
+  libraryId: "/sveltejs/svelte",
+  query: "how do $state and $derived runes replace stores in Svelte 5?"
+})
+```
+
+Write `query` as a specific question, not a single keyword — `"how do I bind PDO prepared statement parameters safely?"` retrieves better docs than `"PDO"`. Other examples: `"which hx-swap values re-run scripts in the swapped fragment?"`, `"how do I delegate events with jQuery .on() for dynamically added rows?"`.
+
+For version-specific docs, use a versioned ID from the Step 1 output (e.g. `/vercel/next.js/v14.3.0`).
 
 ### Step 3: Write Code Based on Docs
 
@@ -77,18 +72,21 @@ Do not batch into a single query — separate queries yield more focused results
 
 ## Fallback: No MCP Available
 
-If Context7 MCP tools are not available, use the `ctx7` CLI:
+If Context7 MCP tools are not available, use the `ctx7` CLI. Both subcommands take the query as a required second argument.
 
-The `npx` commands work in both POSIX shells and PowerShell. In PowerShell, keep topics containing `$state` or other dollar-prefixed identifiers in single quotes so they are not expanded as variables.
+The `npx` commands work in both POSIX shells and PowerShell. In PowerShell, keep queries containing `$state` or other dollar-prefixed identifiers in single quotes so they are not expanded as variables.
 
 ```bash
-# Resolve library ID
-npx ctx7 library htmx
+# Resolve library ID: ctx7 library <name> <query>
+npx ctx7@latest library "HTMX" "hx-swap and hx-trigger behavior"
 
-# Query docs (library ID + topic)
-npx ctx7 docs /bigskysoftware/htmx "hx-swap hx-trigger"
-npx ctx7 docs /sveltejs/svelte "$state $derived runes"
-npx ctx7 docs /php/php-src "PDO prepared statements"
+# Query docs: ctx7 docs <libraryId> <query>
+npx ctx7@latest docs /bigskysoftware/htmx "which hx-swap values re-run scripts in the swapped fragment?"
+npx ctx7@latest docs /sveltejs/svelte 'how do $state and $derived runes replace stores in Svelte 5?'
 ```
+
+The same rules apply as for the MCP tools: use the library's official spelling (`"Next.js"`, `"Three.js"`), and phrase the query as the concrete question rather than a single keyword.
+
+If a command fails with a quota error, tell the user and suggest `npx ctx7@latest login` or setting the `CONTEXT7_API_KEY` environment variable for higher limits. Do not silently fall back to training knowledge.
 
 If `ctx7` is also unavailable, fall back to WebSearch/WebFetch against the official documentation site.

@@ -103,9 +103,26 @@ class WorkflowReminderTest(unittest.TestCase):
         self.assert_silent("기존 인증 기능 구현을 검토해줘")
 
     def test_skips_ordinary_security_and_branch_reviews(self) -> None:
-        for prompt in ("보안 검토해줘", "브랜치 리뷰해줘", "Review this pull request."):
+        for prompt in (
+            "보안 검토해줘",
+            "브랜치 리뷰해줘",
+            "머지 전에 브랜치 리뷰해줘",
+            "Review this pull request.",
+        ):
             with self.subTest(prompt=prompt):
                 self.assert_silent(prompt)
+
+    def test_read_only_branch_review_is_routed_to_branch_merge_review(self) -> None:
+        for prompt in (
+            "수정하지 말고 브랜치 리뷰해줘",
+            "머지 전에 브랜치 리뷰해줘. 파일은 수정하지 마.",
+            "read-only branch review please",
+            "Review this pull request with no changes to any files.",
+        ):
+            with self.subTest(prompt=prompt):
+                context = self.assert_only_workflow(prompt, "evidence-first-review")
+                self.assertIn("branch-merge-review", context)
+                self.assertIn("do not modify", context)
 
     def test_reminds_for_korean_explicit_read_only_review(self) -> None:
         context = self.assert_only_workflow(
@@ -239,6 +256,9 @@ class WorkflowReminderTest(unittest.TestCase):
             },
             {"user_prompt": "버튼 문구의 오타 한 글자만 수정해줘"},
             {"user_prompt": "체크포인트가 무엇인지 설명해줘."},
+            {"user_prompt": "수정하지 말고 브랜치 리뷰해줘"},
+            {"prompt": "read-only branch review please"},
+            {"user_prompt": "머지 전에 브랜치 리뷰해줘"},
         )
         for fixture in fixtures:
             with self.subTest(fixture=fixture):
