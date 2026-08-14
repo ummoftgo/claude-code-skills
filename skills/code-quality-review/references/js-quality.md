@@ -2,6 +2,12 @@
 
 CLI tools and manual patterns for frontend quality review.
 
+> **The read-only rule in `SKILL.md` overrides every instruction in this file.** Under a
+> read-only request, no command here may install a tool, create a config file, write a
+> report file, or auto-fix code — regardless of what an individual section says. Each
+> write-causing command below carries its own read-only contract line; when one is
+> skipped, record it in the report with its reason.
+
 ## Table of Contents
 1. [CLI Tool Setup](#1-cli-tool-setup)
 2. [Running the Tools](#2-running-the-tools)
@@ -21,6 +27,8 @@ CLI tools and manual patterns for frontend quality review.
 
 Tools are project-local (npm). Install only what is missing.
 
+**Read-only:** skip every command in this block; record them as `skipped-read-only`.
+
 ```bash
 # ESLint — use if eslint.config.js / .eslintrc.* exists in project
 if [ ! -f node_modules/.bin/eslint ]; then
@@ -30,7 +38,7 @@ fi
 # Biome — use if biome.json exists (replaces ESLint + Prettier)
 if [ ! -f node_modules/.bin/biome ]; then
   npm install --save-dev --save-exact @biomejs/biome
-  # First time: npx @biomejs/biome init
+  # First time: npx --no @biomejs/biome init
 fi
 
 # Oxlint — use for large codebases or alongside ESLint for speed
@@ -63,66 +71,71 @@ fi
 ### ESLint
 ```bash
 # Report only (no auto-fix)
-npx eslint . --format=compact
+npx --no eslint . --format=compact
 
 # With specific directories
-npx eslint src/ --format=compact --max-warnings=0
+npx --no eslint src/ --format=compact --max-warnings=0
 
 # JSON output for scripting
-npx eslint . --format=json -o eslint-report.json
+# **Read-only:** skip this command; record it as `skipped-read-only`.
+npx --no eslint . --format=json -o eslint-report.json
 
 # Auto-fix safe issues
-npx eslint . --fix
+# **Read-only:** skip this command; record it as `skipped-read-only`.
+npx --no eslint . --fix
 ```
 
 ### Biome
 ```bash
 # Lint + format check combined
-npx @biomejs/biome check .
+npx --no @biomejs/biome check .
 
 # CI mode (stricter — fails on warnings too)
-npx @biomejs/biome ci .
+npx --no @biomejs/biome ci .
 
 # Auto-fix
-npx @biomejs/biome check --write .
+# **Read-only:** skip this command; record it as `skipped-read-only`.
+npx --no @biomejs/biome check --write .
 ```
 
 ### Oxlint
 ```bash
 # Fast lint pass (good for large codebases)
-npx oxlint .
+npx --no oxlint .
 
 # With TypeScript support
-npx oxlint --tsconfig tsconfig.json .
+npx --no oxlint --tsconfig tsconfig.json .
 
 # Auto-fix
-npx oxlint --fix .
+# **Read-only:** skip this command; record it as `skipped-read-only`.
+npx --no oxlint --fix .
 ```
 
 ### svelte-check
 ```bash
 # Machine-readable output
-npx svelte-check --output machine
+npx --no svelte-check --output machine
 
 # Verbose (includes warnings)
-npx svelte-check --output machine-verbose
+npx --no svelte-check --output machine-verbose
 
 # Check specific directory
-npx svelte-check --workspace src/
+npx --no svelte-check --workspace src/
 ```
 
 ### knip — unused code & dependencies
 ```bash
 # Full report: unused files, exports, dependencies
-npx knip
+npx --no knip
 
 # Fix automatically where possible
-npx knip --fix
+# **Read-only:** skip this command; record it as `skipped-read-only`.
+npx --no knip --fix
 
 # Specific category
-npx knip --include files          # only unused files
-npx knip --include dependencies   # only unused npm packages
-npx knip --include exports        # only unused exports
+npx --no knip --include files          # only unused files
+npx --no knip --include dependencies   # only unused npm packages
+npx --no knip --include exports        # only unused exports
 ```
 
 ---

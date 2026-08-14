@@ -12,7 +12,7 @@ Runs CLI analysis tools first, then supplements with pattern-based review. Adapt
 Detect the active shell before using a snippet. On POSIX use `command -v`, `[ -f ... ]`, and the Bash examples below. On Windows PowerShell use `Get-Command`, `Test-Path`, and PowerShell conditionals; invoke the same PHP/npm tools directly. Prefer `rg` for recursive searches on both platforms, with `Get-ChildItem -Recurse | Select-String` as the Windows fallback. Do not require WSL or Git Bash for a Windows-native installation.
 
 > **Read-only mode (priority rule).** If the user asked for a review **without changing anything** (e.g. "수정하지 말고 검토만", "read-only", review delegated under a read-only sandbox), then this skill must not write to the workspace:
-> - **Do not install** missing tools (no `npm install`, `composer require`, PHAR downloads, etc.). Run only the tools already present; for each missing tool, record it as **`skipped (not installed)`** in the report.
+> - **Do not install** missing tools (no `npm install`, `composer require`, PHAR downloads, etc.). Run only the tools already present. Record the withheld install command as **`skipped-read-only`**, and the tool role it would have enabled as **`skipped-not-installed`** — the command was withheld, the check was impossible.
 > - **Do not modify code** and do not change worktree or Git state — findings and recommendations only.
 > - **Do not write any file**, report files included. (Inline output is the default anyway — see Step 4; under a read-only constraint it is the *only* option, even if the user asks for a file. Say that a report file needs write permission.)
 >
@@ -27,6 +27,90 @@ Load before scanning:
 
 Load all applicable files for full-stack review.
 
+**If no reference exists for a detected language, report that language as unsupported and skip
+its files — do not stop the whole review.** A mixed repository still gets a full PHP review when
+its Go service has no reference yet; what must never happen is substituting another language's
+rules, because a PHP checklist applied to Go produces confident findings about code it does not
+understand. Name the unreviewed paths in the report so the gap is visible.
+
+### What a language reference must contain
+
+This is the **target contract** for new and restructured references. The three shipped today
+predate it and do not match it yet — their current numbering is below. Restructuring them is
+scheduled work, not a precondition for using this table.
+
+| Reference | Current sections |
+|---|---|
+| `php-quality.md` | §0 version resolution · §1 setup · §2 execution · §3–6 manual patterns |
+| `js-quality.md` | §1 setup · §2 execution · §3–6 manual patterns · §7 Svelte lifecycle |
+| `css-quality.md` | §1 setup · §2 execution · §3–6 manual patterns |
+
+The target: every `references/{language}-quality.md` carries the same seven sections so this
+skill can drive it without knowing the language, and adding a language means adding one
+reference file plus one detection row in Step 1 — not editing the body below.
+
+| § | Contents |
+|---|---|
+| 0 | **Applicability and scope** — detection signals, package/workspace root, generated and vendor paths to exclude |
+| 1 | **Version resolution** — runtime, toolchain, package manager, and lockfile the project pins |
+| 2 | **Tool roles** — static analysis / style / complexity / duplication, and which project config takes precedence |
+| 3 | **Availability and authority** — existence check, install path for normal mode, and the read-only contract below |
+| 4 | **Execution** — POSIX and PowerShell 5.1 forms, exit-code and output interpretation, and any write side effect |
+| 5 | **Manual patterns** — what the tools cannot catch |
+| 6 | **Severity mapping** — tool output to High/Medium/Low, plus the run-state vocabulary below |
+
+Do not force one tool per role. When a role has no established tool in that language, record
+`not applicable` or `unavailable` with the reason instead of inventing one.
+
+**Run-state vocabulary** — every tool invocation resolves to exactly one:
+
+| State | Meaning |
+|---|---|
+| `passed` | Ran clean |
+| `findings` | Ran and reported problems |
+| `skipped-read-only` | A **command** writes, and the request is read-only, so it was withheld. This is what the contract line below records |
+| `skipped-not-installed` | A **tool role** could not run because its tool is absent — under read-only because the install was withheld, in normal mode because the install failed |
+| `unavailable` | No tool fills this role in this language |
+| `timeout` / `execution-error` | Started but did not produce a usable result |
+
+The two skip states describe **different things** and often co-occur: `skipped-read-only` is
+about a command that was withheld, `skipped-not-installed` is about a role that produced no
+findings. A read-only review of a machine without PHPStan records both — the install as
+`skipped-read-only`, static analysis as `skipped-not-installed`. Collapsing them hides which
+findings the review could still have produced with write permission.
+
+An incomplete run never silently becomes a pass. State which run-states occurred, and treat any
+of the last four as leaving that role **unverified** — the verdict must say so rather than
+implying the code passed that check.
+
+### Read-only contract for write-causing commands
+
+A reference file may not quietly instruct a write that the read-only rule above forbids. Every
+command that installs, creates a directory, sets a permission bit, initializes a tool, writes a
+config or report file, or auto-fixes code carries one of these two lines:
+
+```
+**Read-only:** skip this command; record it as `skipped-read-only`.
+**Read-only:** skip every command in this block; record them as `skipped-read-only`.
+```
+
+The first sits immediately above its command — as prose outside a fence, or as a `#` / `//`
+comment inside one, so the example stays runnable. The second sits in the prose immediately
+before a fence and covers every command in that block; it states its own scope, so it can never
+be mistaken for a guard on one command while the rest run unguarded.
+
+`tests/test_php_baseline.py` enumerates the write-causing commands in the three references
+shipped today and fails when one loses its contract line. It does not discover a new reference
+on its own — **when you add a language, add its write-causing commands to that list too.**
+
+**Always invoke npm-hosted tools as `npx --no <tool>`.** Plain `npx` falls back to downloading a
+missing package into the npm cache, and [npm's docs](https://docs.npmjs.com/cli/commands/npx)
+state that in non-TTY or CI environments `--yes` is assumed — so an agent running `npx eslint`
+non-interactively installs silently, which a read-only review must never do. `--no` makes the
+command fail instead. (`--no-install` is a deprecated alias that npm converts to `--no`; write
+`--no` so the contract has one spelling.) Running
+`node_modules/.bin/<tool>` directly is equally acceptable.
+
 ## Step 1: Detect Stack and Infer Conventions
 
 Inspect the project root to determine languages and frameworks:
@@ -39,7 +123,7 @@ Infer project conventions from **existing code majority** (not assumed standards
 
 ## Step 2: Run CLI Tools
 
-Run all applicable tools. For each tool, check if it exists first — if not, install per the reference file instructions **(unless read-only mode applies — then skip the install and mark the tool `skipped (not installed)`)**. Capture output for integration into the report.
+Run all applicable tools. For each tool, check if it exists first — if not, install per the reference file instructions. **Under read-only, the install command is withheld (`skipped-read-only`) and the tool role it would have enabled stays unrun (`skipped-not-installed`).** In normal mode, `skipped-not-installed` means the install itself failed. Capture output for integration into the report.
 
 ### PHP stack
 
@@ -78,21 +162,21 @@ phpcpd <src-dir>
 ### JS / Svelte / HTMX stack
 ```bash
 # Linting (use whichever is configured in the project)
-npx eslint . --format=compact          # if ESLint config exists
-npx @biomejs/biome check .             # if biome.json exists
-npx oxlint .                           # if oxlint configured
+npx --no eslint . --format=compact          # if ESLint config exists
+npx --no @biomejs/biome check .             # if biome.json exists
+npx --no oxlint .                           # if oxlint configured
 
 # Svelte type check (if .svelte files exist)
-npx svelte-check --output machine
+npx --no svelte-check --output machine
 
 # Unused exports / dead dependencies
-npx knip
+npx --no knip
 ```
 
 ### CSS / SCSS stack
 ```bash
 # Stylelint (use if .css or .scss files exist)
-npx stylelint "**/*.css" "**/*.scss" --formatter=compact
+npx --no stylelint "**/*.css" "**/*.scss" --formatter=compact
 ```
 
 See reference files for installation instructions when tools are missing.

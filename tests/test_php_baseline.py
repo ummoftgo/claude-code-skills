@@ -123,7 +123,16 @@ def between(text: str, start_marker: str, end_marker: str, *, label: str) -> str
 #: 그래서 판정을 **선언된 계약**으로 옮긴다. 마커는 사람이 읽는 가시 텍스트여야 한다 —
 #: HTML 주석은 이 저장소가 비지시 텍스트로 취급하므로 모델이 읽지 않는다.
 READ_ONLY_MARKER = (
-    "**Read-only:** skip this command; record it as `skipped (not installed)`."
+    "**Read-only:** skip this command; record it as `skipped-read-only`."
+)
+
+#: 블록 단위 계약. 코드 블록 바로 앞 산문에 두면 그 블록의 **모든** 명령을 덮는다.
+#: 명령마다 긴 문장을 반복하면 설치 블록이 읽히지 않으므로 두 형태를 함께 허용하되,
+#: 문구가 "every command in this block" 이라고 **범위를 명시**하므로 부분 가드로 오인되지
+#: 않는다. 명령 하나만 가드하려는 의도라면 명령 단위 형태를 써야 한다.
+READ_ONLY_BLOCK_MARKER = (
+    "**Read-only:** skip every command in this block; "
+    "record them as `skipped-read-only`."
 )
 
 #: 마커를 명령과 연결하는 창. 절 단위 불리언이면 같은 절의 한 명령만 가드해도 나머지가 함께
@@ -131,39 +140,149 @@ READ_ONLY_MARKER = (
 GUARD_WINDOW_LINES = 10
 
 
-def non_instructional_spans(text: str) -> list[tuple[int, int]]:
-    """지시로 읽히지 않는 구간 — 펜스 코드 블록과 HTML 주석의 (시작, 끝) 오프셋.
+def html_comment_spans(text: str) -> list[tuple[int, int]]:
+    """HTML 주석 구간. 이 저장소는 이를 비지시 텍스트로 취급하므로 모델이 읽지 않는다."""
+    return [(m.start(), m.end()) for m in re.finditer(r"<!--.*?-->", text, re.DOTALL)]
 
-    이 저장소는 HTML 주석을 비지시 텍스트로 취급한다(`tests/test_skill_contracts.py` 의
-    `instructional_text()`). 코드 블록 안의 문장도 실행 예제이지 모델에 대한 지시가 아니다.
+
+_FENCE_OPEN = re.compile(r"^( {0,3})(`{3,}|~{3,})([^\n]*)$")
+
+
+def fenced_spans_with_language(text: str) -> list[tuple[int, int, str, bool]]:
+    """펜스 구간과 언어. CommonMark 규칙을 따른다.
+
+    정규식 한 방으로 처리하면 세 가지를 함께 틀린다 — 최대 3칸 들여쓰기를 놓치고, 여는
+    펜스보다 **긴** 닫는 펜스를 인정하지 않으며, `bash title=demo` 같은 info string에서
+    언어를 뽑지 못한다. 각각이 진짜 펜스를 놓쳐 벌거벗은 마커를 통과시키거나, 반대로
+    유효한 마커를 거부한다.
     """
-    spans: list[tuple[int, int]] = []
-    for match in re.finditer(
-        r"^(```+|~~~+)[^\n]*\n.*?^\1", text, re.DOTALL | re.MULTILINE
-    ):
-        spans.append((match.start(), match.end()))
-    for match in re.finditer(r"<!--.*?-->", text, re.DOTALL):
-        spans.append((match.start(), match.end()))
+    spans: list[tuple[int, int, str, bool]] = []
+    lines = text.splitlines(keepends=True)
+    offsets, position = [], 0
+    for line in lines:
+        offsets.append(position)
+        position += len(line)
+
+    index = 0
+    while index < len(lines):
+        opening = _FENCE_OPEN.match(lines[index].rstrip("\n\r"))
+        if not opening:
+            index += 1
+            continue
+        indent, fence, info = opening.groups()
+        # info string 의 첫 낱말이 언어다. 나머지는 속성이므로 무시한다.
+        language = info.strip().split()[0].lower() if info.strip() else ""
+        start = offsets[index]
+        index += 1
+        while index < len(lines):
+            candidate = lines[index].rstrip("\n\r")
+            closing = re.match(rf"^ {{0,3}}({re.escape(fence[0])}{{{len(fence)},}})[ \t]*$", candidate)
+            if closing:
+                spans.append((start, offsets[index] + len(lines[index]), language, True))
+                index += 1
+                break
+            index += 1
+        else:
+            # 닫히지 않은 펜스는 문서 끝까지로 본다 — 그 안의 마커를 지시로 오인하지 않는다.
+            # 종결 여부를 함께 돌려줘야 `code_blocks()` 가 마지막 줄을 닫는 펜스로 오인하지 않는다.
+            spans.append((start, len(text), language, False))
     return spans
+
+
+#: 펜스 언어별 주석 접두. **언어와 무관하게 둘 다 허용하면 안 된다** — Bash에서 `//` 는
+#: 주석이 아니라 명령이고, 그 줄은 오류를 내고 다음 명령이 그대로 실행된다. 즉 무효한 마커가
+#: 정상 가드로 통과한다. 모르는 언어는 펜스 밖 산문 마커만 인정한다.
+_FENCE_COMMENT_PREFIX = {
+    "bash": "#", "sh": "#", "shell": "#", "zsh": "#", "console": "#",
+    "powershell": "#", "ps1": "#", "pwsh": "#", "yaml": "#", "yml": "#",
+    "js": "//", "javascript": "//", "ts": "//", "typescript": "//",
+    "jsx": "//", "tsx": "//", "php": "//", "scss": "//", "sass": "//",
+}
+#: 의도적으로 뺀 것 — `json` 은 문법에 주석이 없고, 순수 `css` 주석은 `/* … */` 뿐이다.
+#: SCSS/Sass 는 `//` 단일 행 주석을 정식으로 지원하므로 포함한다(저장소 자신도 그렇게 쓴다).
+#: `//` 를 허용하면 "예제를 깨뜨리지 않는 유효한 주석"이라는 계약을 스스로 어긴다.
+#: 이런 펜스에는 인라인 마커를 두지 말고 펜스 **밖** 산문 마커를 쓴다.
 
 
 def marker_lines(text: str) -> list[int]:
     """계약 문구가 **지시로 읽히는 자리에** 독립된 줄로 놓인 위치(문자 오프셋).
 
-    세 가지를 함께 요구한다.
+    허용하는 두 형태:
 
-    * 줄 전체가 계약 문장과 **완전히 일치**해야 한다. 접두어만 보면
-      `**Read-only:** skip nothing; always run it.` 같은 반대 문구가 통과한다.
-    * 코드 펜스 안이면 안 된다 — 실행 예제를 깨뜨리면서 게이트만 통과시키는 자리다.
-    * HTML 주석 안이면 안 된다 — 이 저장소가 비지시 텍스트로 취급하므로 모델이 읽지 않는다.
+    * 펜스 **밖**의 산문 줄 — 줄 전체가 계약 문장과 일치.
+    * 펜스 **안**의 주석 줄 — `#` 또는 `//` 뒤에 계약 문장. 코드 블록은 이 스킬들에서
+      실행할 명령 그 자체이므로, 명령 바로 위 주석이 가장 국소적이고 자연스러운 자리다.
+
+    거부하는 것:
+
+    * 접두어만 일치 — `**Read-only:** skip nothing; always run it.` 같은 반대 문구가 통과한다.
+    * 펜스 안의 **벌거벗은** 줄 — 예제를 깨뜨리면서 게이트만 통과한다.
+    * HTML 주석 안 — 이 저장소가 비지시 텍스트로 취급한다.
     """
-    spans = non_instructional_spans(text)
+    languages = fenced_spans_with_language(text)
+    fences = [(start, end) for start, end, _lang, _closed in languages]
+    comments = html_comment_spans(text)
     offsets = []
     position = 0
     for line in text.splitlines(keepends=True):
-        if " ".join(line.split()) == READ_ONLY_MARKER and not any(
-            start <= position < end for start, end in spans
-        ):
+        stripped = line.strip()
+        inside_fence = any(start <= position < end for start, end in fences)
+        inside_comment = any(start <= position < end for start, end in comments)
+        if inside_comment:
+            position += len(line)
+            continue
+        if inside_fence:
+            language = next(
+                (lang for start, end, lang, _closed in languages if start <= position < end),
+                "",
+            )
+            prefix = _FENCE_COMMENT_PREFIX.get(language)
+            if prefix is None:
+                matched = False   # 모르는 언어 — 펜스 밖 산문 마커만 인정한다
+            else:
+                body = stripped[len(prefix):].strip() if stripped.startswith(prefix) else None
+                matched = body is not None and " ".join(body.split()) == READ_ONLY_MARKER
+        else:
+            matched = " ".join(stripped.split()) == READ_ONLY_MARKER
+        if matched:
+            offsets.append(position)
+        position += len(line)
+    return offsets
+
+
+def block_guarded_spans(text: str) -> list[tuple[int, int]]:
+    """블록 단위 마커가 덮는 펜스 구간.
+
+    마커와 펜스 사이에는 **공백만** 허용한다. 거리 제한이 아니라 인접성 규칙이다 —
+    사이에 산문이 끼면 그 산문이 계약을 뒤집을 수 있고, 어느 블록을 가리키는지도 모호해진다.
+    (`GUARD_WINDOW_LINES` 는 명령 단위 마커에만 적용된다.)
+    """
+    fences = [(start, end) for start, end, _lang, _closed in fenced_spans_with_language(text)]
+    covered = []
+    for offset in _standalone_marker_offsets(text, READ_ONLY_BLOCK_MARKER):
+        following = next((span for span in fences if span[0] >= offset), None)
+        if following is None:
+            continue
+        # 마커 줄 자체를 제외한 사이 텍스트에 **공백 외의 것이 있으면 연결하지 않는다.**
+        # "10줄 이내 첫 펜스"만 보면 사이에 "run them anyway" 같은 산문이 끼어도 통과한다.
+        marker_line_end = text.find("\n", offset)
+        between_text = text[marker_line_end + 1 : following[0]] if marker_line_end >= 0 else ""
+        if between_text.strip() == "":
+            covered.append(following)
+    return covered
+
+
+def _standalone_marker_offsets(text: str, marker: str) -> list[int]:
+    """펜스·HTML 주석 **밖**의 산문 줄에서 `marker` 와 완전히 일치하는 줄의 오프셋."""
+    fences = [(start, end) for start, end, _lang, _closed in fenced_spans_with_language(text)]
+    comments = html_comment_spans(text)
+    offsets = []
+    position = 0
+    for line in text.splitlines(keepends=True):
+        outside = not any(
+            start <= position < end for start, end in fences + comments
+        )
+        if outside and " ".join(line.split()) == marker:
             offsets.append(position)
         position += len(line)
     return offsets
@@ -191,9 +310,13 @@ def unguarded_by_anchor(text: str, anchors: dict[str, str]) -> dict[str, list[in
     occurrences.sort()
 
     available = marker_lines(text)
+    block_covered = block_guarded_spans(text)
     consumed: set[int] = set()
     unguarded: dict[str, list[int]] = {name: [] for name in anchors}
     for position, name in occurrences:
+        # 블록 단위 마커는 그 블록의 모든 명령을 덮으므로 1:1 소비 대상이 아니다.
+        if any(start <= position < end for start, end in block_covered):
+            continue
         window_start = _line_offset(text, position, -GUARD_WINDOW_LINES)
         claimed = next(
             (
@@ -273,13 +396,19 @@ def prohibits(text: str, subject: str) -> bool:
 
 
 def code_blocks(text: str) -> str:
-    """펜스 코드 블록만 이어붙인다. 산문과 실행 지시를 가르는 경계다."""
-    return "\n".join(
-        block
-        for _fence, block in re.findall(
-            r"^(```+|~~~+)[^\n]*\n(.*?)^\1", text, re.DOTALL | re.MULTILINE
-        )
-    )
+    """펜스 코드 블록의 **본문만** 이어붙인다. 산문과 실행 지시를 가르는 경계다.
+
+    스캐너는 하나뿐이다 — 별도 정규식을 두면 한쪽이 놓치는 펜스를 다른 쪽이 잡아 두 검사의
+    결과가 어긋난다.
+
+    **닫히지 않은 펜스는 마지막 줄을 버리지 않는다.** `body[1:-1]` 을 무조건 쓰면 닫는 펜스가
+    없는 블록의 마지막 명령이 검사에서 사라져, 맨 `npx` 같은 우회가 통과한다.
+    """
+    parts = []
+    for start, end, _language, closed in fenced_spans_with_language(text):
+        body = text[start:end].splitlines(keepends=True)
+        parts.extend(body[1:-1] if closed else body[1:])
+    return "".join(parts)
 
 
 def invoked_as_command(text: str, tool: str) -> bool:
@@ -540,12 +669,60 @@ class PhpToolchainBaseline(unittest.TestCase):
         """GREEN — 읽기 전용 조건을 잘못 걸어 일반 모드까지 죽이면 리뷰가 빈 껍데기가 된다.
 
         일반 모드에서 도구가 없으면 설치한다는 지시가 살아 있어야 한다. 이것이 사라지면
-        리뷰는 `skipped (not installed)`만 잔뜩 내고 실제 검사를 하지 않는다.
+        리뷰는 `skipped-not-installed` 만 잔뜩 내고 실제 검사를 하지 않는다.
         """
         skill = read("skills/code-quality-review/SKILL.md")
-        self.assertIn("if not, install per the reference file instructions", skill)
-        self.assertIn("unless read-only mode applies", skill)
-        self.assertIn("skipped (not installed)", skill)
+        step_two = between(
+            skill, "## Step 2: Run CLI Tools", "## Step 3", label="Step 2"
+        )
+        # 일반 모드 설치 경로가 살아 있어야 한다.
+        self.assertIn("install per the reference file instructions", step_two)
+        # 그리고 읽기 전용에서만 보류돼야 한다 — 게이트 없이 설치하면 우선 규칙을 어긴다.
+        self.assertRegex(step_two, r"read-only")
+        self.assertIn("skipped-read-only", step_two)
+        self.assertIn("skipped-not-installed", step_two)
+
+    def test_npm_tools_are_never_invoked_with_a_bare_npx(self) -> None:
+        """GREEN (1단계에서 추가) — 맨 `npx` 는 없는 패키지를 받아 설치한다.
+
+        npm 문서상 비대화형·CI 환경에서는 `--yes` 가 가정되므로, 에이전트가 읽기 전용
+        리뷰 중 `npx eslint` 를 실행하면 **조용히 설치된다.** `--no` 는 설치 대신 실패시킨다.
+        `--no-install` 은 deprecated 별칭이라 계약의 철자를 하나로 고정하기 위해 거부한다.
+
+        본문과 참조를 함께 검사한다 — 같은 명령이 양쪽에 있어 한쪽만 고치면 드리프트한다.
+        검사 범위는 **실행 지시(코드 블록)** 다. 규칙을 설명하는 산문은 맨 `npx` 를 예시로
+        들 수 있어야 한다.
+        """
+        sources = {
+            "SKILL.md": read("skills/code-quality-review/SKILL.md"),
+            **{f"{name}.md": quality_reference(name) for name in QUALITY_REFERENCES},
+        }
+        for name, text in sources.items():
+            with self.subTest(source=name):
+                bare = [
+                    line.strip()
+                    for line in code_blocks(text).splitlines()
+                    # `--no-install` 은 deprecated 별칭이다. 계약은 `--no` 하나로 고정한다.
+                    if re.search(r"\bnpx\s+(?!--no(?:\s|$))", line)
+                ]
+                self.assertEqual(
+                    bare, [], f"{name}: `npx --no` 또는 node_modules/.bin 을 써야 한다"
+                )
+
+    def test_the_bare_npx_check_rejects_deprecated_and_unclosed_forms(self) -> None:
+        """실제 문서만 스캔하면 검사기 자체의 구멍이 드러나지 않는다."""
+        def bare(text: str) -> list[str]:
+            return [
+                line.strip()
+                for line in code_blocks(text).splitlines()
+                if re.search(r"\bnpx\s+(?!--no(?:\s|$))", line)
+            ]
+
+        self.assertTrue(bare("```bash\nnpx --no-install eslint .\n```"),
+                        "`--no-install` 은 deprecated 별칭이므로 거부해야 한다")
+        self.assertTrue(bare("```bash\nnpx eslint ."),
+                        "닫히지 않은 펜스의 명령도 검사 대상이다")
+        self.assertFalse(bare("```bash\nnpx --no eslint .\n```"))
 
     @unittest.expectedFailure
     def test_php_version_resolution_has_a_single_source(self) -> None:
@@ -575,17 +752,14 @@ class PhpToolchainBaseline(unittest.TestCase):
             len(next(iter(distinct))), 1, f"조각이 두 파일에 중복된다: {owners}"
         )
 
-    @unittest.expectedFailure
     def test_every_write_causing_instruction_carries_a_read_only_guard(self) -> None:
-        """RED → 1단계 — 쓰기를 유발하는 **명령 각각**이 읽기 전용 가드를 동반해야 한다.
+        """GREEN (1단계에서 전환됨) — 쓰기를 유발하는 **명령 각각**이 읽기 전용 가드를 동반해야 한다.
 
-        본문(`SKILL.md`)은 읽기 전용에서 설치·수정·모든 파일 쓰기를 금지하는 우선 규칙을
-        선언하지만, 본문이 "먼저 읽으라"고 지시하는 참조에는 조건 없는 쓰기 명령이 있다.
-        Step 2의 게이트는 "도구 설치"만 가리므로 설정 생성·자동수정·보고서 출력은 걸리지 않는다.
+        Step 2의 게이트는 "도구 설치"만 가리므로 설정 생성·자동수정·보고서 출력은 걸리지
+        않는다. 그래서 쓰기를 유발하는 27개 능력마다 계약 문구를 요구한다.
 
-        **파일 상단에 "read-only" 한 줄을 추가하는 것으로는 통과할 수 없다** — 각 명령이
-        놓인 절이 가드를 갖췄는지 확인한다. 1단계의 실효 완료 조건이므로 여기가 느슨하면
-        불완전한 구현이 GREEN으로 전환된다.
+        **파일 상단에 문구 한 줄을 추가하는 것으로는 통과할 수 없다** — 각 명령이 자기
+        계약 문구를 갖거나, 범위를 명시한 블록 문구가 그 블록을 덮어야 한다.
         """
         for reference_name in QUALITY_REFERENCES:
             anchors = {
@@ -993,11 +1167,11 @@ class CheckerSelfTest(unittest.TestCase):
         """
         for label, document in (
             (
-                "코드 펜스 안",
+                "펜스 안 벌거벗은 줄 (예제를 깨뜨린다)",
                 f"```bash\n{READ_ONLY_MARKER}\nwget -O b phpstan.phar\n```",
             ),
             (
-                "HTML 주석 안",
+                "HTML 주석 안 (모델이 읽지 않는다)",
                 f"<!--\n{READ_ONLY_MARKER}\n-->\n```bash\nwget -O b phpstan.phar\n```",
             ),
         ):
@@ -1006,6 +1180,95 @@ class CheckerSelfTest(unittest.TestCase):
                     unguarded_occurrences(document, r"phpstan\.phar"),
                     f"{label} 의 마커를 지시로 인정하면 안 된다",
                 )
+
+    def test_a_comment_marker_inside_a_block_is_a_guard(self) -> None:
+        """코드 블록은 이 스킬들에서 실행할 명령 그 자체다.
+
+        명령 바로 위 주석이 가장 국소적인 자리이고, 주석 형태라 예제도 깨지지 않는다.
+        단 **접두는 그 언어의 주석 문법이어야** 한다.
+        """
+        for language, prefix in (("bash", "#"), ("js", "//"), ("php", "//")):
+            with self.subTest(language=language):
+                document = (
+                    f"```{language}\n{prefix} {READ_ONLY_MARKER}\n"
+                    "wget -O b phpstan.phar\n```"
+                )
+                self.assertEqual(unguarded_occurrences(document, r"phpstan\.phar"), [])
+
+    def test_a_comment_prefix_from_another_language_is_not_a_guard(self) -> None:
+        """Bash에서 `//` 는 주석이 아니라 명령이다 — 오류를 내고 다음 명령이 그대로 실행된다."""
+        document = (
+            f"```bash\n// {READ_ONLY_MARKER}\nwget -O b phpstan.phar\n```"
+        )
+        self.assertTrue(
+            unguarded_occurrences(document, r"phpstan\.phar"),
+            "무효한 주석 접두가 정상 가드로 통과하면 안 된다",
+        )
+
+    def test_languages_without_line_comments_admit_no_inline_marker(self) -> None:
+        """JSON에는 주석이 없고 CSS 주석은 `/* … */` 다 — `//` 는 예제를 깨뜨린다."""
+        for language in ("json", "css"):
+            with self.subTest(language=language):
+                document = (
+                    f"```{language}\n// {READ_ONLY_MARKER}\n"
+                    "wget -O b phpstan.phar\n```"
+                )
+                self.assertTrue(unguarded_occurrences(document, r"phpstan\.phar"))
+
+    def test_scss_line_comments_are_a_valid_marker_form(self) -> None:
+        """SCSS/Sass 는 `//` 단일 행 주석을 정식 지원한다 — 이 저장소도 그렇게 쓴다."""
+        for language in ("scss", "sass"):
+            with self.subTest(language=language):
+                document = (
+                    f"```{language}\n// {READ_ONLY_MARKER}\n"
+                    "wget -O b phpstan.phar\n```"
+                )
+                self.assertEqual(unguarded_occurrences(document, r"phpstan\.phar"), [])
+
+    def test_block_markers_use_the_same_fence_scanner(self) -> None:
+        """블록 마커 경로가 다른 파서를 쓰면 표준 펜스에서 올바른 계약이 거부된다."""
+        for label, fence_open, fence_close in (
+            ("긴 닫는 펜스", "```bash", "````"),
+            ("들여쓴 펜스", "  ```bash", "  ```"),
+        ):
+            with self.subTest(label=label):
+                document = (
+                    f"{READ_ONLY_BLOCK_MARKER}\n\n"
+                    f"{fence_open}\nwget -O b phpstan.phar\n{fence_close}"
+                )
+                self.assertEqual(
+                    unguarded_occurrences(document, r"phpstan\.phar"),
+                    [],
+                    "블록 마커 판정이 명령 단위와 같은 스캐너를 써야 한다",
+                )
+
+    def test_an_unclosed_fence_keeps_its_last_command(self) -> None:
+        """닫는 펜스가 없으면 마지막 줄이 본문에서 사라져 맨 `npx` 검사가 뚫린다."""
+        self.assertIn("npx eslint", code_blocks("```bash\nnpx eslint ."))
+
+    def test_commonmark_fence_forms_are_recognised(self) -> None:
+        """펜스를 놓치면 그 안의 벌거벗은 마커가 산문으로 취급돼 가드로 통과한다."""
+        for label, document in (
+            ("여는 펜스보다 긴 닫는 펜스",
+             f"```bash\n{READ_ONLY_MARKER}\nwget -O b phpstan.phar\n````"),
+            ("최대 3칸 들여쓰기",
+             f"  ```bash\n  {READ_ONLY_MARKER}\n  wget -O b phpstan.phar\n  ```"),
+        ):
+            with self.subTest(label=label):
+                self.assertTrue(unguarded_occurrences(document, r"phpstan\.phar"))
+
+    def test_an_info_string_with_attributes_still_resolves_its_language(self) -> None:
+        """`bash title=demo` 의 언어는 첫 낱말이다 — 못 뽑으면 유효한 마커를 거부한다."""
+        document = (
+            f"```bash title=demo\n# {READ_ONLY_MARKER}\n"
+            "wget -O b phpstan.phar\n```"
+        )
+        self.assertEqual(unguarded_occurrences(document, r"phpstan\.phar"), [])
+
+    def test_an_unlabelled_fence_admits_no_inline_marker(self) -> None:
+        """언어를 모르면 어떤 접두가 주석인지 알 수 없다 — 펜스 밖 산문만 인정한다."""
+        document = f"```\n# {READ_ONLY_MARKER}\nwget -O b phpstan.phar\n```"
+        self.assertTrue(unguarded_occurrences(document, r"phpstan\.phar"))
 
     def test_a_backtick_inside_a_block_does_not_close_the_fence(self) -> None:
         """내용 속 백틱을 종결 펜스로 오인하면, 진짜 블록 안의 마커가 가드로 인정된다."""
@@ -1020,6 +1283,57 @@ class CheckerSelfTest(unittest.TestCase):
             unguarded_occurrences(document, r"phpstan\.phar"),
             "펜스 안 마커가 인정되면 안 된다",
         )
+
+    def test_a_block_marker_covers_every_command_in_that_block(self) -> None:
+        """범위를 명시한 블록 마커는 그 블록 전체를 덮는다 — 부분 가드가 아니다."""
+        document = (
+            f"{READ_ONLY_BLOCK_MARKER}\n\n"
+            "```bash\n"
+            "wget -O b phpstan.phar\n"
+            "wget -O b phpmd.phar\n"
+            "```"
+        )
+        unguarded = unguarded_by_anchor(
+            document, {"phpstan": r"phpstan\.phar", "phpmd": r"phpmd\.phar"}
+        )
+        self.assertEqual(unguarded["phpstan"], [])
+        self.assertEqual(unguarded["phpmd"], [])
+
+    def test_prose_between_a_block_marker_and_its_fence_breaks_the_link(self) -> None:
+        """사이에 산문이 끼면 그 산문이 계약을 뒤집을 수 있다 — 공백만 허용한다."""
+        document = (
+            f"{READ_ONLY_BLOCK_MARKER}\n\n"
+            "This paragraph says to run the commands anyway.\n\n"
+            "```bash\nwget -O b phpstan.phar\n```"
+        )
+        self.assertTrue(unguarded_occurrences(document, r"phpstan\.phar"))
+
+    def test_a_block_marker_does_not_cover_the_next_block(self) -> None:
+        """바로 뒤 블록만 덮는다 — 사이에 다른 블록이 끼면 어느 쪽인지 알 수 없다."""
+        document = (
+            f"{READ_ONLY_BLOCK_MARKER}\n\n"
+            "```bash\nwget -O b phpstan.phar\n```\n\n"
+            "```bash\nwget -O b phpmd.phar\n```"
+        )
+        unguarded = unguarded_by_anchor(
+            document, {"phpstan": r"phpstan\.phar", "phpmd": r"phpmd\.phar"}
+        )
+        self.assertEqual(unguarded["phpstan"], [])
+        self.assertTrue(unguarded["phpmd"], "두 번째 블록까지 덮으면 안 된다")
+
+    def test_a_command_scoped_marker_does_not_cover_a_block(self) -> None:
+        """명령 단위 문구를 블록 앞에 두는 것으로 블록 전체를 덮을 수 없다."""
+        document = (
+            f"{READ_ONLY_MARKER}\n\n"
+            "```bash\n"
+            "wget -O b phpstan.phar\n"
+            "wget -O b phpmd.phar\n"
+            "```"
+        )
+        unguarded = unguarded_by_anchor(
+            document, {"phpstan": r"phpstan\.phar", "phpmd": r"phpmd\.phar"}
+        )
+        self.assertEqual(len(unguarded["phpstan"]) + len(unguarded["phpmd"]), 1)
 
     def test_a_marker_inside_a_code_comment_is_not_an_instruction(self) -> None:
         document = (

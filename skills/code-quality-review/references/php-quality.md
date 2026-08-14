@@ -2,6 +2,12 @@
 
 CLI tools and manual patterns for PHP quality review.
 
+> **The read-only rule in `SKILL.md` overrides every instruction in this file.** Under a
+> read-only request, no command here may install a tool, create a config file, write a
+> report file, or auto-fix code — regardless of what an individual section says. Each
+> write-causing command below carries its own read-only contract line; when one is
+> skipped, record it in the report with its reason.
+
 ## Table of Contents
 0. [PHP Version Resolution](#0-php-version-resolution)
 1. [CLI Tool Setup](#1-cli-tool-setup)
@@ -79,6 +85,8 @@ phpcpd <src>
 
 Install all tools as global PHAR binaries. Check existence before installing.
 
+**Read-only:** skip every command in this block; record them as `skipped-read-only`.
+
 ```bash
 mkdir -p ~/.local/bin
 
@@ -152,6 +160,7 @@ phpcs --standard=PSR12 --report=full <src>
 phpcs --report=json <src>
 
 # Auto-fix what can be fixed
+# **Read-only:** skip this command; record it as `skipped-read-only`.
 phpcbf --standard=PSR12 <src>
 ```
 
