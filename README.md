@@ -89,6 +89,7 @@ Windows 프로젝트 범위는 스킬과 에이전트만 설치합니다. Window
 |---|---|
 | “새 인증 기능을 구현해줘” | `plan-and-build` |
 | “컨텍스트 문서부터 읽고 수정 없이 이전 지적을 재검토해줘” | `evidence-first-review` |
+| “이 계획대로 구현됐는지 검증해줘” | `evidence-first-review` (`plan-conformance` 프로필) |
 | “해당 변경만 커밋하고 내일 재개할 인수인계를 남겨줘” | `safe-checkpoint` |
 | “원인이 불명확한 오류를 분석하고 고쳐줘” | `systematic-debugging` |
 | “머지 전에 브랜치 리뷰해줘” | `branch-merge-review` |
