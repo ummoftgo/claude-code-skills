@@ -65,19 +65,122 @@ fi
 echo "PHP_CMD=$PHP_CMD ($(${PHP_CMD} -r 'echo PHP_VERSION;' 2>/dev/null))"
 ```
 
+### Derive the source directory
+
+`SRC_DIR` comes from the first PSR-4 **directory value** in `composer.json`. PSR-4 maps namespace
+keys (`"App\\"`) to directory values (`"src/"`), so read `array_values`, not `array_keys`.
+
+```bash
+SRC_DIR=$(php -r '$p=json_decode(file_get_contents("composer.json"),true)["autoload"]["psr-4"]??[];echo rtrim(array_values($p)[0]??""," /");') || SRC_DIR="src"
+[ -n "$SRC_DIR" ] || SRC_DIR="src"      # fall back to src/, app/, or the project root
+```
+
 ### Using PHP_CMD with tools
 
 Only **PHPStan** uses the PHP binary for type analysis — the others are version-agnostic style checkers.
 
+A project config takes precedence over `--level`. Use `if`/`else` rather than `&&`/`||`:
+PHPStan exits non-zero when it finds errors, which would trigger a `||` fallback and run the
+analysis twice.
+
+PHPStan auto-discovers **three** config names — `phpstan.neon`, `phpstan.neon.dist`, and
+`phpstan.dist.neon`. Checking only the first two makes a project that ships just
+`phpstan.dist.neon` look unconfigured, and the `--level=5` fallback then overrides the level the
+project actually set.
+
+**Check the cache location before running under a read-only request.** PHPStan writes its result
+cache to `sys_get_temp_dir()/phpstan` by default — outside the repository, so the default is
+safe. Two settings can move it inside:
+
+- `tmpDir` — a **relative** value resolves against the config file's directory;
+- `resultCachePath` — sets the cache file directly, **independently of `tmpDir`**, so checking
+  `tmpDir` alone misses it.
+
+Read **the config actually in effect**, not just the root auto-discovered names, and follow
+`includes:` **all the way down** — a grandparent config can set the cache path, and each include
+list resolves against the directory of the file that declares it.
+
 ```bash
-# PHPStan — run under the correct PHP binary
-$PHP_CMD $(command -v phpstan) analyse <src> --no-progress --error-format=raw
+# One variable decides everything below: which config PHPStan will actually use.
+# Resolve it in PHPStan's own priority order — NOT with `ls | head -1`, which sorts
+# alphabetically and would pick phpstan.dist.neon over phpstan.neon.
+PHPSTAN_CONFIG=""
+if [ -n "${PHPSTAN_EXPLICIT_CONFIG:-}" ]; then
+  PHPSTAN_CONFIG="$PHPSTAN_EXPLICIT_CONFIG"          # set only when the run passes --configuration
+else
+  for candidate in phpstan.neon phpstan.neon.dist phpstan.dist.neon; do
+    [ -f "$candidate" ] && { PHPSTAN_CONFIG="$candidate"; break; }
+  done
+fi
+
+# Read-only gate. Decide first, then run — printing the grep result and running anyway is
+# not a gate. `CACHE_RISK` non-empty means the cache would land inside the repository, or we
+# could not tell.
+CONFIG_CHAIN=""
+CACHE_RISK=""
+
+# Walk `includes:` **recursively**. One level is not enough: a grandparent config can set the
+# cache path, and stopping at the parent lets it through. Paths inside an include list resolve
+# against the including file's directory, not the working directory.
+collect_config() {
+  local file="$1" dir inc target canonical
+  if [ ! -r "$file" ]; then
+    CACHE_RISK="config unreadable: $file"      # cannot judge → not safe
+    return
+  fi
+  # Compare canonical paths: `phpstan.neon`, `./phpstan.neon`, and `././phpstan.neon` are the
+  # same file, and a raw string compare would recurse forever on a self-include.
+  canonical=$(cd "$(dirname "$file")" 2>/dev/null && printf '%s/%s' "$(pwd)" "$(basename "$file")") \
+    || { CACHE_RISK="unresolvable: $file"; return; }
+  # Newline-separated, not space-separated: a project path containing a space would otherwise
+  # split into fragments and every config would look unresolvable, skipping analysis for good
+  # projects. Windows paths (`C:\Users\First Last\...`) hit this immediately.
+  case "$(printf '%s\n' "$CONFIG_CHAIN")" in *"$canonical"$'\n'*) return ;; esac
+  CONFIG_CHAIN="$CONFIG_CHAIN$canonical"$'\n'
+  dir=$(dirname "$file")
+  while IFS= read -r inc; do
+    inc=$(printf '%s' "$inc" | sed "s/^[[:space:]]*-[[:space:]]*//; s/[\"']//g")
+    [ -n "$inc" ] || continue
+    case "$inc" in /*) target="$inc" ;; *) target="$dir/$inc" ;; esac
+    collect_config "$target"
+  done < <(awk '/^includes:/{f=1;next} f&&/^[[:space:]]*-/{print} f&&/^[^[:space:]-]/{f=0}' "$file")
+}
+
+if [ -n "$PHPSTAN_CONFIG" ]; then
+  collect_config "$PHPSTAN_CONFIG"
+  # Judge each cache setting against the directory of the file that declares it.
+  while IFS= read -r cfg; do
+    [ -n "$cfg" ] || continue
+    cfg_dir=$(cd "$(dirname "$cfg")" 2>/dev/null && pwd) || { CACHE_RISK="unresolvable: $cfg"; continue; }
+    while IFS= read -r setting; do
+      value=$(printf '%s' "${setting#*:}" | tr -d " \"'")
+      [ -n "$value" ] || continue
+      case "$value" in /*) resolved="$value" ;; *) resolved="$cfg_dir/$value" ;; esac
+      case "$resolved" in "$PWD"|"$PWD"/*) CACHE_RISK="$cfg: $setting" ;; esac
+    done < <(grep -hE '^[[:space:]]*(tmpDir|resultCachePath):' "$cfg" 2>/dev/null)
+  done <<< "$CONFIG_CHAIN"
+fi
+# No config at all is safe: PHPStan then uses sys_get_temp_dir()/phpstan, outside the repository.
+
+# PHPStan — run under the correct PHP binary, using the config resolved above
+if [ "${READ_ONLY:-0}" = "1" ] && [ -n "$CACHE_RISK" ]; then
+  echo "static analysis: skipped-read-only — result cache would be written inside the repository ($CACHE_RISK)"
+elif [ -n "$PHPSTAN_CONFIG" ]; then
+  $PHP_CMD $(command -v phpstan) analyse "$SRC_DIR" \
+    --configuration="$PHPSTAN_CONFIG" --no-progress --error-format=raw
+else
+  $PHP_CMD $(command -v phpstan) analyse "$SRC_DIR" \
+    --level=5 --no-progress --error-format=raw
+fi
 
 # phpcs / phpmd / phpcpd — version-agnostic; default php is fine
 phpcs --report=full <src>
 phpmd <src> text cleancode,codesize,naming,unusedcode
 phpcpd <src>
 ```
+
+The gate and the analysis read **the same `PHPSTAN_CONFIG`**. Splitting them is how a check
+inspects one file while the run uses another and the repository-internal cache slips through.
 
 ---
 
@@ -128,14 +231,16 @@ fi
 Replace `<src>` with the actual source directory (e.g., `src/`, `.`, `app/`).
 
 ### PHPStan — static analysis
-```bash
-# Level 5 is a good balance; raise to 8 for strict projects
-phpstan analyse <src> --level=5 --no-progress --error-format=raw
 
-# If phpstan.neon exists in the project root, it is picked up automatically
-# To use a specific config:
-phpstan analyse --configuration=phpstan.neon
-```
+**§0 ("Using PHP_CMD with tools") owns every PHPStan invocation**, including the explicit
+`--configuration` variant. Nothing here repeats a command: a second spelling would drift, and a
+bare `phpstan analyse --level=5` would override the level the project deliberately set.
+
+If either setting resolves inside the repository — or the effective config cannot be determined —
+do not run the analysis under a read-only request. Record static analysis as `skipped-read-only`
+and say it needs write permission or a cache path outside the repository. **Unknown is not safe**:
+a config that could not be read is exactly the case where a write would be a surprise. In normal
+mode the cache write is expected and desirable.
 
 Output: one line per error — `file.php:line:message`. Feed directly into report.
 

@@ -22,7 +22,9 @@ Detect the active shell before using a snippet. On POSIX use `command -v`, `[ -f
 
 Load before scanning:
 - `references/php-quality.md` — PHP tool setup, execution, and manual patterns
-- `references/js-quality.md` — JS/Svelte/HTMX tool setup, execution, and manual patterns
+- `references/js-toolchain.md` — JS/TS toolchain and environment-neutral patterns (**single source for tool invocation**)
+- `references/js-frontend-quality.md` — browser surface: DOM, jQuery, Svelte, HTMX
+- `references/node-quality.md` — server, CLI, daemon, library: async, streams, lifecycle, resources
 - `references/css-quality.md` — CSS/SCSS tool setup, execution, and manual patterns
 
 Load all applicable files for full-stack review.
@@ -35,14 +37,16 @@ understand. Name the unreviewed paths in the report so the gap is visible.
 
 ### What a language reference must contain
 
-This is the **target contract** for new and restructured references. The three shipped today
+This is the **target contract** for new and restructured references. The five shipped today
 predate it and do not match it yet — their current numbering is below. Restructuring them is
 scheduled work, not a precondition for using this table.
 
 | Reference | Current sections |
 |---|---|
 | `php-quality.md` | §0 version resolution · §1 setup · §2 execution · §3–6 manual patterns |
-| `js-quality.md` | §1 setup · §2 execution · §3–6 manual patterns · §7 Svelte lifecycle |
+| `js-toolchain.md` | §1 setup · §2 execution · §3–5 neutral patterns |
+| `js-frontend-quality.md` | §1 browser performance · §2 browser style/duplication · §3 Svelte lifecycle |
+| `node-quality.md` | §1–7 server-side patterns |
 | `css-quality.md` | §1 setup · §2 execution · §3–6 manual patterns |
 
 The target: every `references/{language}-quality.md` carries the same seven sections so this
@@ -99,8 +103,8 @@ comment inside one, so the example stays runnable. The second sits in the prose 
 before a fence and covers every command in that block; it states its own scope, so it can never
 be mistaken for a guard on one command while the rest run unguarded.
 
-`tests/test_php_baseline.py` enumerates the write-causing commands in the three references
-shipped today and fails when one loses its contract line. It does not discover a new reference
+`tests/test_php_baseline.py` enumerates the write-causing commands in the references shipped
+today and fails when one loses its contract line. It does not discover a new reference
 on its own — **when you add a language, add its write-causing commands to that list too.**
 
 **Always invoke npm-hosted tools as `npx --no <tool>`.** Plain `npx` falls back to downloading a
@@ -115,7 +119,10 @@ command fail instead. (`--no-install` is a deprecated alias that npm converts to
 
 Inspect the project root to determine languages and frameworks:
 - PHP: `composer.json`, `*.php` files → load `references/php-quality.md`
-- JS/Svelte/HTMX: `package.json`, `*.svelte`, `*.js` → load `references/js-quality.md`
+- JS/TS: `package.json`, `*.js`, `*.mjs`, `*.cjs`, `*.ts`, `*.mts`, `*.cts`, `*.tsx` → always load `references/js-toolchain.md`, then
+  - browser surface (`*.svelte`, bundler config, a frontend framework dependency) → `references/js-frontend-quality.md`
+  - server surface (a server framework dependency, a `bin` entry, an HTTP listener) → `references/node-quality.md`
+  - both, when the workspace serves both
 - CSS/SCSS: `*.css`, `*.scss`, `*.sass` files → load `references/css-quality.md`
 
 Infer project conventions from **existing code majority** (not assumed standards):
@@ -127,59 +134,24 @@ Run all applicable tools. For each tool, check if it exists first — if not, in
 
 ### PHP stack
 
-**Before running any PHP tool**, resolve the PHP binary version per `references/php-quality.md` Section 0:
-1. Extract required version from `composer.json` (`require.php`)
-2. Compare with `php --version`
-3. If mismatch → try `php{major}.{minor}` CLI (e.g. `php8.3`); if not found → ask the user
-4. Set `PHP_CMD` accordingly; use it for PHPStan (version-sensitive); other tools use default `php`
+`references/php-quality.md` is the **single source** for PHP toolchain invocation — runtime
+version resolution (`PHP_CMD`), source-directory derivation (`SRC_DIR`), and the four tool
+commands all live there. Follow its §0 for version resolution and §2 for execution.
 
-```bash
-# Derive src-dir: read the first PSR-4 *directory value* from composer.json;
-# fall back to src/, app/, or project root if autoload not defined.
-# PSR-4 maps namespace keys ("App\\") to directory values ("src/") — use array_values, not array_keys.
-# Example: SRC_DIR=$(php -r '$p=json_decode(file_get_contents("composer.json"),true)["autoload"]["psr-4"]??[];echo rtrim(array_values($p)[0]??""," /");') || SRC_DIR="src"
+Duplicating those commands here would drift: two spellings of the same instruction leave the
+reader unable to tell which is authoritative, and only one of them gets fixed.
 
-# Static analysis — run under resolved PHP_CMD
-# If phpstan.neon / phpstan.neon.dist exists, omit --level (project config takes precedence)
-# Use if/else to avoid double-execution: phpstan exits non-zero when it finds errors,
-# which would trigger the || fallback in a chained &&/|| expression.
-if [ -f phpstan.neon ] || [ -f phpstan.neon.dist ]; then
-  $PHP_CMD $(command -v phpstan) analyse <src-dir> --no-progress --error-format=raw
-else
-  $PHP_CMD $(command -v phpstan) analyse <src-dir> --level=5 --no-progress --error-format=raw
-fi
+### JS / TypeScript stack
 
-# Style/convention (version-agnostic)
-phpcs --standard=PSR12 --report=full <src-dir>
-
-# Complexity, duplication, dead code (version-agnostic)
-phpmd <src-dir> text cleancode,codesize,naming,unusedcode
-
-# Copy-paste detection (version-agnostic)
-phpcpd <src-dir>
-```
-
-### JS / Svelte / HTMX stack
-```bash
-# Linting (use whichever is configured in the project)
-npx --no eslint . --format=compact          # if ESLint config exists
-npx --no @biomejs/biome check .             # if biome.json exists
-npx --no oxlint .                           # if oxlint configured
-
-# Svelte type check (if .svelte files exist)
-npx --no svelte-check --output machine
-
-# Unused exports / dead dependencies
-npx --no knip
-```
+`references/js-toolchain.md` is the **single source** for JS/TS tool invocation — ESLint, Biome,
+Oxlint, `tsc --noEmit`, svelte-check, and knip, each with its read-only contract. Follow its §2.
 
 ### CSS / SCSS stack
-```bash
-# Stylelint (use if .css or .scss files exist)
-npx --no stylelint "**/*.css" "**/*.scss" --formatter=compact
-```
 
-See reference files for installation instructions when tools are missing.
+`references/css-quality.md` §2 owns Stylelint invocation.
+
+Installation for every stack lives in its reference file's setup section, gated by the
+read-only contract above.
 
 ## Step 3: Manual Review — Four Categories
 
@@ -194,7 +166,7 @@ Flag deviations from the inferred project majority only — not from external st
 Tools cover most of this; focus manual review on semantic inconsistencies tools can't detect
 (e.g., same concept named differently in different files).
 
-**Svelte lifecycle review rule**: Before flagging any store subscription or lifecycle issue in a `.svelte` file, read the entire component. The `$store` reactive syntax auto-unsubscribes — never flag it as a leak. Only flag manual `.subscribe()` calls that lack an `onDestroy` cleanup. See `references/js-quality.md` Section 7 for the full decision tree.
+**Svelte lifecycle review rule**: Before flagging any store subscription or lifecycle issue in a `.svelte` file, read the entire component. The `$store` reactive syntax auto-unsubscribes — never flag it as a leak. Only flag manual `.subscribe()` calls that lack an `onDestroy` cleanup. See `references/js-frontend-quality.md` Section 3 for the full decision tree.
 
 ### Category 3 — Duplicated / Redundant Code
 Tools (phpcpd, knip) cover structural duplication. Also flag:

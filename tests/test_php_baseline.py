@@ -32,7 +32,13 @@ ROOT = Path(__file__).resolve().parents[1]
 
 REVIEW_SKILLS = ("code-quality-review", "web-security-review", "branch-merge-review")
 
-QUALITY_REFERENCES = ("php-quality", "js-quality", "css-quality")
+QUALITY_REFERENCES = (
+    "php-quality",
+    "js-toolchain",          # 3단계 분할: 도구 + 환경 중립 패턴 (명령의 단일 원천)
+    "js-frontend-quality",   # 브라우저 표면
+    "node-quality",          # 서버·CLI·데몬·라이브러리
+    "css-quality",
+)
 
 #: 쓰기 유발 능력마다 (참조, 이름, **앵커 패턴**, **보존 패턴**).
 #:
@@ -53,17 +59,17 @@ WRITE_CAUSING = (
     ("php-quality", "phpcpd 설치", r"wget[^\n]*phpcpd", r"wget[^\n]*phpcpd"),
     ("php-quality", "phpcpd 실행권한", r"chmod \+x ~/\.local/bin/phpcpd", r"chmod \+x ~/\.local/bin/phpcpd"),
     ("php-quality", "PHP 자동수정 실행", r"(?m)^phpcbf\s+--", r"(?m)^phpcbf\s+--"),
-    ("js-quality", "ESLint 설치", r"npm install[^\n]*\beslint\b", r"npm install[^\n]*\beslint\b"),
-    ("js-quality", "Biome 설치", r"npm install[^\n]*@biomejs/biome", r"npm install[^\n]*@biomejs/biome"),
-    ("js-quality", "Biome 초기화", r"@biomejs/biome init", r"@biomejs/biome init"),
-    ("js-quality", "Oxlint 설치", r"npm install[^\n]*\boxlint\b", r"npm install[^\n]*\boxlint\b"),
-    ("js-quality", "svelte-check 설치", r"npm install[^\n]*svelte-check", r"npm install[^\n]*svelte-check"),
-    ("js-quality", "knip 설치", r"npm install[^\n]*\bknip\b", r"npm install[^\n]*\bknip\b"),
-    ("js-quality", "ESLint 보고서 출력", r"-o \S+\.json", r"-o \S+\.json"),
-    ("js-quality", "ESLint 자동수정", r"eslint[^\n]*--fix", r"eslint[^\n]*--fix"),
-    ("js-quality", "Biome 자동수정", r"biome[^\n]*--write", r"biome[^\n]*--write"),
-    ("js-quality", "Oxlint 자동수정", r"oxlint[^\n]*--fix", r"oxlint[^\n]*--fix"),
-    ("js-quality", "knip 자동수정", r"knip[^\n]*--fix", r"knip[^\n]*--fix"),
+    ("js-toolchain", "ESLint 설치", r"npm install[^\n]*\beslint\b", r"npm install[^\n]*\beslint\b"),
+    ("js-toolchain", "Biome 설치", r"npm install[^\n]*@biomejs/biome", r"npm install[^\n]*@biomejs/biome"),
+    ("js-toolchain", "Biome 초기화", r"@biomejs/biome init", r"@biomejs/biome init"),
+    ("js-toolchain", "Oxlint 설치", r"npm install[^\n]*\boxlint\b", r"npm install[^\n]*\boxlint\b"),
+    ("js-toolchain", "svelte-check 설치", r"npm install[^\n]*svelte-check", r"npm install[^\n]*svelte-check"),
+    ("js-toolchain", "knip 설치", r"npm install[^\n]*\bknip\b", r"npm install[^\n]*\bknip\b"),
+    ("js-toolchain", "ESLint 보고서 출력", r"-o \S+\.json", r"-o \S+\.json"),
+    ("js-toolchain", "ESLint 자동수정", r"eslint[^\n]*--fix", r"eslint[^\n]*--fix"),
+    ("js-toolchain", "Biome 자동수정", r"biome[^\n]*--write", r"biome[^\n]*--write"),
+    ("js-toolchain", "Oxlint 자동수정", r"oxlint[^\n]*--fix", r"oxlint[^\n]*--fix"),
+    ("js-toolchain", "knip 자동수정", r"knip[^\n]*--fix", r"knip[^\n]*--fix"),
     ("css-quality", "Stylelint 설치", r"(?m)npm install[^\n]*\bstylelint$", r"(?m)npm install[^\n]*\bstylelint$"),
     ("css-quality", "Stylelint 표준 설정 설치", r"(?m)npm install[^\n]*stylelint-config-standard$", r"(?m)npm install[^\n]*stylelint-config-standard$"),
     ("css-quality", "Stylelint SCSS 설정 설치", r"npm install[^\n]*stylelint-config-standard-scss", r"npm install[^\n]*stylelint-config-standard-scss"),
@@ -428,18 +434,26 @@ def invoked_as_command(text: str, tool: str) -> bool:
 def states_affirmatively(text: str, phrase_pattern: str) -> bool:
     """문구가 **긍정형으로** 선언되는가.
 
-    한계(수용): 부정어를 같은 단락 전체에서 찾으므로, 무관한 부정어가 있는 단락은 보수적으로
-    거부한다. 거짓 음성은 RED가 늦게 열릴 뿐이지만 거짓 양성은 게이트를 뚫는다.
+    부정어는 **같은 문장 안**에서만 부정으로 본다 — 앞("Never dispatch …")이든 뒤
+    ("Dispatching … is prohibited.")든 상관없다. 단락 전체를 보면
+    무관한 부정어("The roster is variable, **not** fixed at three.")가 옆 문장에 있다는
+    이유로 올바른 선언을 거부한다 — 거짓 음성도 게이트를 망가뜨린다.
     """
     negative = re.compile(
-        r"never|not |없이|말고|않는다|않는|금지|제외|exclude|prohibit", re.IGNORECASE
+        r"\bnever\b|\bnot\b|\bno\b|없이|말고|않는다|않는|금지|exclude|prohibit",
+        re.IGNORECASE,
     )
     for statement in statements(text):
-        if not re.search(phrase_pattern, statement, re.IGNORECASE):
-            continue
-        if negative.search(statement):
-            continue
-        return True
+        for sentence in re.split(r"(?<=[.!?])\s+", statement):
+            match = re.search(phrase_pattern, sentence, re.IGNORECASE)
+            if not match:
+                continue
+            # 문장 전체를 본다 — 부정은 앞에도("Never dispatch …") 뒤에도
+            # ("Dispatching … is prohibited.") 올 수 있다. 문장 단위로 쪼갠 뒤이므로
+            # 옆 문장의 무관한 부정어가 섞이지 않는다.
+            if negative.search(sentence):
+                continue
+            return True
     return False
 
 
@@ -491,11 +505,21 @@ class PhpScopeBaseline(unittest.TestCase):
             for line in table.splitlines()
             if line.startswith("|") and line.count("|") >= 3
         }
-        backend = rows.get("**Backend**", "")
-        self.assertIn("`*.php`", backend)
+        php_backend = [
+            line for label, line in rows.items()
+            if "Backend" in label and "PHP" in label
+        ]
+        self.assertTrue(php_backend, f"PHP Backend 행이 없다: {sorted(rows)}")
+        self.assertIn("`*.php`", php_backend[0])
         # Backend 판정이 매니페스트를 요구하게 되면 composer 없는 저장소가 빠진다.
-        frontend = rows.get("**Frontend**", "")
-        self.assertNotIn("`*.php`", frontend)
+        self.assertRegex(
+            php_backend[0], r"extension alone|확장자",
+            "PHP 분류가 확장자만으로 결정된다고 표에 남아 있어야 한다",
+        )
+        for label, line in rows.items():
+            if "Backend" not in label and "Category" not in label:
+                with self.subTest(row=label):
+                    self.assertNotIn("`*.php`", line)
 
         detection = read("skills/code-quality-review/SKILL.md")
         self.assertIn("- PHP: `composer.json`, `*.php` files", detection)
@@ -519,25 +543,48 @@ class PhpScopeBaseline(unittest.TestCase):
         )
         self.assertIn("--diff-filter=d", quality_block)
 
-    @unittest.expectedFailure
     def test_rename_away_from_php_uses_the_previous_path(self) -> None:
-        """RED → 3단계 — rename의 이전 경로가 **읽히기만 하고 쓰이지 않는다**.
+        """GREEN (3단계에서 전환됨) — rename의 이전 경로가 보안 범위에 합류한다.
 
-        현행 수집기는 이전 경로 레코드를 `_previous`로 소비한 뒤 버리고, 커밋 범위 수집은
-        새 경로만 산출한다. `.php`가 `.ts`로 옮겨가며 인증 로직이 사라져도 이전 경로의
-        PHP 보안 문맥이 리뷰에 들어오지 않는다.
+        커밋 범위 수집은 rename에서 새 경로만 산출하므로, 별도 수집이 없으면 `.php`가 `.ts`로
+        옮겨가며 사라진 인증 로직이 리뷰에 보이지 않는다. 그래서 이전 경로를 따로 모아
+        `CHANGED_SEC`에 합류시킨다.
 
-        문장이 아니라 **변수가 실제로 사용되는지**를 본다 — 올바른 구현을 설명하는 산문만
-        추가해서는 통과할 수 없다.
+        산문 선언과 **실효 명령**을 함께 요구하고, `cut` 필드 번호까지 고정한다 — 올바른 구현을
+        설명하는 문장만 추가하거나 새 경로를 수집하는 구현으로는 통과할 수 없다.
         """
         skill = read("skills/branch-merge-review/SKILL.md")
-        # 이전 경로를 버리는 현행 표기(`_previous`)가 사라지고, 실제로 범위에 합류해야 한다.
-        self.assertNotIn("_previous", skill)
+        # 산문 선언과 **실효 명령** 둘 다 요구한다. `_previous` 같은 변수명 존재 여부는
+        # 대리 신호일 뿐이라, 올바른 구현이 다른 이름을 쓰면 거짓 실패한다.
         self.assertTrue(
             states_affirmatively(
-                skill, r"CHANGED_SEC[^\n]*previous|previous path[^\n]*CHANGED_SEC"
+                skill, r"previous path[^\n]*CHANGED_SEC|CHANGED_SEC[^\n]*previous"
             ),
             "이전 경로가 보안 범위에 합류한다고 긍정형으로 선언되지 않았다",
+        )
+        commands = code_blocks(skill)
+        # `--name-status --diff-filter=R` 은 `R100\t이전\t새` 를 낸다. `cut -f2` 가 이전 경로,
+        # `cut -f3` 은 **새 경로**다 — 후자를 수집하면 이미 있는 경로를 다시 넣을 뿐이라
+        # 사라진 PHP 문맥은 여전히 안 보인다. 명령의 필드 선택까지 고정한다.
+        posix = re.search(
+            r"--name-status[^\n]*--diff-filter=R[^\n]*\|[^\n]*cut -f(\d)", commands
+        )
+        self.assertIsNotNone(posix, "rename 이전 경로를 수집하는 POSIX 명령이 없다")
+        self.assertEqual(
+            posix.group(1), "2",
+            "cut 필드가 2가 아니면 새 경로를 수집하는 것이다 (이전 경로는 2번 필드)",
+        )
+        self.assertRegex(
+            commands,
+            r"CHANGED_SEC=[^\n]*RENAME|RENAME[^\n]*CHANGED_SEC",
+            "수집한 이전 경로가 CHANGED_SEC 에 합류하지 않는다",
+        )
+        # Windows 네이티브 설치에서도 같은 합류가 있어야 한다.
+        self.assertRegex(
+            commands,
+            # PowerShell 블록에는 백틱(`` `t ``)이 있으므로 백틱을 제외하면 매치되지 않는다.
+            r"(?s)diff --name-status[^\n]*-M[\s\S]{0,600}?changedSec",
+            "PowerShell 수집에 rename 이전 경로 합류가 없다",
         )
 
 
@@ -571,14 +618,13 @@ class PhpReviewerBaseline(unittest.TestCase):
                     locations, f"{check!r} 가 허용된 두 위치 어디에도 없다"
                 )
 
-    @unittest.expectedFailure
     def test_php_and_node_get_separate_quality_reviewers(self) -> None:
-        """RED → 3단계 — Backend Quality 리뷰어가 하나뿐이라 한 언어가 다른 언어를 덮는다.
+        """GREEN (3단계에서 전환됨) — Backend Quality 리뷰어가 하나뿐이라 한 언어가 다른 언어를 덮는다.
 
-        현행은 정확히 3인 고정 로스터이고 Agent A 행이 `php-quality.md`를 직접 지정한다.
+        고정 로스터에서는 백엔드 품질 슬롯이 하나뿐이라 특정 언어 참조를 직접 지정했다.
         `{language}` 치환만 하면 PHP+Node 저장소에서 한쪽 리뷰가 사라진다.
 
-        산문이 아니라 **로스터 표의 구조**를 본다 — Agent A 행이 특정 언어 참조를 고정하지
+        산문이 아니라 **로스터 표의 구조**를 본다 — 백엔드 품질 슬롯 행이 특정 언어 참조를 고정하지
         않아야 하고, 감지된 백엔드 언어마다 리뷰어가 생성돼야 한다.
         """
         skill = read("skills/branch-merge-review/SKILL.md")
@@ -601,9 +647,8 @@ class PhpReviewerBaseline(unittest.TestCase):
             "언어별 디스패치가 긍정형으로 선언되지 않았다 — 부정 선언은 게이트가 아니다",
         )
 
-    @unittest.expectedFailure
     def test_incomplete_php_review_blocks_ready_to_merge(self) -> None:
-        """RED → 3단계 — PHP 리뷰어가 실패해도 정상 승인이 나올 수 있다.
+        """GREEN (3단계에서 전환됨) — PHP 리뷰어가 실패해도 정상 승인이 나올 수 있다.
 
         현행 실패 처리는 부분 결과로 진행하고, 보고서 판정에는 언어별 검토 완료 게이트가
         없다. 리뷰어가 언어별로 늘어나면 조용한 누락 위험이 커진다.
@@ -624,7 +669,10 @@ class PhpReviewerBaseline(unittest.TestCase):
         for failure_mode in (
             r"did not complete|실패",
             r"not dispatched|미디스패치|디스패치되지",
-            r"reference[^\n]*not loaded|참조[^\n]*로드",
+            # 부재를 뜻하는 표현이면 형태는 자유다 — 한 가지 철자만 받으면 정상 문구를 거부한다.
+            r"(?:without|not|missing|미)[^\n]{0,40}reference[^\n]{0,40}load"
+            r"|reference[^\n]{0,40}(?:not|without|missing)[^\n]{0,20}load"
+            r"|참조[^\n]{0,20}(?:미로드|로드되지)",
         ):
             with self.subTest(failure_mode=failure_mode):
                 self.assertRegex(gate, failure_mode)
@@ -658,12 +706,114 @@ class PhpToolchainBaseline(unittest.TestCase):
         run_section = reference[heading.end():][
             : following.start() if following else None
         ]
+        reference_all = quality_reference("php-quality")
         for tool in ("phpstan", "phpcs", "phpmd", "phpcpd"):
             with self.subTest(tool=tool):
+                # 실행 절에 명령이 있거나, 정본을 가리키고 그 정본에 명령이 있어야 한다.
+                # 명령을 §2 안에 **강제**하면 정본 수렴 자체가 불가능해진다.
+                here = invoked_as_command(run_section, tool)
+                points_elsewhere = re.search(
+                    rf"§0|Section 0|owns every {tool}", run_section, re.IGNORECASE
+                ) and invoked_as_command(reference_all, tool)
                 self.assertTrue(
-                    invoked_as_command(run_section, tool),
-                    f"{tool} 이 실행 절에서 명령으로 호출되지 않는다",
+                    here or points_elsewhere,
+                    f"{tool} 이 실행되지도, 정본을 가리키지도 않는다",
                 )
+
+    def test_dispatch_prompts_do_not_restate_the_phpstan_config_rule(self) -> None:
+        """GREEN (3단계에서 추가) — 정본을 만들고 프롬프트에 옛 지시를 남기면 권위가 갈린다.
+
+        프롬프트가 `phpstan.neon` 하나만 확인하라고 하면, 정본이 세 이름을 처리해도 실제
+        디스패치는 부분 검사로 돌아가 프로젝트 level 을 덮는다.
+        """
+        prompts = read("skills/branch-merge-review/references/reviewer-prompts.md")
+        # 백틱 유무에 상관없이 잡는다 — 옛 문구가 평문으로 돌아와도 통과하면 안 된다.
+        self.assertNotRegex(
+            prompts,
+            r"check\s+`?phpstan\.neon`?\s+first",
+            "프롬프트가 단일 설정 이름 폴백을 다시 지시하고 있다",
+        )
+        # 정본 지시는 **그 항목 안**에 있어야 한다. 파일 어딘가에 파일명이 있는 것으로는
+        # 그 항목이 정본을 가리킨다는 근거가 되지 않는다.
+        # `{focus}` 표의 **PHP 행**을 고른다. "PHPStan 과 config 가 든 첫 임의 행"으로 고르면
+        # 앞에 다른 행이 생겼을 때 회귀가 가려진다.
+        # `{focus}` 표 구간으로 한정한다. 파일 전체에서 세면 역할 매핑 표의 PHP 행까지
+        # 잡히고, `PHPStan` 을 조건에 넣어 좁히면 반대로 focus 행이 둘이어도 못 잡는다.
+        focus_table = between(
+            prompts,
+            "`{focus}` per language",
+            "When a language has no row here",
+            label="focus 표",
+        )
+        php_rows = [
+            line for line in focus_table.splitlines() if line.startswith("| PHP ")
+        ]
+        self.assertEqual(len(php_rows), 1, f"PHP focus 행이 정확히 하나여야 한다: {php_rows}")
+        phpstan_line = php_rows[0]
+        self.assertIn(
+            "php-quality.md", phpstan_line,
+            "PHPStan 항목이 정본을 가리키지 않는다",
+        )
+
+    def test_phpstan_config_discovery_covers_all_three_names(self) -> None:
+        """GREEN (3단계에서 추가) — PHPStan 은 세 이름을 자동 탐지한다.
+
+        두 개만 검사하면 `phpstan.dist.neon` 만 있는 프로젝트가 미설정으로 보이고,
+        `--level=5` 폴백이 프로젝트가 정한 level 을 덮는다.
+        """
+        commands = code_blocks(quality_reference("php-quality"))
+        for name in ("phpstan.neon", "phpstan.neon.dist", "phpstan.dist.neon"):
+            with self.subTest(config=name):
+                self.assertIn(name, commands)
+
+    def test_phpstan_result_cache_is_gated_under_read_only(self) -> None:
+        """GREEN (3단계에서 추가) — 캐시가 저장소 안에 떨어지는 **두** 경로를 모두 막는다.
+
+        기본값(`sys_get_temp_dir()/phpstan`)은 저장소 밖이라 안전하다. 안으로 들어오는 길은
+        둘이며, `tmpDir` 만 보면 나머지 하나로 그대로 새어 나간다.
+        """
+        reference = quality_reference("php-quality")
+        for setting in ("tmpDir", "resultCachePath"):
+            with self.subTest(setting=setting):
+                self.assertIn(setting, reference)
+        commands = code_blocks(reference)
+        self.assertRegex(
+            commands,
+            r"tmpDir\|resultCachePath|\(tmpDir\|resultCachePath\)",
+            "두 설정을 함께 읽는 명령이 없다",
+        )
+        # 우선순위대로 고른다 — `ls | head -1` 은 사전순이라 phpstan.dist.neon 을 먼저 잡는다.
+        self.assertNotRegex(
+            commands, r"ls\s+phpstan[^\n]*head -1",
+            "사전순 선택은 PHPStan 의 실제 우선순위와 다르다",
+        )
+        order = re.search(
+            r"for candidate in ([^\n;]+); do", commands
+        )
+        self.assertIsNotNone(order, "설정 후보를 우선순위대로 도는 루프가 없다")
+        self.assertEqual(
+            order.group(1).split(),
+            ["phpstan.neon", "phpstan.neon.dist", "phpstan.dist.neon"],
+            "PHPStan 의 설정 우선순위와 다르다",
+        )
+        # 게이트와 실행이 같은 변수를 써야 한다 — 갈리면 검사는 A 를, 실행은 B 를 본다.
+        self.assertRegex(
+            commands, r"--configuration=\"?\$PHPSTAN_CONFIG",
+            "실행이 게이트가 검사한 설정을 그대로 쓰지 않는다",
+        )
+        self.assertRegex(
+            commands, r"includes:",
+            "부모 설정이 캐시 경로를 정할 수 있으므로 includes 를 따라야 한다",
+        )
+        self.assertRegex(
+            reference, r"independently of `tmpDir`|독립",
+            "resultCachePath 가 tmpDir 과 독립이라는 사실이 이 항목의 실질이다",
+        )
+        self.assertRegex(
+            reference, r"[Uu]nknown is not safe|판정할 수 없|cannot be determined",
+            "실효 설정을 못 읽는 경우를 안전으로 처리하면 게이트가 뚫린다",
+        )
+        self.assertRegex(reference, r"skipped-read-only")
 
     def test_normal_mode_still_installs_missing_tools(self) -> None:
         """GREEN — 읽기 전용 조건을 잘못 걸어 일반 모드까지 죽이면 리뷰가 빈 껍데기가 된다.
@@ -724,18 +874,19 @@ class PhpToolchainBaseline(unittest.TestCase):
                         "닫히지 않은 펜스의 명령도 검사 대상이다")
         self.assertFalse(bare("```bash\nnpx --no eslint .\n```"))
 
-    @unittest.expectedFailure
     def test_php_version_resolution_has_a_single_source(self) -> None:
-        """RED → 3단계 — 버전 해석 네 조각이 본문과 참조에 흩어져 있다.
+        """GREEN (3단계에서 전환됨) — 버전 해석 네 조각이 본문과 참조에 흩어져 있다.
 
         `SRC_DIR` PSR-4 도출은 본문에만 있어 완전한 중복도 아니다. 권위 문구만 붙이면
         모델이 비권위 사본도 계속 읽으므로 충돌이 남는다.
 
         토큰 하나가 아니라 **네 조각 전부가 같은 한 파일에** 있는지를 본다.
         """
+        # **실행 지시만 본다.** 정본을 가리키는 산문("… derivation lives in php-quality.md")은
+        # 두 번째 사본이 아니라 단일 원천 설계 그 자체다. 산문까지 세면 올바른 구현이 막힌다.
         locations = {
-            "SKILL.md": read("skills/code-quality-review/SKILL.md"),
-            "php-quality.md": quality_reference("php-quality"),
+            "SKILL.md": code_blocks(read("skills/code-quality-review/SKILL.md")),
+            "php-quality.md": code_blocks(quality_reference("php-quality")),
         }
         owners = {}
         for piece, pattern in self.VERSION_RESOLUTION_PIECES.items():
@@ -756,7 +907,7 @@ class PhpToolchainBaseline(unittest.TestCase):
         """GREEN (1단계에서 전환됨) — 쓰기를 유발하는 **명령 각각**이 읽기 전용 가드를 동반해야 한다.
 
         Step 2의 게이트는 "도구 설치"만 가리므로 설정 생성·자동수정·보고서 출력은 걸리지
-        않는다. 그래서 쓰기를 유발하는 27개 능력마다 계약 문구를 요구한다.
+        않는다. 그래서 쓰기를 유발하는 능력마다 계약 문구를 요구한다(현재 27개 — `WRITE_CAUSING` 이 정본).
 
         **파일 상단에 문구 한 줄을 추가하는 것으로는 통과할 수 없다** — 각 명령이 자기
         계약 문구를 갖거나, 범위를 명시한 블록 문구가 그 블록을 덮어야 한다.
@@ -777,6 +928,172 @@ class PhpToolchainBaseline(unittest.TestCase):
                         f"{reference_name} 의 {capability}: {READ_ONLY_MARKER!r} 계약"
                         f" 문구가 없는 발생 {len(lines)}건 (줄 {lines})",
                     )
+
+
+class PhpStanReadOnlyGateTest(unittest.TestCase):
+    """읽기 전용 캐시 게이트를 **실행해서** 검증한다.
+
+    문자열 검사는 "설정 이름이 문서에 있다"까지만 말한다. 게이트가 실제로 실행을 막는지는
+    돌려 봐야 안다 — 실제로 grep 결과를 출력만 하고 그대로 실행하는 구현이 문자열 검사를
+    통과한 적이 있다.
+    """
+
+    ANALYSIS_MARKER = "RAN-ANALYSIS"
+
+    def gate_script(self) -> str:
+        """`php-quality.md` §0 의 bash 블록을 꺼내 분석 호출만 마커로 대체한다."""
+        reference = quality_reference("php-quality")
+        match = re.search(
+            r"```bash\n(# One variable decides.*?)```", reference, re.DOTALL
+        )
+        self.assertIsNotNone(match, "§0 실행 블록을 찾지 못했다")
+        block = match.group(1)
+        # 줄 이음(`\` 개행)을 먼저 합친다. 첫 줄만 치환하면 `#` 가 그 줄의 `\` 까지 주석으로
+        # 만들어, 이어지던 줄이 미아 명령으로 실행되고 스크립트가 127 로 죽는다.
+        block = re.sub(r"\\\n\s+", " ", block)
+        block = block.replace(
+            "$PHP_CMD $(command -v phpstan) analyse", f"echo {self.ANALYSIS_MARKER} #"
+        )
+        block = re.sub(r"^(phpcs|phpmd|phpcpd) .*", "", block, flags=re.MULTILINE)
+        return "PHP_CMD=php\nSRC_DIR=src\n" + block
+
+    def run_gate(
+        self,
+        config: str | None,
+        *,
+        readable: bool = True,
+        extra: dict[str, str] | None = None,
+        unreadable: tuple[str, ...] = (),
+        subdir: str = "",
+    ) -> str:
+        """게이트 블록을 실제로 실행한다. `extra` 로 include 대상 파일을 함께 놓는다."""
+        import subprocess, tempfile, os
+        with tempfile.TemporaryDirectory() as base:
+            work = Path(base, subdir) if subdir else Path(base)
+            work.mkdir(parents=True, exist_ok=True)
+            work = str(work)
+            (Path(work) / "gate.sh").write_text(self.gate_script(), encoding="utf-8")
+            written = []
+            if config is not None:
+                target = Path(work) / "phpstan.neon"
+                target.write_text(config, encoding="utf-8")
+                written.append(target)
+                if not readable:
+                    os.chmod(target, 0o000)
+            for name, body in (extra or {}).items():
+                path = Path(work) / name
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(body, encoding="utf-8")
+                written.append(path)
+                if name in unreadable:
+                    os.chmod(path, 0o000)
+            result = subprocess.run(
+                ["bash", "gate.sh"], cwd=work, capture_output=True, text=True,
+                env={**os.environ, "READ_ONLY": "1"},
+            )
+            for path in written:
+                os.chmod(path, 0o644)
+            # 스크립트 자체가 죽으면 "실행되지 않았다"가 아니라 하네스 결함이다.
+            self.assertEqual(
+                result.returncode, 0,
+                f"게이트 스크립트가 종료 코드 {result.returncode} 로 실패했다:\n{result.stderr}",
+            )
+            return result.stdout
+
+    def assertRan(self, output: str, message: str) -> None:
+        self.assertIn(self.ANALYSIS_MARKER, output, message)
+
+    def assertSkipped(self, output: str, message: str) -> None:
+        self.assertNotIn(self.ANALYSIS_MARKER, output, message)
+        self.assertIn("skipped-read-only", output, message)
+
+    def test_a_config_without_cache_settings_runs(self) -> None:
+        """기본 캐시 위치는 저장소 밖이다 — 막으면 정상 프로젝트의 정적 분석이 죽는다."""
+        self.assertRan(
+            self.run_gate("parameters:\n\tlevel: 6\n"),
+            "설정은 있으나 캐시를 옮기지 않는 프로젝트는 실행돼야 한다",
+        )
+
+    def test_no_config_at_all_runs(self) -> None:
+        self.assertRan(self.run_gate(None), "설정이 없으면 기본값이므로 안전하다")
+
+    def test_a_relative_tmpdir_blocks_the_run(self) -> None:
+        """상대 경로는 설정 파일 디렉터리 기준으로 풀려 저장소 안에 떨어진다."""
+        self.assertSkipped(
+            self.run_gate("parameters:\n\ttmpDir: .phpstan-cache\n"),
+            "상대 tmpDir 이 실행을 막지 못했다",
+        )
+
+    def test_a_result_cache_path_inside_the_repo_blocks_the_run(self) -> None:
+        """`resultCachePath` 는 `tmpDir` 과 독립이다 — 한쪽만 보면 그대로 샌다."""
+        self.assertSkipped(
+            self.run_gate("parameters:\n\tresultCachePath: build/rc.php\n"),
+            "resultCachePath 가 실행을 막지 못했다",
+        )
+
+    def test_a_grandparent_include_that_moves_the_cache_blocks_the_run(self) -> None:
+        """한 단계만 따라가면 조부모 설정이 그대로 통과한다.
+
+        `phpstan.neon` → `parent.neon` → `grand.neon` 에서 마지막이 `tmpDir` 을 저장소 안으로
+        옮기면, 실제 PHPStan 은 그 값을 쓰고 캐시를 저장소에 남긴다.
+        """
+        self.assertSkipped(
+            self.run_gate(
+                "includes:\n\t- parent.neon\n",
+                extra={
+                    "parent.neon": "includes:\n\t- grand.neon\n",
+                    "grand.neon": "parameters:\n\ttmpDir: .phpstan-cache\n",
+                },
+            ),
+            "중첩 include 가 게이트를 우회했다",
+        )
+
+    def test_an_unreadable_include_blocks_the_run(self) -> None:
+        """읽지 못한 include 를 조용히 버리면 판정 불가를 안전으로 처리하는 것이다."""
+        self.assertSkipped(
+            self.run_gate(
+                "includes:\n\t- parent.neon\n",
+                extra={"parent.neon": "parameters:\n\tlevel: 6\n"},
+                unreadable=("parent.neon",),
+            ),
+            "읽을 수 없는 include 를 안전으로 처리했다",
+        )
+
+    def test_a_cache_path_at_the_repository_root_blocks_the_run(self) -> None:
+        """`$PWD` 정확히 일치도 저장소 안이다 — `$PWD/*` 만 보면 루트 지정이 새어 나간다."""
+        self.assertSkipped(
+            self.run_gate("parameters:\n\ttmpDir: .\n"),
+            "저장소 루트를 캐시 위치로 지정한 설정이 통과했다",
+        )
+
+    def test_a_self_including_config_terminates_and_is_judged(self) -> None:
+        """경로 별칭(`./x` vs `x`)을 정규화하지 않으면 방문 검사를 우회해 무한 재귀한다."""
+        self.assertSkipped(
+            self.run_gate("includes:\n\t- ./phpstan.neon\nparameters:\n\ttmpDir: .cache\n"),
+            "자기 include 순환에서 캐시 설정을 판정하지 못했다",
+        )
+
+    def test_a_path_containing_spaces_does_not_false_positive(self) -> None:
+        """공백 구분 누적은 `C:\\Users\\First Last\\...` 같은 경로를 조각내 전부 unresolvable 로 만든다.
+
+        fail-closed 라 저장소를 쓰지는 않지만, 안전한 프로젝트의 정적 분석이 통째로 사라진다.
+        이 저장소는 Windows 네이티브 설치를 지원하므로 흔한 경로다.
+        """
+        self.assertRan(
+            self.run_gate("parameters:\n\tlevel: 6\n", subdir="First Last/proj"),
+            "공백이 든 경로에서 안전한 설정이 건너뛰어졌다",
+        )
+        self.assertSkipped(
+            self.run_gate("parameters:\n\ttmpDir: .cache\n", subdir="First Last/proj"),
+            "공백이 든 경로에서 위험한 설정이 통과했다",
+        )
+
+    def test_an_unreadable_config_blocks_the_run(self) -> None:
+        """판정할 수 없으면 안전이 아니다 — 읽지 못한 설정이야말로 쓰기가 놀라움이 된다."""
+        self.assertSkipped(
+            self.run_gate("x\n", readable=False),
+            "읽을 수 없는 설정을 안전으로 처리했다",
+        )
 
 
 class PhpSecurityBaseline(unittest.TestCase):
@@ -1044,6 +1361,91 @@ class PreconditionsForRedTests(unittest.TestCase):
                 )
 
 
+class NodeReferenceSemanticsTest(unittest.TestCase):
+    """3단계에서 고친 기술적 주장을 고정한다.
+
+    이 파일들은 문법이 아니라 **런타임 의미**를 가르친다. 틀린 설명은 리뷰어가 잘못된 findings를
+    내게 하고, 그 findings는 코드보다 오래 남는다. 각 항목은 검토에서 실제로 틀렸던 것이다.
+    """
+
+    def node_quality(self) -> str:
+        return quality_reference("node-quality")
+
+    def test_promise_all_is_not_described_as_leaving_rejections_unhandled(self) -> None:
+        """`Promise.all` 은 모든 입력에 핸들러를 붙이므로 나중 거부도 handled 다.
+
+        Node v24 실측에서 `unhandled=0`. "나중 거부가 unhandled 가 된다"고 쓰면 리뷰어가
+        존재하지 않는 경고를 근거로 findings를 만든다. 실제 손실은 **호출자가 결과를 받지
+        못한다**는 것이고, 경고가 없어서 조용하다는 점이 핵심이다.
+        """
+        section = between(
+            self.node_quality(), "### `Promise.all`", "## 2. Error Propagation",
+            label="Promise.all 절",
+        )
+        self.assertRegex(
+            section,
+            r"never receives their outcomes|호출자가[^\n]*받지 못",
+            "손실을 '호출자가 결과를 받지 못함'으로 설명해야 한다",
+        )
+        self.assertRegex(
+            section,
+            r"not \*unhandled\*|unhandled 가 아니",
+            "나중 거부가 unhandled 가 아니라는 사실이 빠지면 안 된다",
+        )
+        self.assertRegex(
+            section,
+            r"attaches a handler to every input|모든 입력에[^\n]*핸들러",
+            "왜 unhandled 가 아닌지(모든 입력에 핸들러 부착)가 빠지면 근거 없는 주장이 된다",
+        )
+        self.assertRegex(
+            section,
+            r"loss is silent|no warning appears|조용",
+            "경고가 없어 손실이 조용하다는 점이 이 항목의 실질이다",
+        )
+        self.assertNotRegex(
+            section,
+            r"becomes an unhandled rejection",
+            "틀린 주장이 되살아났다",
+        )
+
+    def test_pipeline_caveat_names_the_settled_states(self) -> None:
+        """`pipeline` 이 파괴하지 않는 것은 **이미 end/finish/close 를 낸** 스트림이다.
+
+        "이미 오류난 스트림"으로 쓰면 오류 처리 의미를 반대로 가르친다.
+        """
+        section = between(
+            self.node_quality(), "## 3. Streams & Backpressure", "## 4. Process Lifecycle",
+            label="스트림 절",
+        )
+        self.assertRegex(section, r"`end`, `finish`, or `close`|end.*finish.*close")
+        self.assertNotRegex(
+            section, r"already\s+finished or errored", "틀린 주장이 되살아났다"
+        )
+
+    def test_type_checking_states_that_noemit_alone_is_not_read_only(self) -> None:
+        """`tsc --noEmit` 도 `incremental`/`composite` 면 `.tsbuildinfo` 를 쓴다.
+
+        1단계 읽기 전용 계약이 여기서 깨진다 — 검토가 약속한 무쓰기를 어기고 사용자 저장소에
+        새 파일을 남긴다. tsconfig 를 먼저 읽으라는 지시와 composite 의 처리가 함께 있어야 한다.
+        """
+        toolchain = quality_reference("js-toolchain")
+        section = between(
+            toolchain, "### TypeScript", "### svelte-check", label="TypeScript 절"
+        )
+        self.assertIn(".tsbuildinfo", section)
+        self.assertRegex(section, r"incremental")
+        self.assertRegex(section, r"composite")
+        self.assertRegex(
+            section, r"skipped-read-only",
+            "composite 프로젝트에서 무엇으로 기록할지가 없다",
+        )
+        self.assertNotRegex(
+            section,
+            r"`--noEmit` is what keeps this read-only safe",
+            "틀린 전제가 되살아났다",
+        )
+
+
 class CheckerSelfTest(unittest.TestCase):
     """단언 자체를 검증한다 — 잘못된 구현이 **실제로** 통과하지 못하는지.
 
@@ -1162,7 +1564,7 @@ class CheckerSelfTest(unittest.TestCase):
     def test_a_marker_in_a_non_instructional_position_is_not_a_guard(self) -> None:
         """계약 문장을 그대로 써도 **읽히지 않는 자리**면 가드가 아니다.
 
-        27개 명령 앞에 문구를 넣다 보면 코드 블록 안에 들어가기 쉽다. 그러면 실행 예제를
+        여러 명령 앞에 문구를 넣다 보면 코드 블록 안에 들어가기 쉽다. 그러면 실행 예제를
         깨뜨리면서 게이트만 통과한다. HTML 주석은 이 저장소가 비지시 텍스트로 취급한다.
         """
         for label, document in (

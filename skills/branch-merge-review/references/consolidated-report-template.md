@@ -12,13 +12,15 @@ Structure for the team leader's consolidated output (SKILL.md Step 5). The same 
 ## Executive Summary
 [2–3 sentences: overall quality and security posture, most critical findings]
 
+**Review completeness**: [per language — `PHP: reviewed` · `Node: reviewer did not complete` · `Go: no reference, unreviewed`]
 **Recommendation**: Block merge | Merge after fixes | Ready to merge
+  ↳ `Ready to merge` requires every language with changed files to be `reviewed`.
 **Blocking items**: [CH-1, H-2, ...] | None
 **Findings**: Critical: N · High: N · Medium: N · Low: N  |  Validated: N · Needs verification: N
 
 ## Review Coverage
 - Files reviewed: [list or count by category]
-- Skipped reviewers: [e.g., "Agent A — no backend files changed"]
+- Skipped reviewers: [e.g., "PHP quality — no PHP files changed"]
 - Excluded from quality scope: [deleted files, if any]
 
 ---
@@ -59,11 +61,11 @@ Structure for the team leader's consolidated output (SKILL.md Step 5). The same 
 > The consolidated sections above are authoritative. These are the unedited reviewer outputs for reference.
 
 ### Backend Quality Reviewer
-[Agent A full report — or "Skipped: no backend files changed"]
+[Per-language quality reports — or "Skipped: no files changed for this language"]
 
 ### Security Reviewer
-[Agent B full report]
+[Security reviewer full report]
 
 ### Frontend Quality Reviewer
-[Agent C full report — or "Skipped: no frontend files changed"]
+[Frontend quality report — or "Skipped: no frontend files changed"]
 ```

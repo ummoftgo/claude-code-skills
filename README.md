@@ -110,7 +110,7 @@ Windows 프로젝트 범위는 스킬과 에이전트만 설치합니다. Window
 | 증거 우선 검증 — 특정 주장 대조, 원본 JSON/CSV/DB·비Git 디렉터리 점검 | “컨텍스트 문서의 주장을 원본 데이터로 검증해줘” | `evidence-first-review` |
 | 최초 검토 (`initial`) — 새 문제를 찾는 첫 리뷰 | “브랜치 리뷰해줘” | 2단계로 |
 
-**범위가 PR·브랜치여도 작업 모드가 이깁니다.** `evidence-first-review`만 이전 지적을 1:1 원장으로 추적해 `resolved`·`partially resolved`·`unresolved`·`regressed`로 분류하고, must-fix 조건을 재검증해 `approved`·`conditionally approved`·`hold`를 판정합니다. `branch-merge-review`에는 이 모드가 없습니다 — 3인 병렬 리뷰어로 **신규 발견**을 하는 스킬입니다. 재검토·승인 요청을 범위만 보고 `branch-merge-review`로 보내면 사용자가 요청한 산출물(지적별 상태 분류, 승인 판정)이 나오지 않습니다.
+**범위가 PR·브랜치여도 작업 모드가 이깁니다.** `evidence-first-review`만 이전 지적을 1:1 원장으로 추적해 `resolved`·`partially resolved`·`unresolved`·`regressed`로 분류하고, must-fix 조건을 재검증해 `approved`·`conditionally approved`·`hold`를 판정합니다. `branch-merge-review`에는 이 모드가 없습니다 — 감지된 언어마다 품질 리뷰어를 띄우고 보안 리뷰어를 더한 병렬 팀으로 **신규 발견**을 하는 스킬입니다. 재검토·승인 요청을 범위만 보고 `branch-merge-review`로 보내면 사용자가 요청한 산출물(지적별 상태 분류, 승인 판정)이 나오지 않습니다.
 
 #### 2단계 — 최초 검토일 때의 범위 (주제보다 우선)
 

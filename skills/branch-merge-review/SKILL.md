@@ -5,7 +5,7 @@ description: "Run a first-time (initial) discovery review of all committed chang
 
 # Branch Merge Review
 
-Review all committed diff changes against main/master using a 3-person parallel reviewer team — backend quality, full-stack security, and frontend quality — each invoking the appropriate installed skill (`code-quality-review` or `web-security-review`). The team leader waits for all three to finish (Step 3), cross-validates Critical/High findings with grep audit patterns (Step 4), and produces a consolidated report. Reviewers NEVER modify code — findings only.
+Review all committed diff changes against main/master with a parallel reviewer team: **one quality reviewer per detected backend language**, one frontend quality reviewer when a browser surface exists, and one security reviewer — each invoking the appropriate installed skill (`code-quality-review` or `web-security-review`). The team leader waits for every reviewer to finish (Step 3), cross-validates Critical/High findings with grep audit patterns (Step 4), and produces a consolidated report. Reviewers NEVER modify code — findings only.
 
 ## Platform command selection
 
@@ -26,7 +26,7 @@ Invoke installed skills by name (`code-quality-review`, `web-security-review`); 
 > - **Route on one question — is exactly one status column filled? — and abort otherwise. Do not enumerate pairs.** When only X is filled (`M `, `A `, `R `, `T `, `D `) the worktree matches the index; when only Y is filled (` M`, ` A`, ` R`, ` T`, ` D`) the index matches HEAD. Either way the file on disk *is* what a commit would record, so it can go to a content-based reviewer. `??` (untracked) also passes, and `D `/` D` are pure deletions routed to the deletion path below. **When both columns are filled, stop the review**: print the raw `XY<space>path` records and ask the user to commit, stash, or resolve the conflict before asking again. Never skip such a path silently — silence is exactly how staged work vanishes from a review. Express the rule with negated character classes rather than a pair list — `' '[!\ ]` and `[!\ ]' '` — so no combination can be left out and any status letter Git adds later is covered.
 > - **Both columns filled means the index and the worktree can hold different content, and reviewing the current file then misses the entire commit.** Measured on a real repository: for `MM` (dangerous edit staged, then the worktree reverted to the HEAD content) `git diff HEAD -- <path>` is **completely empty** while `git diff --cached HEAD -- <path>` still shows the removed `htmlspecialchars()` call — a current-content review sees nothing at all. For `AM` (dangerous new file staged, then overwritten with harmless content) the HEAD diff shows only the harmless side. For `AD` the HEAD diff is empty although `git commit` would add the file; for `RD` the HEAD diff names the **old** path so the new path yields nothing; for `MD` the HEAD diff shows a pure deletion and hides the staged modification. The old enumerated allowlist `[ MARCT][ MTRC]` passed `MM`, `AM`, `RM` and `MT` straight into the review, which is exactly this defect. Every unmerged pair (`DD`, `AU`, `UD`, `UA`, `DU`, `AA`, `UU`) fills both columns and so fails the same test; a leading `*U*` case states that intent explicitly.
 > - **Aborting is right for this skill; reviewing the two sides separately is not.** The reviewers dispatched here (`code-quality-review`, `web-security-review`) inspect files on disk by path, and the index-side content is not a file — surfacing it would mean writing `git show :<path>` to a temporary file, after which every finding cites a path and line number that does not exist in the repository. Passing the gate is what establishes the single premise "the current file is what will be committed"; reviewing both sides breaks it and leaves the user unable to tell which of two reports describes the code that ships. Keep it practical by naming the remedy in the abort message instead: measured, a single `git add -A` collapsed `MM`, `AM`, `RM`, `MT`, `AD`, `RD` and `MD` all into one-column states. Note that `git add` adopts the **worktree** side and discards index-only content (for `MM` the record disappears entirely), so recovering the index side needs a commit or `git stash` — a choice only the user can make, which is why the gate does not make it for them.
-> - A `D ` or ` D` status has no current content, so it must not go to a content-based reviewer — but it must not be dropped either. Review each deletion through `git diff HEAD -- <path>` and treat the removed lines as findings, the same way Agent B receives every changed path including deletions here: a removed CSRF check, auth guard, input sanitizer, or CSP header is itself a finding.
+> - A `D ` or ` D` status has no current content, so it must not go to a content-based reviewer — but it must not be dropped either. Review each deletion through `git diff HEAD -- <path>` and treat the removed lines as findings, the same way the security reviewer receives every changed path including deletions here: a removed CSRF check, auth guard, input sanitizer, or CSP header is itself a finding.
 >
 > ```bash
 > CONTENT=(); DELETED=(); BLOCKED=()
@@ -53,7 +53,7 @@ Invoke installed skills by name (`code-quality-review`, `web-security-review`); 
 
 ## Reference Files
 
-- `references/reviewer-prompts.md` — Common Instructions and the full Agent A/B/C dispatch prompts (Step 2)
+- `references/reviewer-prompts.md` — Common Instructions and the dispatch prompt templates (Step 2)
 - `references/consolidated-report-template.md` — structure of the consolidated report (Step 5)
 
 ---
@@ -155,9 +155,14 @@ try {
   $changedQa = @($allTouched | ForEach-Object {
     git diff --name-only --diff-filter=d $mergeBase HEAD -- $_
   } | Sort-Object -Unique)
-  $changedSec = @($allTouched | ForEach-Object {
+  # Rename pairs: `R100<TAB>previous<TAB>new`. Field 2 is the **previous** path — field 3 is
+  # the new one, which is already in scope. Collecting the wrong field leaves the vanished
+  # context invisible.
+  $renamed = @(git diff --name-status --diff-filter=R -M $mergeBase HEAD |
+    ForEach-Object { ($_ -split "`t")[1] } | Where-Object { $_ })
+  $changedSec = @(@($allTouched | ForEach-Object {
     git diff --name-only $mergeBase HEAD -- $_
-  } | Sort-Object -Unique)
+  }) + $renamed | Sort-Object -Unique | Where-Object { $_ })
 } finally {
   $ErrorActionPreference = $previousErrorPreference
 }
@@ -170,30 +175,100 @@ try {
 - Security reviewer (B) receives `CHANGED_SEC` — no `--diff-filter`, so every changed path is included, deletions among them (a removed security guard is itself a finding).
 - Never replace either filter with an enumerated list such as `ACMR`/`ACMRD`: both drop `T`, so a config file swapped for a symlink disappears from the review while `ALL_TOUCHED` still lists it.
 
-Categorize the file list:
+Categorize the file list. **Extension decides the category wherever it can**, because a
+manifest-based rule silently drops repositories that have no manifest — a legacy PHP project
+without `composer.json` is common, and losing it would drop backend review entirely.
 
-| Category | Extensions / Filenames |
-|----------|------------------------|
-| **Backend** | `*.php`, `composer.json`, `composer.lock` |
-| **Frontend** | `*.js`, `*.ts`, `*.svelte`, `*.html` |
-| **Style** | `*.css`, `*.scss`, `*.sass` |
-| **Config** | `*.json`, `*.yaml`, `*.yml`, `*.env*`, `*.ini` |
+| Category | Extensions / Filenames | Decided by |
+|----------|------------------------|---|
+| **Backend (PHP)** | `*.php`, `composer.json`, `composer.lock` | extension alone |
+| **Backend (Python)** | `*.py`, `pyproject.toml`, `requirements*.txt` | extension alone |
+| **Backend (Go)** | `*.go`, `go.mod`, `go.sum` | extension alone |
+| **Backend (Rust)** | `*.rs`, `Cargo.toml`, `Cargo.lock` | extension alone |
+| **JS/TS** | `*.js`, `*.mjs`, `*.cjs`, `*.ts`, `*.mts`, `*.cts`, `*.tsx`, `package.json`, `package-lock.json`, `pnpm-lock.yaml`, `yarn.lock` | **surface, see below** |
+| **Frontend (markup)** | `*.svelte`, `*.html` | extension alone |
+| **Style** | `*.css`, `*.scss`, `*.sass` | extension alone |
+| **Config** | `*.json`, `*.yaml`, `*.yml`, `*.env*`, `*.ini` | extension alone |
+
+**Only JS/TS needs a surface decision**, because the same extension serves a browser bundle and
+an HTTP server. Everything else is settled by extension; surface detection selects security
+references (Step 2) but never overrides the quality category.
+
+### Deciding the JS/TS surface
+
+Judge **per workspace, not per repository** — a monorepo with a web app and a CLI is exactly the
+case a single project-level verdict gets wrong. For each changed JS/TS file, find the nearest
+enclosing `package.json` and read it:
+
+| Surface | Evidence |
+|---|---|
+| `browser` | bundler config (Vite, webpack, Rollup, esbuild), a frontend framework dependency, `*.svelte`/`*.html` siblings, a `browser` field |
+| `http-server` | a server framework dependency (Express, Fastify, NestJS, Koa, Hono), an HTTP listener, a `main`/`exports` server entry |
+| `native` | a `bin` entry, a CLI framework dependency, a library with neither of the above |
+
+A workspace can carry more than one surface; assign all that apply. Path convention
+(`apps/web`, `server/`, `src/routes`) is **supporting evidence only** — a manifest outranks it.
+
+**When no `package.json` encloses the file at all** — a loose script, a build helper, a deleted
+path whose workspace is gone — there is no manifest to read, so path convention and the file's
+own contents become the only evidence. That is exactly the ambiguous case below: it does not
+license skipping the file.
+
+**When the surface is ambiguous, dispatch conservatively rather than asking.** Reviewers return
+their findings in a single response and cannot pause for a question mid-run, so a question here
+would stall the whole review:
+
+- send the file to the **Node** quality reviewer in every ambiguous case;
+- **also** send it to the frontend reviewer when a browser surface remains possible;
+- record `surface classification: ambiguous` for those paths in the final report;
+- ask before dispatching only when even conservative duplication is impossible.
 
 If no files match a category, skip the corresponding reviewer's scope (but the Security reviewer always reviews everything).
 
+### Renamed and deleted paths
+
+A rename yields only the new path (see Step 1), so a `.php` file renamed to `.ts` loses its PHP
+context exactly when that matters most — an auth guard that vanished during the move. For every
+rename in the branch, add the **previous path** to `CHANGED_SEC` and classify it by its own
+extension, so the security reviewer still sees the old contents in the diff:
+
+```bash
+# Rename pairs on this branch: previous path <TAB> new path
+RENAMES=$(git diff --name-status --diff-filter=R -M "$MERGE_BASE" HEAD | cut -f2)
+CHANGED_SEC=$(printf '%s\n%s\n' "$CHANGED_SEC" "$RENAMES" | sort -u | grep -v '^$')
+```
+
+Deleted paths are already in `CHANGED_SEC` (no `--diff-filter`) and stay classified by
+extension — a deleted `.php` is still PHP for security purposes even though no current file
+exists to read.
+
 ---
 
-## Step 2: Dispatch 3 Reviewers in Parallel
+## Step 2: Dispatch Reviewers in Parallel
 
-Dispatch all three agents **in a single message** (parallel Agent tool calls). Do not wait for one before starting the others.
+Dispatch every agent **in a single message** (parallel Agent tool calls). Do not wait for one before starting the others.
 
-Read `references/reviewer-prompts.md` and use its Common Instructions block plus the Agent A/B/C prompt templates verbatim. Invariants that must survive any adaptation:
+The roster is **variable, not fixed at three**. Create **one quality reviewer per detected
+backend language**, plus one frontend quality reviewer when a browser surface exists, plus one
+security reviewer. A single "Backend Quality" slot would let a PHP+Node repository lose one
+language entirely — whichever reviewer filled the slot last.
+
+Read `references/reviewer-prompts.md` and use its Common Instructions block plus the prompt
+templates verbatim. Invariants that must survive any adaptation:
 
 | Agent | Skill invoked | Scope |
 |---|---|---|
-| **A — Backend Quality** | `code-quality-review` (php-quality.md) | Backend files (`CHANGED_QA`) |
-| **B — Security** | `web-security-review` (both references) | ALL changed files, deleted included (`CHANGED_SEC`) |
-| **C — Frontend Quality** | `code-quality-review` (js-quality.md, css-quality.md) | Frontend + Style files (`CHANGED_QA`) |
+| **Quality — {language}** | `code-quality-review` with that language's reference | That language's files (`CHANGED_QA`) |
+| **Security** | `web-security-review` with the references its surfaces select | ALL changed files, deleted included (`CHANGED_SEC`) |
+| **Frontend Quality** | `code-quality-review` (`js-toolchain.md`, `js-frontend-quality.md`, `css-quality.md`) | Browser-surface + Style files (`CHANGED_QA`) |
+
+One reviewer per language, and **each reviewer's file list is disjoint from the others'** —
+except for the deliberate duplication an ambiguous JS/TS surface produces. Never merge two
+languages into one reviewer to keep the count down: a persona and reference chosen for one
+language produce confident, wrong findings about the other.
+
+When a language has no reference file yet, do not substitute another language's. Skip that
+language, name the unreviewed paths in the report, and let the remaining reviewers run.
 
 - Every prompt embeds the Common Instructions, with `[OUTPUT_LANGUAGE]` replaced by the language the user used when requesting the review.
 - Every reviewer is read-only: never modify a file, never write a report file to disk, never offer fixes. Results reach the team leader as the agent's **return value**, not through a file.
@@ -207,10 +282,10 @@ Before dispatching, decide which agents to spawn:
 
 | Condition | Action |
 |-----------|--------|
-| Backend files == 0 | Skip Agent A; note "No backend changes" in report |
-| Frontend + Style files == 0 | Skip Agent C; note "No frontend changes" in report |
+| A language's files == 0 | Skip that language's quality reviewer; note "No {language} changes" in report |
+| Frontend + Style files == 0 | Skip the frontend quality reviewer; note "No frontend changes" in report |
 | All changed files == 0 | Abort: "No changed files to review" |
-| Agent B (Security) | Always spawn — reviews all changed files including deleted |
+| Security reviewer | Always spawn — reviews all changed files including deleted |
 
 ---
 
@@ -223,18 +298,47 @@ Wait until all spawned agents have returned their complete reports. Do not promp
 - If an agent returns an error, retry once. If it fails again, mark that reviewer as unavailable.
 - Never block the entire report waiting for one reviewer indefinitely.
 
+**Completion gate — a language whose review did not happen cannot be approved.** Proceeding with
+partial findings is right for *reporting*; it is wrong for the *verdict*. For every language with
+changed files, `Ready to merge` **must not** be selected when any of these holds:
+
+- its quality reviewer **did not complete** or returned an error twice;
+- its quality reviewer was **not dispatched** at all — no reference file, or an ambiguous surface
+  that never resolved;
+- the security reviewer ran without the **reference for that language being loaded**.
+
+In any of those cases the recommendation is `Block merge` or `Merge after fixes`, and the report
+says which language went unreviewed and why. Silence about a missing reviewer reads as a clean
+result, and the risk grows precisely as the roster grows — with one fixed backend reviewer a
+failure was obvious; with one per language it is not.
+
+> **Currently fail-closed for Node.** `web-security-review` ships PHP and browser references
+> only, so a branch touching server-side JS/TS cannot reach `Ready to merge` until a Node
+> security reference exists. That is the intended behaviour, not an oversight: approving a
+> security review that never loaded a reference for the changed language would be a false clean
+> result. Say so explicitly in the report — "Node security reference not available; server-side
+> JS/TS unreviewed" — so the gap is a decision the reader can act on rather than a silent block.
+
 ---
 
 ## Step 4: Team Leader Cross-Validation
 
 After all reports are received:
 
-**4a. Normalize quality finding severity** — Agent A/C reports use category-based format, not severity grades. Before cross-validating, assign each quality finding a severity:
+**4a. Normalize quality finding severity** — quality reviewer reports use category-based format, not severity grades. Before cross-validating, assign each quality finding a severity:
 - **High**: N+1 queries, broken auth logic, data corruption risk
 - **Medium**: Eval-order issues, non-trivial duplication, performance anti-patterns in hot paths
 - **Low**: Style inconsistencies, dead code, redundant comments
 
-**4b. Cross-validate Critical and High findings** — run grep against the implicated file(s) only (not the whole project). For each finding, select the matching pattern family:
+**4b. Cross-validate Critical and High findings** — run grep against the implicated file(s) only (not the whole project). For each finding, select the matching pattern family.
+
+**Select the family by the implicated file's language, not by the list below being the only one.**
+The patterns shipped here cover PHP and the browser surface. When a finding lands in a language
+with no family here, say `⚠ Needs runtime/architectural verification` rather than forcing a
+mismatched pattern — a PHP injection regex run over Go proves nothing about the Go code, and a
+non-match must never be read as evidence of safety. Adding a language means adding a family to
+**both** the POSIX block and the PowerShell hashtable below; updating only one leaves Windows
+installs silently behind.
 
 **Security patterns** (from `web-security-review/references/`):
 ```bash
