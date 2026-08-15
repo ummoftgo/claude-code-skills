@@ -101,11 +101,15 @@ Detect the active shell before using a snippet. On POSIX use `command -v`, `[ -f
 > | `bootstrapFiles:` reached through `includes:` | **Yes** — the chain is recursive, so a clean root config proves nothing (reproduced) |
 > | `composer.json` → `autoload.files`, root **or any dependency** | **Yes**, with nothing declared in `phpstan.neon`. The composer autoloader runs every entry in `vendor/composer/autoload_files.php`, which includes dependencies' own `autoload.files` (reproduced) |
 >
-> So the safe PHP case is a project whose **resolved** config chain declares no `bootstrapFiles`,
-> no project `rules`/`services`, and no `.php` include, and whose composer autoloader — root and
-> dependencies — declares no `autoload.files`. That is most projects, and for them analysis is
-> pure parsing. Resolve all four before running PHPStan against a diff you would not run; the
-> commands for it are in `references/php-quality.md` §0.
+> **On an untrusted diff, do not try to judge the config — a PHPStan config at all is a stop.**
+> Reading it as text cannot be made sound: NEON's inline forms, an `includes: [inner.neon]` whose
+> target a line-based collector never reaches, and `\uXXXX` escapes that reconstruct `.php` from
+> text containing no `.php` each defeat it. Proving a config harmless needs a real NEON parser
+> over the whole include graph. So the gate in `references/php-quality.md` §0 stops on any
+> config, and its text scan only records **why**; a project with no PHPStan config has no
+> config-driven execution path and still gets analysed.
+>
+> On your own or your team's branch none of this fires and PHPStan runs exactly as before.
 >
 > **When the diff is untrusted** — an external contributor's branch, an unfamiliar dependency, any
 > code you would not run — the executing tools need isolation before they run. A workspace mounted

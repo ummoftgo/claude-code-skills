@@ -138,12 +138,20 @@ collect_config() {
   case "$(printf '%s\n' "$CONFIG_CHAIN")" in *"$canonical"$'\n'*) return ;; esac
   CONFIG_CHAIN="$CONFIG_CHAIN$canonical"$'\n'
   dir=$(dirname "$file")
+  # Two forms, both valid NEON: a block list under `includes:`, and an inline
+  # `includes: [a.neon, b.neon]` on one line. Collecting only the first leaves the second's
+  # targets out of the chain entirely, so every later check silently skips them.
   while IFS= read -r inc; do
-    inc=$(printf '%s' "$inc" | sed "s/^[[:space:]]*-[[:space:]]*//; s/[\"']//g")
+    inc=$(printf '%s' "$inc" | sed "s/^[[:space:]]*-[[:space:]]*//; s/[\"']//g; s/^[[:space:]]*//; s/[[:space:]]*$//")
     [ -n "$inc" ] || continue
     case "$inc" in /*) target="$inc" ;; *) target="$dir/$inc" ;; esac
     collect_config "$target"
-  done < <(awk '/^includes:/{f=1;next} f&&/^[[:space:]]*-/{print} f&&/^[^[:space:]-]/{f=0}' "$file")
+  done < <(
+    awk '/^includes:/{f=1;next} f&&/^[[:space:]]*-/{print} f&&/^[^[:space:]-]/{f=0}' "$file"
+    # inline: pull what is between the brackets and split on commas
+    grep -oE '^[[:space:]]*"?includes"?[[:space:]]*:[[:space:]]*\[[^]]*\]' "$file" 2>/dev/null |
+      sed 's/.*\[//; s/\]//' | tr ',' '\n'
+  )
 }
 
 if [ -n "$PHPSTAN_CONFIG" ]; then
@@ -156,13 +164,20 @@ if [ -n "$PHPSTAN_CONFIG" ]; then
     # (`"danger\u002ephp"` parses as `danger.php`), so a text scan cannot judge such a file.
     grep -q '\\u[0-9a-fA-F]\{4\}' "$cfg" 2>/dev/null &&
       { CACHE_RISK="$cfg: contains \\u escapes — cannot judge from text"; continue; }
-    # Not line-anchored: NEON also accepts `parameters: {tmpDir: .cache}` on one line.
+    # Not line-anchored: NEON also accepts `parameters: {tmpDir: .cache}` on one line, and a
+    # JSON config quotes the key (`"tmpDir":`), which an unquoted pattern never matches.
     while IFS= read -r setting; do
       value=$(printf '%s' "${setting#*:}" | tr -d " \"'" | tr -d ',}')
       [ -n "$value" ] || { CACHE_RISK="$cfg: $setting (unreadable value)"; continue; }
       case "$value" in /*) resolved="$value" ;; *) resolved="$cfg_dir/$value" ;; esac
+      # Canonicalise before comparing. A `.` or `..` anywhere in the path makes a string
+      # prefix test wrong in the dangerous direction: `/srv/./app/.cache` does not start with
+      # `/srv/app`, yet that is exactly where it lands. `-m` so a not-yet-created cache
+      # directory still resolves.
+      resolved=$(realpath -m "$resolved" 2>/dev/null) ||
+        { CACHE_RISK="$cfg: $setting (unresolvable path)"; continue; }
       case "$resolved" in "$PWD"|"$PWD"/*) CACHE_RISK="$cfg: $setting" ;; esac
-    done < <(grep -ohE '(tmpDir|resultCachePath)[[:space:]]*:[^,}]*' "$cfg" 2>/dev/null)
+    done < <(grep -ohE '["'"'"']?(tmpDir|resultCachePath)["'"'"']?[[:space:]]*:[^,}]*' "$cfg" 2>/dev/null)
   done <<< "$CONFIG_CHAIN"
 fi
 # No config at all is safe: PHPStan then uses sys_get_temp_dir()/phpstan, outside the repository.

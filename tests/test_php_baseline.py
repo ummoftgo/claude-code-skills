@@ -1192,6 +1192,54 @@ class PhpStanInlineCacheGateTest(PhpStanReadOnlyGateTest):
         self.assertIn(self.ANALYSIS_MARKER, output, "저장소 밖 캐시인데 막았다")
         self.assertNotIn(self.SKIP_MARKER, output)
 
+    def test_a_cache_setting_inside_an_inline_include_is_caught(self) -> None:
+        """`includes: [inner.neon]` 대상이 체인에 없으면 그 안의 tmpDir 도 안 보인다.
+
+        실행 게이트는 "설정이 있으면 중단"으로 덮지만, 이건 **신뢰 브랜치**에서도 도는
+        읽기 전용 경로다 — 여기서 놓치면 저장소 안에 캐시가 생긴다.
+        """
+        output = self.run_gate(
+            "includes: [inner.neon]\n",
+            extra={
+                "src/A.php": "<?php class A {}",
+                "inner.neon": "parameters: {tmpDir: .phpstan-cache}\n",
+            },
+        )
+        self.assertIn(self.SKIP_MARKER, output, "inline include 안의 캐시 설정을 놓쳤다")
+        self.assertNotIn(self.ANALYSIS_MARKER, output)
+
+    def test_a_quoted_json_key_is_caught(self) -> None:
+        """`"tmpDir":` 는 인용된 키다 — 인용 없는 패턴은 매치하지 않는다."""
+        output = self.run_gate(
+            '{"parameters":{"level":0,"paths":["src"],"tmpDir":".phpstan-cache"}}\n',
+            extra={"src/A.php": "<?php class A {}"},
+        )
+        self.assertIn(self.SKIP_MARKER, output, "JSON 인용 키를 놓쳤다")
+        self.assertNotIn(self.ANALYSIS_MARKER, output)
+
+    def test_a_non_canonical_absolute_path_is_resolved_first(self) -> None:
+        """`/srv/./app/.cache` 는 `/srv/app` 으로 시작하지 않지만 거기에 쓴다."""
+        with tempfile.TemporaryDirectory() as base:
+            work = Path(base)
+            (work / "src").mkdir()
+            (work / "src" / "A.php").write_text("<?php class A {}")
+            # 경로 중간에 `.` 을 끼워 문자열 prefix 비교를 빗나가게 한다.
+            parent, name = str(work.parent), work.name
+            (work / "phpstan.neon").write_text(
+                f"parameters: {{level: 0, tmpDir: {parent}/./{name}/.cache}}\n"
+            )
+            (work / "gate.sh").write_text(self.gate_script(), encoding="utf-8")
+            result = subprocess.run(
+                ["bash", "gate.sh"], cwd=str(work), capture_output=True, text=True,
+                env={**os.environ, "READ_ONLY": "1"},
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn(
+                self.SKIP_MARKER, result.stdout,
+                "정규화하지 않아 저장소 내부 캐시를 외부로 판정했다",
+            )
+            self.assertNotIn(self.ANALYSIS_MARKER, result.stdout)
+
     def test_an_escaped_config_cannot_be_judged_from_text(self) -> None:
         r"""`\uXXXX` 는 원문에 없는 값을 만든다 — 판정 불가는 안전이 아니다."""
         output = self.run_gate(
@@ -2582,8 +2630,25 @@ class UntrustedExecutionContractTest(unittest.TestCase):
             "실행하지 않는 경로를 구분하지 않으면 모든 PHP 리뷰에 경고가 붙는다",
         )
         self.assertRegex(
-            rule, r"most projects|does not execute anything",
-            "일반적인 PHP 프로젝트는 안전하다는 사실이 없다",
+            rule, r"no config-driven execution path and still gets analysed",
+            "설정이 없는 프로젝트는 계속 분석된다는 점이 없다",
+        )
+
+    def test_the_skill_and_the_reference_agree_on_the_php_policy(self) -> None:
+        """상위가 "체인을 해석해 안전하면 실행"이라 하고 하위가 "설정이 있으면 중단"이면
+        상위를 먼저 읽은 리뷰어가 게이트를 우회한다. Cargo 에서 지운 것과 같은 종류다."""
+        rule = self.rule()
+        self.assertRegex(
+            rule, r"a PHPStan config at all is a stop",
+            "상위 계약이 하위 게이트 정책과 다르다",
+        )
+        self.assertNotRegex(
+            rule, r"So the safe PHP case is a project whose \*\*resolved\*\* config chain",
+            "체인을 해석해 안전 판정하라는 옛 지시가 남아 있다",
+        )
+        self.assertRegex(
+            rule, r"runs exactly as before",
+            "신뢰 브랜치가 그대로라는 점이 상위에 없다",
         )
 
     def test_the_php_reference_repeats_it_where_the_command_is(self) -> None:
