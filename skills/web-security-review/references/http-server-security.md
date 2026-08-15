@@ -31,7 +31,10 @@ would double-report the same findings.
 
 ### MUST
 - MUST hash passwords with a purpose-built password hash — never a plain digest, however many
-  rounds. Prefer a **memory-hard** algorithm: argon2id (≥19 MiB, t=2, p=1) or scrypt (≥N=2^17).
+  rounds. Prefer a **memory-hard** algorithm at or above OWASP's minimum: argon2id with
+  **m=19 MiB, t=2, p=1**, or scrypt with **N=2^17, r=8, p=1**. Quote all three parameters when
+  reporting — `N` alone does not fix the cost, because halving `r` halves the memory the
+  attacker needs at the same `N`.
   **bcrypt is not memory-hard** — it is an acceptable legacy choice with a work factor of 10 or
   more, but it does not resist GPU attack the way the first two do, so do not describe it as
   equivalent.
@@ -107,23 +110,34 @@ router.get('/orders/:id', requireLogin, (req, res) => send(db.order(req.params.i
 
 **Severity if violated**: Medium
 
-- `Content-Security-Policy` — the one that matters; without it, an XSS has full reach.
-- `X-Content-Type-Options: nosniff`
-- `Strict-Transport-Security` on HTTPS origins
-- `X-Frame-Options` or CSP `frame-ancestors`
-- `Referrer-Policy`
+| Header | Applies to |
+|---|---|
+| `Content-Security-Policy` | **HTML document responses.** Without it an XSS has full reach |
+| `X-Frame-Options` or CSP `frame-ancestors` | HTML document responses |
+| `X-Content-Type-Options: nosniff` | every response, JSON included |
+| `Strict-Transport-Security` | every response on an HTTPS origin |
+| `Referrer-Policy` | every response |
 
-Report a missing CSP at Medium on its own, and raise it when the response also reflects user
-input.
+**Decide what the endpoint returns before reporting a missing CSP.** Almost every CSP directive
+governs how a *document* loads subresources, so a service that only returns JSON gains close to
+nothing from one — reporting it there is noise that trains the reader to skip this section. Report
+a missing CSP at Medium when the response is an HTML document, and raise it when that document
+also reflects user input. For an API that returns no HTML, `nosniff` and HSTS are the headers
+that still matter.
 
 ## 8. CORS
 
 **Severity if violated**: High if misconfigured
 
 ### MUST
-- MUST NOT reflect an arbitrary `Origin` header into `Access-Control-Allow-Origin`.
-- MUST NOT combine `Access-Control-Allow-Credentials: true` with a wildcard or reflected origin
-  — that hands any site the user's authenticated responses.
+- MUST NOT reflect an arbitrary `Origin` header into `Access-Control-Allow-Origin`. Combined
+  with `Access-Control-Allow-Credentials: true` this hands any site the user's authenticated
+  responses — it is the exposure in this section, and it is Critical in practice.
+- MUST NOT combine `Access-Control-Allow-Credentials: true` with a wildcard. Per the
+  [Fetch standard](https://fetch.spec.whatwg.org/#cors-protocol-and-credentials) the browser
+  **fails** a credentialed request whose response says `Access-Control-Allow-Origin: *`, so this
+  is a broken configuration rather than a data leak. Report it as Medium and say so — the danger
+  is the fix developers reach for next, which is reflecting the origin.
 - MUST keep the allowlist explicit and reviewable.
 
 ```

@@ -41,6 +41,7 @@ QUALITY_REFERENCES = (
     "js-toolchain",          # 3단계 분할: 도구 + 환경 중립 패턴 (명령의 단일 원천)
     "js-frontend-quality",   # 브라우저 표면
     "node-quality",          # 서버·CLI·데몬·라이브러리
+    "python-quality",        # 6단계: Python
     "css-quality",
 )
 
@@ -80,6 +81,10 @@ WRITE_CAUSING = (
     # 설정 생성은 지시가 산문, 내용은 코드 블록 — 앵커와 보존이 갈리는 유일한 항목.
     ("css-quality", "Stylelint 설정 생성", r"create a minimal one", r'"extends": \[[^\]]*stylelint-config-standard'),
     ("css-quality", "Stylelint 자동수정", r"stylelint[^\n]*--fix", r"stylelint[^\n]*--fix"),
+    ("python-quality", "Python 도구 설치(uv)", r"uv tool install", r"uv tool install"),
+    ("python-quality", "Python 도구 설치(pip)", r"pip install", r"pip install"),
+    ("python-quality", "ruff 자동수정", r"ruff check --fix", r"ruff check --fix"),
+    ("python-quality", "ruff 포매팅 적용", r"(?m)^ruff format \.$", r"(?m)^ruff format \.$"),
 )
 
 #: 절 이름 → 선언된 심각도. 개수가 아니라 **의미**를 고정한다. 같은 `MUST` 문법에 서로 다른
@@ -954,7 +959,7 @@ class PhpToolchainBaseline(unittest.TestCase):
         """GREEN (1단계에서 전환됨) — 쓰기를 유발하는 **명령 각각**이 읽기 전용 가드를 동반해야 한다.
 
         Step 2의 게이트는 "도구 설치"만 가리므로 설정 생성·자동수정·보고서 출력은 걸리지
-        않는다. 그래서 쓰기를 유발하는 능력마다 계약 문구를 요구한다(현재 27개 — `WRITE_CAUSING` 이 정본).
+        않는다. 그래서 쓰기를 유발하는 능력마다 계약 문구를 요구한다(현재 31개 — `WRITE_CAUSING` 이 정본).
 
         **파일 상단에 문구 한 줄을 추가하는 것으로는 통과할 수 없다** — 각 명령이 자기
         계약 문구를 갖거나, 범위를 명시한 블록 문구가 그 블록을 덮어야 한다.
@@ -1246,6 +1251,9 @@ class PhpSecurityBaseline(unittest.TestCase):
         self.assertIn("references/php-backend-security.md", dispatched)
 
 
+ALL_SURFACES = ("http-server-security.md", "browser-security.md", "native-security.md")
+
+
 class SecurityReferenceSelectionTest(unittest.TestCase):
     """4단계 — 언어×표면 참조 선택이 실제로 지시대로인지 고정한다.
 
@@ -1284,29 +1292,58 @@ class SecurityReferenceSelectionTest(unittest.TestCase):
 
     #: 행 이름이 아니라 **선택된 참조 집합**을 고정한다. 이름만 검사하면 SSR 행이 HTTP 표면을
     #: 빠뜨려도 통과한다 — 실제로 그 오류가 이 방식으로 숨어 있었다.
+    ALL_SURFACES = ("http-server-security.md", "browser-security.md", "native-security.md")
+
+    #: 행 이름이 아니라 **선택된 참조 집합 전체**를 고정한다. `assertIn` 만 쓰면 한 행이
+    #: 표면을 전부 잃어도 통과한다 — 실제로 그 구멍으로 SSR 오류가 숨어 있었다.
     REQUIRED_SELECTIONS = {
-        "Node runtime SSR": ("node-security.md", "http-server-security.md", "browser-security.md"),
-        "Node service that also serves a UI": (
+        "Node runtime SSR": {
             "node-security.md", "http-server-security.md", "browser-security.md",
-        ),
-        "Node static build": ("node-security.md", "browser-security.md"),
-        "Node service + CLI + UI": ("node-security.md",),
-        "Node library with no surface evidence": (
-            "node-security.md", "all three",
-        ),
+        },
+        "Node service that also serves a UI": {
+            "node-security.md", "http-server-security.md", "browser-security.md",
+        },
+        "Node static build": {
+            "node-security.md", "browser-security.md", "native-security.md",
+        },
+        "Node service + CLI |": {
+            "node-security.md", "http-server-security.md", "native-security.md",
+        },
+        "Node service + CLI + UI": {"node-security.md", *ALL_SURFACES},
+        "Node library with no surface evidence": {"node-security.md", *ALL_SURFACES},
+        "Node HTTP service": {"node-security.md", "http-server-security.md"},
+        "Node CLI or daemon": {"node-security.md", "native-security.md"},
+        "PHP server-rendered app": {"php-backend-security.md", "browser-security.md"},
+        "PHP API, no HTML": {"php-backend-security.md"},
+        "Browser assets only": {"browser-security.md"},
     }
 
-    def test_each_combination_selects_the_right_reference_set(self) -> None:
+    #: "all three" 같은 축약이 어떤 파일들을 뜻하는지. 표에서 축약이 사라지면 그냥 파일명이
+    #: 읽히므로 이 매핑이 없어도 검사는 성립한다.
+    SHORTHAND = {"all three": ALL_SURFACES}
+
+    def referenced_files(self, row: str) -> set:
+        found = {
+            name for name in (
+                "php-backend-security.md", "node-security.md", "python-security.md",
+                *ALL_SURFACES,
+            ) if name in row
+        }
+        for phrase, expansion in self.SHORTHAND.items():
+            if phrase in row:
+                found.update(expansion)
+        return found
+
+    def test_each_row_selects_exactly_the_right_reference_set(self) -> None:
         rows = self.selection_rows()
         for label_prefix, required in self.REQUIRED_SELECTIONS.items():
-            match = [row for label, row in rows.items() if label.startswith(label_prefix)]
+            match = [row for label, row in rows.items() if label.startswith(label_prefix.rstrip(" |"))]
             with self.subTest(row=label_prefix):
                 self.assertTrue(match, f"행이 없다: {label_prefix} / 있는 행: {list(rows)}")
-                for reference in required:
-                    self.assertIn(
-                        reference, match[0],
-                        f"{label_prefix} 가 {reference} 를 로드하지 않는다",
-                    )
+                self.assertEqual(
+                    self.referenced_files(match[0]), required,
+                    f"{label_prefix} 의 참조 집합이 기대와 다르다: {match[0].strip()}",
+                )
 
     def test_ambiguous_surface_dispatch_names_the_security_references(self) -> None:
         """표면 불명 시 품질 dispatch 만 정하고 보안 참조를 비워 두면 두 스킬이 모순된다."""
@@ -1434,6 +1471,25 @@ class NodeSecuritySemanticsTest(unittest.TestCase):
         self.assertRegex(section, r"lexical only|symlink or a Windows junction")
         # `path` 는 URL 디코딩하지 않으므로 `%2f` 예제는 순회를 만들지 않는다.
         self.assertRegex(section, r"does \*\*not\*\* URL-decode|not URL-decode")
+
+    def test_path_containment_canonicalises_both_sides(self) -> None:
+        """ROOT 가 symlink 면 한쪽만 realpath 한 비교는 정상 경로를 거부한다 (v24.18.0 재현)."""
+        section = self.reference()
+        good = between(section, "// GOOD — canonicalise", "```", label="path GOOD 패턴")
+        self.assertIn("realpath(ROOT)", good.replace(" ", ""),
+                      "ROOT 자체를 canonicalise 하지 않는다")
+        self.assertNotRegex(
+            good, r"startsWith\(ROOT \+ path\.sep\)",
+            "raw ROOT 문자열과 비교하는 형태가 남아 있다",
+        )
+
+    def test_lifecycle_audit_separates_dependencies_from_this_repository(self) -> None:
+        """설치된 의존성이 도는 훅과 이 저장소가 도는 훅은 범위도 담당자도 다르다."""
+        section = self.reference()
+        audit = between(section, "### Audit", "## 6.", label="공급망 audit")
+        self.assertIn("node_modules/**/package.json", audit)
+        self.assertIn("--glob '!node_modules'", audit)
+        self.assertIn("prepublishOnly", audit)
 
     def test_batbadbut_gives_the_patch_boundary(self) -> None:
         """"패치됐다"만 쓰고 버전을 안 주면 판정할 수 없다 — 리뷰어가 매번 findings 를 낸다."""
@@ -1636,6 +1692,92 @@ def _deps(manifest: dict) -> set:
     }
 
 
+class PythonReferenceSemanticsTest(unittest.TestCase):
+    """Python 참조의 **실측된 사실**을 고정한다. 문자열이 아니라 동작을 근거로 쓴 것들이다."""
+
+    def quality(self) -> str:
+        return read("skills/code-quality-review/references/python-quality.md")
+
+    def security(self) -> str:
+        return read("skills/web-security-review/references/python-security.md")
+
+    def test_ruff_and_mypy_are_invoked_without_writing_a_cache(self) -> None:
+        """두 도구 모두 기본값으로 프로젝트 루트에 캐시 디렉터리를 만든다 — 리뷰가 약속한 적 없는 파일이다."""
+        commands = code_blocks(self.quality())
+        for line in commands.splitlines():
+            stripped = line.strip()
+            if stripped.startswith("ruff check") and "--fix" not in stripped:
+                with self.subTest(command=stripped):
+                    self.assertIn("--no-cache", stripped, "ruff 가 .ruff_cache 를 남긴다")
+            if stripped.startswith("mypy "):
+                with self.subTest(command=stripped):
+                    self.assertIn("--cache-dir", stripped, "mypy 가 .mypy_cache 를 남긴다")
+
+    def test_the_mypy_trap_is_stated_not_assumed(self) -> None:
+        """`--no-incremental` 은 이름과 달리 캐시 디렉터리를 여전히 만든다 (mypy 2.3.1 실측).
+
+        TypeScript 의 `--incremental false` 와 반대라서, 습관으로 옮겨 쓰면 조용히 깨진다.
+        """
+        quality = " ".join(self.quality().split())
+        self.assertRegex(
+            quality,
+            r"--no-incremental does not do what its name suggests|"
+            r"`--no-incremental` does not do what its name suggests",
+        )
+        self.assertIn("js-toolchain.md", quality, "TypeScript 규칙과의 차이를 짚지 않는다")
+
+    def test_vulture_confidence_floors_are_explained(self) -> None:
+        """80 을 기본값처럼 쓰면 미사용 함수(60%)가 전부 사라진다 — vulture 2.16 실측."""
+        quality = " ".join(self.quality().split())
+        self.assertRegex(quality, r"unused function scores 60%")
+        self.assertRegex(quality, r"unused import 90%|an unused import 90%")
+
+    def test_pip_audit_dry_run_is_marked_as_not_an_audit(self) -> None:
+        """`--dry-run` 은 감사 없이 `No known vulnerabilities found` 를 출력한다 — 통과로 읽힌다."""
+        security = " ".join(self.security().split())
+        self.assertRegex(security, r"--dry-run` does not audit|`--dry-run` does not audit")
+
+    def test_os_path_join_absolute_trap_is_named(self) -> None:
+        """`os.path.join(ROOT, "/etc/passwd")` 는 ROOT 를 버린다 — Python 고유의 경로 결함이다."""
+        security = " ".join(self.security().split())
+        self.assertRegex(security, r"returns `b` when `b` is absolute")
+        self.assertIn("is_relative_to", security, "containment 검사 형태가 없다")
+
+    def test_jinja_autoescape_default_is_stated(self) -> None:
+        """Jinja2 `Environment()` 는 autoescape=False 로 시작한다 (3.1.2 실측)."""
+        security = " ".join(self.security().split())
+        self.assertIn("`Environment()` defaults to `autoescape=False`", security)
+        self.assertIn("select_autoescape", security)
+
+    def test_secrets_versus_random_is_stated_as_a_vulnerability(self) -> None:
+        security = " ".join(self.security().split())
+        self.assertIn("secrets.token_urlsafe", security)
+        self.assertRegex(security, r"Mersenne Twister")
+
+    def test_python_security_declares_the_two_axis_pairing(self) -> None:
+        """언어축 파일은 표면축과 짝지어야 한다 — 혼자 로드되면 인증·세션 검토가 통째로 빠진다."""
+        header = self.security()[:1200]
+        self.assertIn("Language axis", header)
+        for surface in ALL_SURFACES:
+            with self.subTest(surface=surface):
+                self.assertIn(surface, header)
+
+    def test_python_quality_follows_the_target_section_contract(self) -> None:
+        """새 참조는 목표 계약(§0–6)대로 쓰기로 했다 — 첫 사례가 어기면 계약이 무의미해진다."""
+        quality = self.quality()
+        for heading in (
+            "## 0. Applicability and Scope",
+            "## 1. Version Resolution",
+            "## 2. Tool Roles",
+            "## 3. Availability and Authority",
+            "## 4. Execution",
+            "## 5. Manual Patterns",
+            "## 6. Severity Mapping",
+        ):
+            with self.subTest(section=heading):
+                self.assertIn(heading, quality)
+
+
 class SecurityMetadataAndGuidanceTest(unittest.TestCase):
     """4단계에서 넓힌 라우팅 표면과 표면 참조의 지침 정확성을 고정한다."""
 
@@ -1661,6 +1803,40 @@ class SecurityMetadataAndGuidanceTest(unittest.TestCase):
         self.assertRegex(
             prompts, r"per changed language",
             "언어 축을 언어마다 로드한다는 지시가 없다",
+        )
+
+    def test_scrypt_guidance_pins_every_cost_parameter(self) -> None:
+        """`N` 만 고정하면 같은 N 으로도 r 을 낮춰 메모리 비용을 반감할 수 있다."""
+        reference = read("skills/web-security-review/references/http-server-security.md")
+        for parameter in ("N=2^17", "r=8", "p=1"):
+            with self.subTest(parameter=parameter):
+                self.assertIn(parameter, reference)
+
+    def test_wildcard_cors_is_not_described_as_a_data_leak(self) -> None:
+        """credentials + `*` 는 Fetch 표준상 브라우저가 실패시킨다 — 반사 origin 과 다르다."""
+        reference = read("skills/web-security-review/references/http-server-security.md")
+        cors = " ".join(
+            between(reference, "## 8. CORS", "## 9.", label="CORS 절").split()
+        )
+        self.assertIn("fetch.spec.whatwg.org", cors, "표준 근거가 없다")
+        self.assertRegex(cors, r"\bfails\b", "브라우저가 요청을 실패시킨다는 사실이 없다")
+        self.assertRegex(
+            cors, r"wildcard.{0,300}?broken configuration rather than a data leak",
+            "wildcard 를 여전히 데이터 유출로 설명한다",
+        )
+        self.assertRegex(
+            cors, r"reflect.{0,300}?Critical",
+            "진짜 노출인 반사 origin 이 wildcard 와 구분되지 않는다",
+        )
+
+    def test_csp_is_scoped_to_document_responses(self) -> None:
+        """JSON 만 반환하는 API 에 CSP 누락을 매번 보고하면 이 절 전체가 무시된다."""
+        reference = read("skills/web-security-review/references/http-server-security.md")
+        headers = between(reference, "## 7. Security Headers", "## 8.", label="헤더 절")
+        self.assertRegex(headers, r"HTML document responses")
+        self.assertRegex(
+            headers, r"API[^.]{0,120}nosniff|nosniff[^.]{0,120}API",
+            "API 에서도 유효한 헤더가 무엇인지 말하지 않는다",
         )
 
     def test_password_hashing_guidance_does_not_call_bcrypt_memory_hard(self) -> None:

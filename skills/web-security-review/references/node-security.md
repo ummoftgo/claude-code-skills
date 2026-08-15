@@ -86,20 +86,30 @@ rg -n "spawn(Sync)?\(" -A3 --glob "*.{js,mjs,cjs,ts,mts,cts,tsx}"
 // BAD — stripping `..` is not normalisation; `....//` survives it
 const target = path.join(ROOT, req.query.file.replace(/\.\./g, ''));
 
-// GOOD — resolve first, then prove containment, then prove it after following links
-const target = path.resolve(ROOT, req.query.file);
-if (target !== ROOT && !target.startsWith(ROOT + path.sep)) throw new Error('outside root');
-const real = await fs.promises.realpath(target);            // may throw if absent — handle
-if (real !== ROOT && !real.startsWith(ROOT + path.sep)) throw new Error('escapes via link');
+// GOOD — canonicalise BOTH sides once, then compare canonical against canonical
+const rootReal = await fs.promises.realpath(ROOT);          // resolve the root itself, once
+const target = path.resolve(rootReal, req.query.file);
+if (target !== rootReal && !target.startsWith(rootReal + path.sep)) {
+  throw new Error('outside root');                          // cheap lexical reject first
+}
+const real = await fs.promises.realpath(target);            // throws if absent — handle
+if (real !== rootReal && !real.startsWith(rootReal + path.sep)) {
+  throw new Error('escapes via link');
+}
 ```
 
-Two things this shape gets right:
+Three things this shape gets right:
 
-- `!== ROOT && !startsWith(ROOT + sep)` — a bare `startsWith(ROOT)` also accepts `/srv/app-backup`
-  when `ROOT` is `/srv/app`.
+- `!== root && !startsWith(root + sep)` — a bare `startsWith(root)` also accepts `/srv/app-backup`
+  when the root is `/srv/app`.
 - `resolve` + `startsWith` is **lexical only**. It cannot see a symlink or a Windows junction
   inside the root that points out of it; `realpath` is what closes that, and a repository under
   analysis can contain exactly such a link.
+- **Both sides are canonicalised.** Comparing a `realpath`-ed target against the raw `ROOT`
+  string rejects legitimate paths whenever the root itself is a link. Measured on Node v24.18.0
+  with `ROOT = '/bin'`: `/bin/sh` resolves to `/usr/bin/dash`, which does not start with `/bin`,
+  so the one-sided check throws on a file that is plainly inside the root. Resolving `ROOT` first
+  makes the same case pass and keeps the escape case rejected.
 
 Note that `path` does **not** URL-decode. `%2f` in a query value stays literal here — decode
 once at the HTTP boundary and validate after decoding (see `http-server-security.md` §5).
@@ -153,9 +163,7 @@ const options = { limit: toInt(req.body.limit), sort: allowSort(req.body.sort) }
 - MUST review newly added or major-bumped dependencies in the diff — a lockfile change is part
   of the security scope, not noise.
 - MUST treat install-time lifecycle scripts in a **new** dependency as a finding until read;
-  they run with full user permissions. That is more than `postinstall`: `preinstall`, `install`,
-  `postinstall`, `prepare`, `prepublish`, `preprepare`, and `postprepare` can all run during an
-  install.
+  they run with full user permissions.
 - MUST NOT commit `.npmrc` containing a token.
 
 ### Audit
@@ -167,12 +175,22 @@ const options = { limit: toInt(req.body.limit), sort: allowSort(req.body.sort) }
 npm audit                 # everything
 npm audit --omit=dev      # production only
 
-# Lifecycle scripts across the **whole** tree, scoped and nested packages included.
-# `node_modules/*/package.json` misses `@scope/pkg` and anything nested; a head limit hides
-# the rest of the list rather than reporting that it was truncated.
+# A. Installed dependencies. A registry dependency runs `preinstall`, `install`, and
+# `postinstall`; a dependency installed from git or a local path also runs `prepare`.
+# Glob the **whole** tree — `node_modules/*/package.json` misses `@scope/pkg` and anything
+# nested, and a head limit hides the rest of the list rather than reporting the truncation.
 rg -n --glob 'node_modules/**/package.json' \
-  '"(preinstall|install|postinstall|prepare|prepublish|preprepare|postprepare)"\s*:'
+  '"(preinstall|install|postinstall|prepare)"\s*:'
+
+# B. The repository's own package(s). `npm install` in this checkout runs the root and
+# workspace scripts, which is a wider set — the publish-side `prepublish`/`prepublishOnly`
+# and `preprepare`/`postprepare` hooks live here, not in an installed registry dependency.
+rg -n --glob '!node_modules' --glob 'package.json' \
+  '"(preinstall|install|postinstall|prepare|preprepare|postprepare|prepublish|prepublishOnly)"\s*:'
 ```
+
+Keep the two lists apart in the report. "A dependency ships a `postinstall`" and "this repository
+gained a `prepare` script" are different findings with different owners.
 
 **Read-only:** skip this command; record it as `skipped-read-only`.
 

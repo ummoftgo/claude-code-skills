@@ -1,6 +1,6 @@
 ---
 name: code-quality-review
-description: "Review code for quality and performance issues. Trigger when user asks for code quality review, refactoring advice, or code cleanup. Covers: (1) unnecessary or misleading comments, (2) style inconsistencies vs project conventions, (3) duplicated/redundant code, (4) performance inefficiencies — especially evaluation order (cheap checks before expensive ones). Covers PHP, JavaScript/TypeScript on both sides — browser code and Node services, CLIs, and libraries — and CSS/SCSS. Runs CLI tools automatically (PHPStan/phpcs/phpmd/phpcpd for PHP; ESLint/Biome/oxlint/tsc/svelte-check/knip for JS/TS; Stylelint for CSS/SCSS). Adapts per detected language and framework; a language with no reference here is reported as unsupported rather than checked against another language's rules. Do not use when the request names security as the subject (use web-security-review) or when the scope is a whole branch/PR before merge (use branch-merge-review)."
+description: "Review code for quality and performance issues. Trigger when user asks for code quality review, refactoring advice, or code cleanup. Covers: (1) unnecessary or misleading comments, (2) style inconsistencies vs project conventions, (3) duplicated/redundant code, (4) performance inefficiencies — especially evaluation order (cheap checks before expensive ones). Covers PHP, Python, JavaScript/TypeScript on both sides — browser code and Node services, CLIs, and libraries — and CSS/SCSS. Runs CLI tools automatically (PHPStan/phpcs/phpmd/phpcpd for PHP; ruff/mypy/pyright/vulture/radon for Python; ESLint/Biome/oxlint/tsc/svelte-check/knip for JS/TS; Stylelint for CSS/SCSS). Adapts per detected language and framework; a language with no reference here is reported as unsupported rather than checked against another language's rules. Do not use when the request names security as the subject (use web-security-review) or when the scope is a whole branch/PR before merge (use branch-merge-review)."
 ---
 
 # Code Quality Review
@@ -25,6 +25,7 @@ Load before scanning:
 - `references/js-toolchain.md` — JS/TS toolchain and environment-neutral patterns (**single source for tool invocation**)
 - `references/js-frontend-quality.md` — browser surface: DOM, jQuery, Svelte, HTMX
 - `references/node-quality.md` — server, CLI, daemon, library: async, streams, lifecycle, resources
+- `references/python-quality.md` — Python tool setup, execution, and manual patterns
 - `references/css-quality.md` — CSS/SCSS tool setup, execution, and manual patterns
 
 Load all applicable files for full-stack review.
@@ -37,8 +38,7 @@ understand. Name the unreviewed paths in the report so the gap is visible.
 
 ### What a language reference must contain
 
-This is the **target contract** for new and restructured references. The five shipped today
-predate it and do not match it yet — their current numbering is below. Restructuring them is
+This is the **target contract** for new and restructured references. The five that predate it do not match it yet — their current numbering is below. Restructuring them is
 scheduled work, not a precondition for using this table.
 
 | Reference | Current sections |
@@ -47,6 +47,7 @@ scheduled work, not a precondition for using this table.
 | `js-toolchain.md` | §1 setup · §2 execution · §3–5 neutral patterns |
 | `js-frontend-quality.md` | §1 browser performance · §2 browser style/duplication · §3 Svelte lifecycle |
 | `node-quality.md` | §1–7 server-side patterns |
+| `python-quality.md` | §0–6 — the first reference that matches the target contract below |
 | `css-quality.md` | §1 setup · §2 execution · §3–6 manual patterns |
 
 The target: every `references/{language}-quality.md` carries the same seven sections so this

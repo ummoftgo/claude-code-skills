@@ -1,6 +1,6 @@
 ---
 name: web-security-review
-description: "Perform security review for application backends and frontends — PHP and Node.js (HTTP services, CLIs, daemons, libraries) plus the browser surface (vanilla JS, jQuery, Svelte, HTMX). Use when: (1) user explicitly requests a security review or audit, (2) a new web feature is complete and needs security sign-off, (3) writing new authentication, file upload, form handling, API endpoint, CLI, or child-process code and want secure-by-default patterns. A language with no reference here is reported as unreviewed rather than checked against another language's rules. Produces severity-classified findings report. Do not use for a pre-merge review of a whole branch or PR (use branch-merge-review, which dispatches this skill as its security reviewer) or for a non-security quality review (use code-quality-review)."
+description: "Perform security review for application backends and frontends — PHP, Python, and Node.js (HTTP services, CLIs, daemons, libraries) plus the browser surface (vanilla JS, jQuery, Svelte, HTMX). Use when: (1) user explicitly requests a security review or audit, (2) a new web feature is complete and needs security sign-off, (3) writing new authentication, file upload, form handling, API endpoint, CLI, or child-process code and want secure-by-default patterns. A language with no reference here is reported as unreviewed rather than checked against another language's rules. Produces severity-classified findings report. Do not use for a pre-merge review of a whole branch or PR (use branch-merge-review, which dispatches this skill as its security reviewer) or for a non-security quality review (use code-quality-review)."
 ---
 
 # Web Security Review
@@ -25,6 +25,7 @@ needs both surface files.
 |---|---|---|
 | Language | `references/php-backend-security.md` | PHP language rules **and** its HTTP surface (see the exception below) |
 | Language | `references/node-security.md` | Node runtime APIs, deserialization, prototype pollution, dependencies, secrets |
+| Language | `references/python-security.md` | Python runtime, deserialization, SQL, templates, crypto, dependencies, secrets |
 | Surface | `references/http-server-security.md` | Auth, session, CSRF, authorization, upload, headers, CORS, response exposure |
 | Surface | `references/browser-security.md` | DOM sinks, CSP, client storage, framework-specific XSS |
 | Surface | `references/native-security.md` | CLI/daemon: invocation trust, filesystem, temp files, child processes, privilege |
@@ -54,11 +55,18 @@ PHP and Node loads both. Then add one surface file per surface in scope.
 | Node CLI or daemon | `node-security.md` | `native-security.md` |
 | Node library with no surface evidence | `node-security.md` | **all three** — the consumer decides the surface and is not in this diff |
 | Node service + CLI | `node-security.md` | `http-server-security.md` + `native-security.md` |
-| Node static build (bundler, prerender) | `node-security.md` | `browser-security.md` |
+| Node static build (bundler, prerender) | `node-security.md` | `browser-security.md` + `native-security.md` — the build script itself runs in CI with repository write access |
 | Node runtime SSR | `node-security.md` | `http-server-security.md` + `browser-security.md` |
 | Node service that also serves a UI | `node-security.md` | `http-server-security.md` + `browser-security.md` |
 | Node service + CLI + UI | `node-security.md` | all three |
+| Python HTTP service (Django, FastAPI, Flask) | `python-security.md` | `http-server-security.md` |
+| Python server-rendered app (templates) | `python-security.md` | `http-server-security.md` + `browser-security.md` |
+| Python CLI, job, or daemon | `python-security.md` | `native-security.md` |
+| Python library with no surface evidence | `python-security.md` | **all three** — the consumer decides the surface and is not in this diff |
 | Browser assets only, no manifest change | — | `browser-security.md` |
+
+**A build is code that runs.** A bundler or prerender config is not just a description of the output — it executes on a developer machine and in CI, reads the working directory, and
+can run arbitrary plugins, so it carries the `native` surface alongside the browser output it produces. `native-security.md` is written for exactly that: build scripts and anything else that trusts its own working directory.
 
 The last row is the only one without a language axis, and it is narrow on purpose: the moment a
 `package.json`, lockfile, or build script is in the diff, `node-security.md` comes back.
