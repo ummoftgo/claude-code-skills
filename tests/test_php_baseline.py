@@ -1325,6 +1325,21 @@ class SecurityReferenceSelectionTest(unittest.TestCase):
         "PHP server-rendered app": {"php-backend-security.md", "browser-security.md"},
         "PHP API, no HTML": {"php-backend-security.md"},
         "Browser assets only": {"browser-security.md"},
+        "Python HTTP service": {"python-security.md", "http-server-security.md"},
+        "Python server-rendered app": {
+            "python-security.md", "http-server-security.md", "browser-security.md",
+        },
+        "Python CLI, job, or daemon": {"python-security.md", "native-security.md"},
+        "Python library with no surface evidence": {"python-security.md", *ALL_SURFACES},
+        "Go HTTP service": {"go-security.md", "http-server-security.md"},
+        "Go server-rendered app": {
+            "go-security.md", "http-server-security.md", "browser-security.md",
+        },
+        "Go CLI or daemon": {"go-security.md", "native-security.md"},
+        "Go library with no surface evidence": {"go-security.md", *ALL_SURFACES},
+        "Rust HTTP service": {"rust-security.md", "http-server-security.md"},
+        "Rust CLI or daemon": {"rust-security.md", "native-security.md"},
+        "Rust library with no surface evidence": {"rust-security.md", *ALL_SURFACES},
     }
 
     #: "all three" 같은 축약이 어떤 파일들을 뜻하는지. 표에서 축약이 사라지면 그냥 파일명이
@@ -1335,13 +1350,29 @@ class SecurityReferenceSelectionTest(unittest.TestCase):
         found = {
             name for name in (
                 "php-backend-security.md", "node-security.md", "python-security.md",
-                *ALL_SURFACES,
+                "go-security.md", "rust-security.md", *ALL_SURFACES,
             ) if name in row
         }
         for phrase, expansion in self.SHORTHAND.items():
             if phrase in row:
                 found.update(expansion)
         return found
+
+    def test_no_selection_row_escapes_the_required_set(self) -> None:
+        """등록된 행만 검사하면 새 언어를 추가할 때 그 행이 검사 없이 통과한다.
+
+        실제로 Python 4행이 그렇게 빠져 있었다. 표에 행을 추가하면 여기에도 추가해야 한다.
+        """
+        rows = set(self.selection_rows())
+        covered = set()
+        for prefix in self.REQUIRED_SELECTIONS:
+            covered.update(
+                label for label in rows if label.startswith(prefix.rstrip(" |"))
+            )
+        self.assertEqual(
+            rows - covered, set(),
+            "선택 표에 참조 집합이 고정되지 않은 행이 있다",
+        )
 
     def test_each_row_selects_exactly_the_right_reference_set(self) -> None:
         rows = self.selection_rows()
@@ -1735,11 +1766,74 @@ class PythonReferenceSemanticsTest(unittest.TestCase):
         )
         self.assertIn("js-toolchain.md", quality, "TypeScript 규칙과의 차이를 짚지 않는다")
 
+    def test_uv_tool_install_takes_one_package(self) -> None:
+        """`uv tool install ruff mypy` 는 uv 0.9.17 에서 거부된다 — 그대로 쓰면 설치가 실패한다."""
+        for line in code_blocks(self.quality()).splitlines():
+            stripped = line.strip()
+            if stripped.startswith("uv tool install"):
+                with self.subTest(command=stripped):
+                    self.assertEqual(
+                        len(stripped.split()), 4,
+                        "uv tool install 은 패키지 하나만 받는다",
+                    )
+
+    def test_declared_tool_roles_all_have_an_install_path(self) -> None:
+        """역할로 선언해 놓고 설치 방법이 없으면 그 역할은 영원히 skipped 다."""
+        install = between(
+            self.quality(), "## 3. Availability and Authority", "## 4. Execution",
+            label="설치 절",
+        )
+        for tool in ("ruff", "mypy", "vulture", "radon"):
+            with self.subTest(tool=tool):
+                self.assertIn(tool, install)
+
+    def test_mypy_uses_the_null_device_not_a_temp_dir(self) -> None:
+        """무쓰기가 가능하면 그 형태를 쓴다 — 상위 계약이 그렇게 정해져 있다."""
+        commands = code_blocks(self.quality())
+        self.assertIn("--cache-dir=/dev/null", commands)
+        self.assertIn("--cache-dir=nul", commands, "Windows 형태가 없다")
+
+    def test_the_exception_example_states_the_hierarchy_correctly(self) -> None:
+        """`except Exception` 은 KeyboardInterrupt/SystemExit 을 잡지 않는다 — bare except 가 잡는다."""
+        quality = " ".join(self.quality().split())
+        self.assertRegex(
+            quality,
+            r"`except Exception` does NOT catch those two; the bare form does",
+        )
+        self.assertRegex(quality, r"default 'except:' must be last",
+                         "세 블록을 나눈 이유(SyntaxError)가 없다")
+
     def test_vulture_confidence_floors_are_explained(self) -> None:
         """80 을 기본값처럼 쓰면 미사용 함수(60%)가 전부 사라진다 — vulture 2.16 실측."""
         quality = " ".join(self.quality().split())
         self.assertRegex(quality, r"unused function scores 60%")
         self.assertRegex(quality, r"unused import 90%|an unused import 90%")
+
+    def test_requirements_audit_states_its_trust_boundary(self) -> None:
+        """requirements 감사는 `pip install -r` 과 같은 신뢰 경계다 — 리뷰 대상이 악의적일 수 있다."""
+        security = " ".join(self.security().split())
+        self.assertRegex(security, r"same trust boundary as `pip install -r`")
+        self.assertIn("--no-deps --disable-pip", security, "경계를 좁히는 형태가 없다")
+
+    def test_literal_eval_is_not_called_safe_for_untrusted_input(self) -> None:
+        """코드를 실행하지 않는 것과 신뢰하지 않는 입력에 안전한 것은 다르다 (CPython 문서)."""
+        security = " ".join(self.security().split())
+        self.assertRegex(security, r"not RCE.{0,40}not as .{0,20}harmless")
+        self.assertRegex(security, r"C-stack exhaustion|memory or C-stack")
+
+    def test_template_injection_is_rated_critical(self) -> None:
+        """Python 실행에 도달한다고 서술하면서 High 로 두면 영향 기반 원칙과 어긋난다."""
+        security = " ".join(self.security().split())
+        self.assertRegex(security, r"\*\*Critical\*\* for template injection")
+        self.assertIn("SandboxedEnvironment", security, "완화 수단을 구분하지 않는다")
+
+    def test_zipfile_and_tarfile_are_not_described_as_the_same(self) -> None:
+        """zipfile 은 멤버 이름을 정화하고 tarfile 은 하지 않는다 (3.12.3 실측)."""
+        security = " ".join(self.security().split())
+        self.assertRegex(security, r"zipfile\.extractall` sanitises member names")
+        self.assertRegex(security, r"OutsideDestinationError")
+        self.assertIn('hasattr(tarfile, "data_filter")', security,
+                      "백포트 때문에 버전 비교는 부정확하다는 점이 없다")
 
     def test_pip_audit_dry_run_is_marked_as_not_an_audit(self) -> None:
         """`--dry-run` 은 감사 없이 `No known vulnerabilities found` 를 출력한다 — 통과로 읽힌다."""
@@ -1948,6 +2042,41 @@ class RustReferenceSemanticsTest(unittest.TestCase):
                 self.assertIn(surface, header)
 
 
+class ReadOnlyBoundaryContractTest(unittest.TestCase):
+    """읽기 전용 계약의 **경계**를 하나로 고정한다.
+
+    "작업 트리 무변경"과 "파일시스템 전체 무쓰기"가 섞여 있으면 참조마다 다른 해석이 나온다.
+    Rust 는 후자를 문자 그대로 지키면 린트를 아예 못 돌린다 — 계약이 어느 쪽인지 말해야 한다.
+    """
+
+    def rule(self) -> str:
+        return " ".join(
+            between(
+                read("skills/code-quality-review/SKILL.md"),
+                "**Read-only mode (priority rule).**", "## Reference Files",
+                label="읽기 전용 규칙",
+            ).split()
+        )
+
+    def test_the_boundary_is_the_workspace_not_the_filesystem(self) -> None:
+        rule = self.rule()
+        self.assertRegex(rule, r"Where the boundary is")
+        self.assertIn("CARGO_TARGET_DIR", rule, "임시 디렉터리 허용 사례가 없다")
+
+    def test_a_genuinely_write_free_form_is_preferred_when_one_exists(self) -> None:
+        """더 강한 보장이 공짜로 있으면 그걸 쓴다 — mypy 는 /dev/null 로 아무 데도 안 쓴다."""
+        rule = self.rule()
+        self.assertRegex(rule, r"prefer it")
+        self.assertIn("--cache-dir=/dev/null", rule)
+
+    def test_the_exception_does_not_leak_into_code_modification(self) -> None:
+        """임시 경로 허용이 자동수정 명령의 우회로가 되면 계약 전체가 무의미해진다."""
+        self.assertRegex(
+            self.rule(),
+            r"Never redirect a write out of the workspace to make a \*?\*?code-modifying",
+        )
+
+
 class LanguageRegistrationConsistencyTest(unittest.TestCase):
     """언어 하나를 지원하려면 네 곳에 등록해야 한다. 한 곳을 빠뜨리는 것이 이 구조의 기본 실패다.
 
@@ -1980,6 +2109,53 @@ class LanguageRegistrationConsistencyTest(unittest.TestCase):
         for language, (quality, _, _) in self.LANGUAGES.items():
             with self.subTest(language=language):
                 self.assertIn(f"references/{quality}", skill, "참조 목록에 없다 — 로드되지 않는다")
+
+    def test_every_language_is_detected_in_step_1(self) -> None:
+        """목록에 있어도 감지 절에 없으면 standalone 리뷰가 그 언어를 알아채지 못한다."""
+        detection = between(
+            read("skills/code-quality-review/SKILL.md"),
+            "## Step 1: Detect Stack", "Infer project conventions", label="Step 1 감지",
+        )
+        for language, (quality, _, extension) in self.LANGUAGES.items():
+            with self.subTest(language=language):
+                self.assertIn(quality, detection, "감지 절이 이 참조를 가리키지 않는다")
+                self.assertIn(extension.lstrip("*"), detection, "감지 신호(확장자)가 없다")
+
+    def test_every_language_has_an_execution_section_in_step_2(self) -> None:
+        """감지만 하고 실행 위임이 없으면 도구를 어떻게 부르는지 아무도 모른다."""
+        execution = between(
+            read("skills/code-quality-review/SKILL.md"),
+            "## Step 2: Run CLI Tools", "## Step 3", label="Step 2 실행",
+        )
+        for language, (quality, _, _) in self.LANGUAGES.items():
+            with self.subTest(language=language):
+                self.assertIn(quality, execution, "실행 위임 절이 없다")
+
+    def test_every_language_has_a_quality_reviewer_mapping(self) -> None:
+        """`{language} → {reference} → {scope}` 매핑이 없으면 branch 리뷰가 리뷰어를 못 만든다."""
+        mapping = between(
+            read("skills/branch-merge-review/references/reviewer-prompts.md"),
+            "| `{language}` | `{reference}` | `{scope}` |",
+            "Add a row when a language gains a reference", label="품질 리뷰어 매핑",
+        )
+        for language, (quality, _, extension) in self.LANGUAGES.items():
+            with self.subTest(language=language):
+                self.assertIn(quality, mapping, "매핑 표에 참조가 없다")
+                self.assertIn(f"`{extension}`", mapping, "매핑 표에 scope 가 없다")
+
+    def test_the_completion_gate_does_not_call_a_covered_language_unreviewable(self) -> None:
+        """게이트가 지원 언어를 미지원으로 말하면 정상 리뷰가 Block 으로 떨어진다."""
+        gate = between(
+            read("skills/branch-merge-review/SKILL.md"),
+            "**Completion gate", "## Step 4", label="완료 게이트",
+        )
+        for language in self.LANGUAGES:
+            with self.subTest(language=language):
+                self.assertNotRegex(
+                    " ".join(gate.split()),
+                    rf"without a language-axis reference[^.]{{0,80}}{language}",
+                    f"{language} 를 여전히 미지원으로 적고 있다",
+                )
 
     def test_every_language_is_listed_in_the_security_skill(self) -> None:
         skill = read("skills/web-security-review/SKILL.md")

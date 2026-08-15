@@ -82,10 +82,18 @@ Two traps specific to Python:
   `os.path.normpath` does **not** — it is lexical only, like the JS `path.resolve` case in
   `node-security.md` §2.
 
-Archive extraction is the same class of bug with a different entry point: `tarfile.extractall`
-and `zipfile.extractall` will write outside the destination when the archive contains `../`
-members or absolute paths. Python 3.12+ takes `filter="data"`; on older runtimes, validate every
-member before extracting.
+Archive extraction is the same class of bug with a different entry point, and the two stdlib
+modules do **not** behave the same — measured on 3.12.3:
+
+- `zipfile.extractall` sanitises member names: a `../escaped.txt` member lands inside the
+  destination as `escaped.txt`, and a leading `/` is stripped. Traversal is not the risk here;
+  zip bombs, symlink members, and colliding names still are.
+- `tarfile.extractall` **does** write outside the destination unless a filter says otherwise.
+  `filter="data"` rejects it (`OutsideDestinationError`), and it is the filter to require.
+
+Check the filter's availability with `hasattr(tarfile, "data_filter")` rather than a version
+comparison — the filters were backported to security-fix releases of older branches, so a version
+test reports "unsupported" on runtimes that support it.
 
 ```bash
 rg -n "extractall|os\.path\.join\(" --glob "*.py"
@@ -114,8 +122,11 @@ config = yaml.load(payload)
 config = yaml.safe_load(payload)
 ```
 
-`ast.literal_eval` is the safe evaluator for literals. It is not a general `eval` replacement:
-it raises on anything that is not a literal, which is the point.
+`ast.literal_eval` evaluates literals only — it does **not** execute arbitrary code, and that is
+a real difference from `eval`. It is still not "safe for untrusted input": the CPython docs warn
+that a sufficiently large or complex string can crash the interpreter through memory or C-stack
+exhaustion. Treat it as *not RCE*, not as *harmless*: bound the input length before calling it, or
+use `json.loads` where the format allows.
 
 ```bash
 rg -n "pickle\.loads?|yaml\.load\(|\beval\(|\bexec\(|jsonpickle|dill\." --glob "*.py"
@@ -168,25 +179,38 @@ rg -n "execute\(f\"|execute\(.*%\s*\(|\.raw\(|\.extra\(|text\(f\"" --glob "*.py"
 `setup.py` executes on install for a source distribution, so a new dependency shipping one is
 worth reading — the Python analogue of an npm lifecycle script.
 
-```bash
-# Known advisories against the lock / requirements. Reads only; writes nothing to the project.
-pip-audit -r requirements.txt
-pip-audit                              # audits the active environment
+**Auditing a requirements file is not a read-only operation by default.** pip-audit's own
+[security model](https://github.com/pypa/pip-audit#security-model) states that auditing a
+requirements input carries the same trust boundary as `pip install -r` on it: resolving
+dependencies can invoke build backends and metadata hooks from the packages being resolved,
+with the reviewer's permissions. On a branch under review — which is exactly the untrusted case
+— that is code execution on the reviewer's machine.
 
-# Hash pinning present?
+```bash
+# Audit the declared pins only, with no resolution: the trust boundary stays at reading the file.
+pip-audit --no-deps --disable-pip -r requirements.txt
+
+# Hash pinning present? (a hashed, fully-pinned file is what makes --no-deps sound)
 rg -n "^\s*--hash=|^\s*[A-Za-z0-9_.-]+==" requirements*.txt
+```
+
+`--no-deps` skips resolution, so it audits what the file names and nothing transitive — say so in
+the report rather than implying full coverage. Auditing the **active environment**
+(`pip-audit` with no `-r`) is safe in the same sense: it reads what is already installed.
+
+**Read-only:** skip every command in this block; record them as `skipped-read-only`.
+
+```bash
+# Full resolution — runs build backends from the audited packages
+pip-audit -r requirements.txt
+# `--fix` rewrites requirements
+pip-audit --fix
 ```
 
 **`pip-audit --dry-run` does not audit.** It resolves and reports what it *would* have audited,
 then prints `No known vulnerabilities found` — a line that reads exactly like a clean result.
-Never record a `--dry-run` as a passing audit.
-
-**Read-only:** skip this command; record it as `skipped-read-only`.
-
-```bash
-# `--fix` rewrites requirements; installing to audit an environment also writes
-pip-audit --fix
-```
+Never record a `--dry-run` as a passing audit; note also that it still performs the resolution
+described above.
 
 ## 6. Secrets & Configuration
 
@@ -242,11 +266,16 @@ rg -n "random\.(choice|randint|random|choices)|md5\(|sha1\(|verify\s*=\s*False" 
 
 ## 8. Template and Markup Rendering
 
-**Severity if violated**: High
+**Severity if violated**: **Critical** for template injection (it reaches Python execution),
+High for the escaping rules below it
 
 ### MUST
 - MUST NOT render a template built from user input — Jinja2 `Template(user_input)` is server-side
-  template injection, which reaches Python execution, not just HTML.
+  template injection. It reaches Python execution through attribute traversal, not just HTML, so
+  report it as **Critical**, above the escaping findings in this section.
+  A `SandboxedEnvironment` is the documented way to render untrusted template text and blocks that
+  traversal; it is a mitigation to verify, not a reason to skip the finding, and escapes from it
+  have been published. Say which environment the code uses.
 - MUST NOT mark user data safe (`|safe`, `mark_safe`, `Markup(...)`) without a sanitiser that the
   reviewer can name.
 - MUST keep autoescaping on. `Environment()` defaults to `autoescape=False` in Jinja2 —

@@ -324,12 +324,21 @@ says which language went unreviewed and why. Silence about a missing reviewer re
 result, and the risk grows precisely as the roster grows — with one fixed backend reviewer a
 failure was obvious; with one per language it is not.
 
-> **Node is now covered.** `web-security-review` ships `node-security.md` (language axis) and
-> `http-server-security.md` / `native-security.md` (surface axis), so server-side JS/TS is
-> reviewable and no longer blocked by this gate. The gate still applies to any language without a
-> language-axis reference — Python, Go, and Rust today. For those, report the paths as unreviewed
-> and let the recommendation reflect it, rather than approving a review that never loaded a
-> reference for the changed language.
+> **Languages covered today** — each has both a quality reference and a security language-axis
+> reference, so none of them is blocked by this gate: **PHP, Python, Go, Rust, and JS/TS**
+> (server and browser surfaces). The surface-axis files `http-server-security.md`,
+> `browser-security.md`, and `native-security.md` pair with all of them except PHP, which carries
+> its HTTP surface in its own file.
+>
+> The gate still applies to any **other** language in the diff. For those, report the paths as
+> unreviewed and let the recommendation reflect it, rather than approving a review that never
+> loaded a reference for the changed language.
+>
+> Adding a language means four edits, not one — the quality reference and its row in
+> `code-quality-review`, the security reference and its rows in the `web-security-review`
+> selection table, the `{language} → {reference} → {scope}` and `{focus}` rows in
+> `references/reviewer-prompts.md`, and the classification row in Step 1. Missing one of them
+> fails silently: the reference exists but nothing loads it.
 
 ---
 

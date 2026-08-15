@@ -100,8 +100,15 @@ Get-ChildItem .venv\Scripts\ -ErrorAction SilentlyContinue |
 
 ```bash
 # Normal mode only. Prefer the project's own tooling — uv, then pip in its virtualenv.
-uv tool install ruff mypy
-python3 -m pip install ruff mypy
+# `uv tool install` takes ONE package per invocation (verified on uv 0.9.17: a second
+# positional argument is rejected with `unexpected argument`).
+uv tool install ruff
+uv tool install mypy
+uv tool install vulture
+uv tool install radon
+
+# Or into the project's environment
+python3 -m pip install ruff mypy vulture radon
 ```
 
 Under read-only, record the withheld install as `skipped-read-only` and each role it would have
@@ -141,12 +148,13 @@ ruff format .
 ### mypy — type checking
 
 ```bash
-# `--cache-dir` pointed outside the project is the read-only-safe form.
-mypy --cache-dir="$(mktemp -d)" .
+# The read-only-safe form: mypy documents the null device as the way to disable the cache
+# entirely, so nothing is written anywhere — not just outside the project.
+mypy --cache-dir=/dev/null .
 ```
 
 ```powershell
-mypy --cache-dir="$env:TEMP\mypy-review" .
+mypy --cache-dir=nul .
 ```
 
 **`--no-incremental` does not do what its name suggests.** Measured on mypy 2.3.1, a run with
@@ -233,21 +241,34 @@ class Cache:
 ### Broad exception handling
 
 ```python
-# BAD — swallows KeyboardInterrupt, SystemExit, and every programming error
+# BAD — swallows every programming error: a TypeError from a refactor now reads as
+# "compute is unavailable", and the traceback is gone
 try:
     result = compute()
 except Exception:
     result = None
+```
 
-# BAD in a different way — bare except also catches BaseException
+```python
+# WORSE — a bare except also catches BaseException, so KeyboardInterrupt and SystemExit
+# stop working. `except Exception` does NOT catch those two; the bare form does.
+try:
+    result = compute()
 except:
     pass
+```
 
+```python
 # GOOD — name what you expect, and let the rest propagate
+try:
+    result = compute()
 except (ValueError, KeyError) as exc:
     logger.warning("compute failed: %s", exc)
     result = None
 ```
+
+(The three are separate blocks on purpose: a bare `except:` after another handler is a
+`SyntaxError` — `default 'except:' must be last`.)
 
 Flag any `except` that discards the exception without logging it. The cost lands later, in an
 incident where the traceback does not exist.

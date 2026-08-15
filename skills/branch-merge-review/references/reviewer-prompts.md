@@ -53,6 +53,9 @@ and reference chosen for one language produce confident, wrong findings about th
 |---|---|---|
 | PHP | `php-quality.md` | `*.php`, `composer.json`, `composer.lock` |
 | Node/TS (server surface) | `js-toolchain.md` + `node-quality.md` | `*.js`, `*.mjs`, `*.cjs`, `*.ts`, `*.mts`, `*.cts`, `*.tsx`, `package.json`, lockfiles |
+| Python | `python-quality.md` | `*.py`, `pyproject.toml`, `setup.py`, `setup.cfg`, `requirements*.txt` |
+| Go | `go-quality.md` | `*.go`, `go.mod`, `go.sum` |
+| Rust | `rust-quality.md` | `*.rs`, `Cargo.toml`, `Cargo.lock` |
 
 Add a row when a language gains a reference. **If a detected language has no reference, do not
 instantiate this template with another language's** — skip it and report the paths as unreviewed.

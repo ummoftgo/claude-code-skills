@@ -14,7 +14,16 @@ Detect the active shell before using a snippet. On POSIX use `command -v`, `[ -f
 > **Read-only mode (priority rule).** If the user asked for a review **without changing anything** (e.g. "수정하지 말고 검토만", "read-only", review delegated under a read-only sandbox), then this skill must not write to the workspace:
 > - **Do not install** missing tools (no `npm install`, `composer require`, PHAR downloads, etc.). Run only the tools already present. Record the withheld install command as **`skipped-read-only`**, and the tool role it would have enabled as **`skipped-not-installed`** — the command was withheld, the check was impossible.
 > - **Do not modify code** and do not change worktree or Git state — findings and recommendations only.
-> - **Do not write any file**, report files included. (Inline output is the default anyway — see Step 4; under a read-only constraint it is the *only* option, even if the user asks for a file. Say that a report file needs write permission.)
+> - **Do not write any file into the workspace**, report files included. (Inline output is the default anyway — see Step 4; under a read-only constraint it is the *only* option, even if the user asks for a file. Say that a report file needs write permission.)
+>
+> **Where the boundary is.** The workspace — the user's repository and anything under it — is what
+> must come out unchanged. A tool writing its own cache to a process-temporary directory outside
+> the workspace does not violate this, and some checks cannot run at all without one: cargo has to
+> put build output somewhere, so `CARGO_TARGET_DIR` pointed at a temp directory is the read-only
+> form, not an exception to it. **Where a genuinely write-free form exists, prefer it** — mypy's
+> `--cache-dir=/dev/null` writes nothing anywhere, so use that rather than a temp directory.
+> Never redirect a write out of the workspace to make a *code-modifying* command acceptable; that
+> is a different rule and it has no exceptions.
 >
 > When in doubt, treat the request as read-only and ask before installing or writing.
 
@@ -136,6 +145,9 @@ Inspect the project root to determine languages and frameworks:
   - browser surface (`*.svelte`, bundler config, a frontend framework dependency) → `references/js-frontend-quality.md`
   - server surface (a server framework dependency, a `bin` entry, an HTTP listener) → `references/node-quality.md`
   - both, when the workspace serves both
+- Python: `pyproject.toml`, `setup.py`, `requirements*.txt`, `*.py` → load `references/python-quality.md`
+- Go: `go.mod`, `*.go` → load `references/go-quality.md`
+- Rust: `Cargo.toml`, `*.rs` → load `references/rust-quality.md`
 - CSS/SCSS: `*.css`, `*.scss`, `*.sass` files → load `references/css-quality.md`
 
 Infer project conventions from **existing code majority** (not assumed standards):
@@ -158,6 +170,22 @@ reader unable to tell which is authoritative, and only one of them gets fixed.
 
 `references/js-toolchain.md` is the **single source** for JS/TS tool invocation — ESLint, Biome,
 Oxlint, `tsc --noEmit`, svelte-check, and knip, each with its read-only contract. Follow its §2.
+
+### Python stack
+
+`references/python-quality.md` §4 owns ruff, mypy/pyright, vulture, and radon invocation,
+including the cache-suppression flags each one needs to stay read-only safe. Follow its §1 for
+version resolution.
+
+### Go stack
+
+`references/go-quality.md` §4 owns `go vet`, staticcheck, golangci-lint, and `gofmt` invocation —
+including the `-o /dev/null` form that keeps `go build` from leaving a binary behind.
+
+### Rust stack
+
+`references/rust-quality.md` §4 owns clippy, `cargo check`, and rustfmt invocation, including the
+`CARGO_TARGET_DIR` and `--locked` pair that keeps cargo from creating `target/` and `Cargo.lock`.
 
 ### CSS / SCSS stack
 
