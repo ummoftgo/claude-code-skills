@@ -1026,6 +1026,7 @@ class PhpStanReadOnlyGateTest(unittest.TestCase):
         extra: dict[str, str] | None = None,
         unreadable: tuple[str, ...] = (),
         subdir: str = "",
+        env: dict[str, str] | None = None,
     ) -> str:
         """게이트 블록을 실제로 실행한다. `extra` 로 include 대상 파일을 함께 놓는다."""
         with tempfile.TemporaryDirectory() as base:
@@ -1049,7 +1050,7 @@ class PhpStanReadOnlyGateTest(unittest.TestCase):
                     os.chmod(path, 0o000)
             result = subprocess.run(
                 ["bash", "gate.sh"], cwd=work, capture_output=True, text=True,
-                env={**os.environ, "READ_ONLY": "1"},
+                env={**os.environ, "READ_ONLY": "1", **(env or {})},
             )
             for path in written:
                 os.chmod(path, 0o644)
@@ -1154,6 +1155,79 @@ class PhpStanReadOnlyGateTest(unittest.TestCase):
             self.run_gate("x\n", readable=False),
             "읽을 수 없는 설정을 안전으로 처리했다",
         )
+
+
+class PhpStanTrustGateTest(PhpStanReadOnlyGateTest):
+    """신뢰 경계 게이트도 **실행해서** 검증한다.
+
+    문자열로는 "게이트가 문서에 있다"까지만 안다. 이 게이트는 두 번 순서가 틀렸었다 —
+    체인 정의 앞에 놓여 빈 체인으로 통과했고, 고친다며 분석 뒤로 옮겨 이미 실행된 뒤에
+    확인했다. 실행 테스트라야 그 둘을 다 잡는다.
+    """
+
+    SKIP_MARKER = "skipped-untrusted-execution"
+
+    def test_a_trusted_branch_runs_the_analysis_unchanged(self) -> None:
+        """PHP 무회귀의 핵심 — 평소 리뷰에서 이 게이트는 아무것도 바꾸지 않는다."""
+        output = self.run_gate(
+            "parameters:\n    level: 0\n    paths:\n        - src\n",
+            extra={"src/A.php": "<?php class A {}"},
+        )
+        self.assertIn(self.ANALYSIS_MARKER, output, "신뢰 브랜치에서 분석이 실행되지 않았다")
+        self.assertNotIn(self.SKIP_MARKER, output)
+
+    def test_bootstrap_files_block_the_run_on_an_untrusted_diff(self) -> None:
+        output = self.run_gate(
+            "parameters:\n    level: 0\n    paths:\n        - src\n"
+            "    bootstrapFiles:\n        - boot.php\n",
+            extra={"src/A.php": "<?php class A {}", "boot.php": "<?php"},
+            env={"UNTRUSTED_DIFF": "1"},
+        )
+        self.assertIn(self.SKIP_MARKER, output, "실행 위험이 있는데 분석이 막히지 않았다")
+        self.assertNotIn(self.ANALYSIS_MARKER, output, "게이트가 판정 후에도 분석을 실행했다")
+
+    def test_a_nested_include_is_caught_too(self) -> None:
+        """루트 설정만 보면 통과한다 — 체인을 실제로 따라가는지 확인한다."""
+        output = self.run_gate(
+            "includes:\n    - inner.neon\nparameters:\n    level: 0\n    paths:\n        - src\n",
+            extra={
+                "src/A.php": "<?php class A {}",
+                "inner.neon": "parameters:\n    rules:\n        - App\\MyRule\n",
+            },
+            env={"UNTRUSTED_DIFF": "1"},
+        )
+        self.assertIn(self.SKIP_MARKER, output, "include 안의 rules 를 놓쳤다")
+        self.assertNotIn(self.ANALYSIS_MARKER, output)
+
+    def test_a_php_include_is_caught(self) -> None:
+        output = self.run_gate(
+            "includes:\n    - dynamic.php\nparameters:\n    level: 0\n    paths:\n        - src\n",
+            extra={"src/A.php": "<?php class A {}", "dynamic.php": "<?php return [];"},
+            env={"UNTRUSTED_DIFF": "1"},
+        )
+        self.assertIn("executable-config", output, "`.php` include 를 실행 위험으로 보지 않았다")
+        self.assertNotIn(self.ANALYSIS_MARKER, output)
+
+    def test_a_legacy_autoload_parameter_is_caught(self) -> None:
+        """구버전을 고정한 프로젝트에서는 옛 파라미터가 실제로 파일을 로드했다."""
+        output = self.run_gate(
+            "parameters:\n    level: 0\n    paths:\n        - src\n"
+            "    autoload_files:\n        - side.php\n",
+            extra={"src/A.php": "<?php class A {}", "side.php": "<?php"},
+            env={"UNTRUSTED_DIFF": "1"},
+        )
+        self.assertIn("legacy-autoload", output)
+        self.assertNotIn(self.ANALYSIS_MARKER, output)
+
+    def test_an_untrusted_diff_with_nothing_executable_still_runs(self) -> None:
+        """모든 것을 막으면 아무도 안 쓴다 — 위험이 없으면 신뢰하지 않는 diff 도 분석한다."""
+        output = self.run_gate(
+            "parameters:\n    level: 0\n    paths:\n        - src\n",
+            extra={"src/A.php": "<?php class A {}"},
+            env={"UNTRUSTED_DIFF": "1"},
+        )
+        self.assertIn(self.ANALYSIS_MARKER, output, "위험이 없는데도 막았다")
+        self.assertNotIn(self.SKIP_MARKER, output)
 
 
 class PhpSecurityBaseline(unittest.TestCase):
@@ -2283,31 +2357,55 @@ class UntrustedExecutionContractTest(unittest.TestCase):
                     "신뢰 경계 규칙으로 연결되지 않는다",
                 )
 
-    def test_the_phpstan_precheck_runs_after_the_chain_is_built(self) -> None:
-        """`CONFIG_CHAIN` 을 정의 전에 소비하면 빈 체인으로 조용히 통과한다."""
+    def test_the_phpstan_trust_gate_runs_before_the_analysis(self) -> None:
+        """순서가 두 번 틀렸던 자리다. 체인 정의 → 게이트 → 분석, 셋 다 고정한다.
+
+        처음에는 게이트가 `collect_config` 정의보다 **앞**에 있어 빈 체인으로 통과했고,
+        고친다면서 분석 **뒤**로 옮겨 이미 실행된 뒤에 확인하게 만들었다.
+        """
         reference = quality_reference("php-quality")
         definition = reference.index("collect_config() {")
-        consumption = reference.index("executable config in chain")
-        self.assertLess(
-            definition, consumption,
-            "사전 확인 블록이 collect_config 정의보다 앞에 있다 — 문서 순서대로 실행하면 빈 체인이다",
-        )
+        gate = reference.index("EXEC_RISK=\"\"")
+        analysis = reference.index("$PHP_CMD $(command -v phpstan) analyse")
+        self.assertLess(definition, gate, "게이트가 체인 정의보다 앞이다 — 빈 체인으로 통과한다")
+        self.assertLess(gate, analysis, "게이트가 분석보다 뒤다 — 이미 실행된 뒤에 확인한다")
+        # 게이트가 실행 분기와 **같은** if 체인이어야 판정이 실행을 막는다.
+        branch = reference[gate:analysis]
+        self.assertIn('if [ -n "$EXEC_RISK" ]', branch,
+                      "게이트 결과가 실행 분기를 막지 않는다")
+        self.assertIn("skipped-untrusted-execution", branch)
 
-    def test_the_autoload_list_is_not_truncated(self) -> None:
-        """`head` 로 자르면 잘린 목록이 짧은 목록으로 읽힌다 — 중요한 항목이 마지막일 수 있다."""
-        for line in code_blocks(quality_reference("php-quality")).splitlines():
-            if "autoload_files.php" in line:
-                with self.subTest(command=line.strip()):
-                    self.assertNotIn("head", line, "목록을 잘라 읽는다")
+    def test_no_trust_gate_command_truncates_its_input(self) -> None:
+        """잘린 목록은 짧은 목록으로 읽힌다 — 문제의 항목이 마지막이거나 6줄 뒤일 수 있다."""
+        gate = between(
+            quality_reference("php-quality"), 'EXEC_RISK=""',
+            "# PHPStan — run under the correct PHP binary", label="신뢰 게이트",
+        )
+        for line in gate.splitlines():
+            stripped = line.strip()
+            if stripped.startswith("#") or not stripped:
+                continue
+            with self.subTest(command=stripped[:60]):
+                self.assertNotRegex(stripped, r"\bhead\b", "목록을 잘라 읽는다")
+                self.assertNotRegex(stripped, r"-A\d+", "고정 줄 수 창으로 자른다")
 
     def test_the_precheck_covers_dependency_extensions_and_versions(self) -> None:
         reference = " ".join(quality_reference("php-quality").split())
         self.assertIn("extension-installer", reference, "의존 패키지 확장 자동 활성화가 없다")
         self.assertIn("--autoload-file", reference, "실행 인자 경로가 없다")
+        self.assertIn("0.12.26", reference, "전환 시점이 부정확하거나 없다")
         self.assertRegex(
-            reference, r"Parameter names moved between major versions",
-            "버전별 파라미터 차이가 없다",
+            reference, r"not a rename",
+            "`scanFiles` 가 옛 `autoload_files` 의 동의어가 아니라는 점이 없다",
         )
+        # `autoload_files.php`(composer 산출물)가 같은 문자열을 포함하므로 그것만으로는
+        # 구버전 파라미터 검사를 확인할 수 없다. 전용 마커를 요구한다.
+        gate = between(
+            quality_reference("php-quality"), 'EXEC_RISK=""',
+            "# PHPStan — run under the correct PHP binary", label="신뢰 게이트",
+        )
+        self.assertIn("autoload_directories", gate, "구버전 파라미터를 검사하지 않는다")
+        self.assertIn("legacy-autoload", gate, "구버전 발견을 별도로 표시하지 않는다")
 
     def test_stylelint_reference_matches_the_top_level_contract(self) -> None:
         """상위는 JSON 도 실행된다고 하는데 하위가 안전하다고 하면 하위가 이긴다 — 명령 옆이니까."""
@@ -2328,7 +2426,7 @@ class UntrustedExecutionContractTest(unittest.TestCase):
         self.assertIn("CONFIG_CHAIN", reference, "체인을 재사용하지 않는다")
         self.assertIn("autoload_files.php", reference, "의존 패키지 목록을 읽지 않는다")
         self.assertRegex(
-            reference, r"executable config in chain",
+            reference, r"executable-config:",
             "`.php` includes 항목을 찾지 않는다",
         )
 
@@ -2359,7 +2457,7 @@ class UntrustedExecutionContractTest(unittest.TestCase):
         self.assertIn("autoload.files", reference)
         self.assertIn("skipped-untrusted-execution", reference)
         self.assertRegex(
-            reference, r"own or your team's branch this is the ordinary case",
+            reference, r"For your own or your team's branch it is inert",
             "기존 PHP 리뷰가 그대로라는 점이 명시되지 않았다",
         )
 
@@ -2372,7 +2470,17 @@ class UntrustedExecutionContractTest(unittest.TestCase):
             ).split()
         )
         self.assertIn(".cargo/config.toml", execution)
-        self.assertRegex(execution, r"build\.rustc-wrapper")
+        for route in ("rustc-wrapper", "rustc-workspace-wrapper", "[alias]", "runner"):
+            with self.subTest(route=route):
+                self.assertIn(route, execution, f"{route} 경로가 없다")
+        self.assertRegex(
+            execution, r"extensionless `\.cargo/config`",
+            "확장자 없는 config 도 읽힌다는 사실이 없다",
+        )
+        self.assertRegex(
+            execution, r"alias shadows it|shadows an external subcommand",
+            "alias 가 clippy 자체를 대체한다는 점이 없다",
+        )
         self.assertRegex(
             execution, r"does not settle the question",
             "build.rs 부재가 결론이 아니라는 점이 없다",

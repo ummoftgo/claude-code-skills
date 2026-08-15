@@ -162,8 +162,38 @@ if [ -n "$PHPSTAN_CONFIG" ]; then
 fi
 # No config at all is safe: PHPStan then uses sys_get_temp_dir()/phpstan, outside the repository.
 
+# Trust gate — decided BEFORE the analysis runs, using the chain collected above.
+# Set UNTRUSTED_DIFF=1 for a branch you would not execute (outside contributor, unfamiliar
+# dependency). On a trusted branch this whole block is inert and nothing changes.
+EXEC_RISK=""
+if [ "${UNTRUSTED_DIFF:-0}" = "1" ]; then
+  while IFS= read -r cfg; do
+    [ -n "$cfg" ] || continue
+    case "$cfg" in *.php) EXEC_RISK="$EXEC_RISK executable-config:$cfg" ;; esac
+    grep -qE '^[[:space:]]*(bootstrapFiles|rules|services):' "$cfg" 2>/dev/null &&
+      EXEC_RISK="$EXEC_RISK config-loads-code:$cfg"
+    # Older PHPStan (before 0.12.26) loaded files through these; a project pinning such a
+    # version still executes them, so check both spellings rather than the current one only.
+    grep -qE '^[[:space:]]*(autoload_files|autoload_directories):' "$cfg" 2>/dev/null &&
+      EXEC_RISK="$EXEC_RISK legacy-autoload:$cfg"
+  done <<< "$CONFIG_CHAIN"
+  # Composer runs every entry here, including dependencies' own `autoload.files`.
+  # No `head`: a truncated list reads as a short list, and the entry that matters may be last.
+  if [ -f vendor/composer/autoload_files.php ] &&
+     grep -qE "=> .*'" vendor/composer/autoload_files.php; then
+    EXEC_RISK="$EXEC_RISK composer-autoload-files"
+  fi
+  # Dependency-shipped extensions, auto-activated by phpstan/extension-installer.
+  if grep -rlE '"phpstan"' vendor/*/*/composer.json 2>/dev/null |
+     xargs -r grep -lE '"includes"' 2>/dev/null | grep -q .; then
+    EXEC_RISK="$EXEC_RISK phpstan-extension"
+  fi
+fi
+
 # PHPStan — run under the correct PHP binary, using the config resolved above
-if [ "${READ_ONLY:-0}" = "1" ] && [ -n "$CACHE_RISK" ]; then
+if [ -n "$EXEC_RISK" ]; then
+  echo "static analysis: skipped-untrusted-execution — analysis would run project code ($EXEC_RISK)"
+elif [ "${READ_ONLY:-0}" = "1" ] && [ -n "$CACHE_RISK" ]; then
   echo "static analysis: skipped-read-only — result cache would be written inside the repository ($CACHE_RISK)"
 elif [ -n "$PHPSTAN_CONFIG" ]; then
   $PHP_CMD $(command -v phpstan) analyse "$SRC_DIR" \
@@ -184,7 +214,7 @@ The gate and the analysis read **the same `PHPSTAN_CONFIG`**.
 ### Before analysing an untrusted diff
 
 Analysis itself is static parsing — `paths:` and `scanFiles:` do not run the files. These do,
-all measured on PHPStan 2.x with PHP 8.3:
+measured on PHPStan 2.1.42 with PHP 8.3 unless noted:
 
 - `bootstrapFiles:` in the **effective** config — including one declared in a file reached
   through `includes:`, which the root config alone never shows;
@@ -196,37 +226,18 @@ all measured on PHPStan 2.x with PHP 8.3:
 - a PHPStan extension shipped by a dependency, which `phpstan/extension-installer` activates
   through `extra.phpstan.includes` with **nothing in the root config** (documented; not
   reproduced here);
-- the invocation's own `-a` / `--autoload-file`, which loads a file the flag names. That flag is
-  yours, not the diff's — but it belongs in the closure.
+- on a project pinning **PHPStan before 0.12.26**, the old `autoload_files:` /
+  `autoload_directories:` parameters, which *loaded* the files they named. They were replaced by
+  `scanFiles:` / `scanDirectories:`, and the replacement is **not a rename**: the current
+  parameters only make symbols discoverable to the analyser, they do not execute anything. Read
+  the config against the version the project pins;
+- the invocation's own `-a` / `--autoload-file`. That flag is yours, not the diff's — but it
+  belongs in the closure.
 
-Parameter names moved between major versions (`autoload_files` / `autoload_directories` became
-`scanFiles` / `scanDirectories`), so read the config against **the PHPStan version the project
-pins**, not against a remembered spelling.
-
-This runs **after** the config chain above, so `CONFIG_CHAIN` is populated:
-
-```bash
-# Every file in the resolved chain, not just the three root names.
-while IFS= read -r cfg; do
-  [ -n "$cfg" ] || continue
-  rg -n '^\s*(bootstrapFiles|rules|services):' -A5 "$cfg" 2>/dev/null
-  case "$cfg" in *.php) echo "executable config in chain: $cfg" ;; esac
-done <<< "$CONFIG_CHAIN"
-
-# Composer: the aggregated list covers dependencies; the root manifest does not.
-# No `head` — a truncated list reads as a short list, and the entry that matters may be last.
-[ -f vendor/composer/autoload_files.php ] && rg -n "=> .*'" vendor/composer/autoload_files.php
-
-# Dependency-shipped PHPStan extensions, auto-activated by phpstan/extension-installer
-rg -n '"phpstan"' -A5 vendor/*/*/composer.json 2>/dev/null | rg -n 'includes' | head -20
-```
-
-For your own or your team's branch this is the ordinary case and needs no action — but a hook,
-extension, or dependency the diff **adds** is new code whoever wrote it. For a diff you would not
-run, resolve the list above first, or record static analysis as `skipped-untrusted-execution`
-per the rule in `SKILL.md`.
- Splitting them is how a check
-inspects one file while the run uses another and the repository-internal cache slips through.
+**The check has to run before the analysis, not after it.** The gate above is inside the same
+`if`/`elif` chain that launches PHPStan, so a risk found there prevents the run rather than
+reporting on one that already happened. For your own or your team's branch it is inert; a hook,
+extension, or dependency the diff **adds** is new code whoever wrote it.
 
 ---
 

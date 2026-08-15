@@ -99,10 +99,21 @@ compile **and execute** `build.rs` and proc macros — verified on cargo 1.91.0 
 that wrote to an absolute path outside the workspace during a `--locked` clippy run. Cargo runs a
 `build.rs` whenever the file exists, with or without a `build =` line in `Cargo.toml`.
 
-**And `build.rs` is not the only route.** `.cargo/config.toml` — a file the repository ships — can
-set `build.rustc` or `build.rustc-wrapper` to any executable, and cargo then calls it on every
-compilation, with no `build.rs` anywhere in the crate (reproduced on cargo 1.91.0). So "this crate
-has no build script" does not settle the question; read `.cargo/config.toml` too.
+**And `build.rs` is not the only route.** The repository's own cargo configuration can redirect
+the run before any of your crate's code compiles. Reproduced on cargo 1.91.0:
+
+- `[build] rustc` / `rustc-wrapper` / `rustc-workspace-wrapper` — cargo calls the named executable
+  on every compilation, with **no `build.rs` anywhere in the crate**;
+- `[alias] clippy = "run --bin something"` — **`cargo clippy` is an external subcommand, and an
+  alias shadows it.** The command you typed then builds and runs a binary from the repository
+  instead of linting. Cargo prints a `shadowing an external subcommand` warning and proceeds.
+- Both work from `.cargo/config.toml` **and** from the extensionless `.cargo/config`, which cargo
+  still reads (with a deprecation warning). Checking only the `.toml` name misses half of it.
+
+`[target.*] runner` and `linker` redirect execution the same way, and `include` inside a cargo
+config is recursive — resolve it before concluding.
+
+So "this crate has no build script" does not settle the question. Read the cargo config first.
 
 So there are two questions, not one. `CARGO_TARGET_DIR` and `--locked` answer *"does this write
 into the crate?"*. They do not answer *"is it safe to run this code?"* — see the untrusted-diff
@@ -110,9 +121,14 @@ rule in `SKILL.md`. For an untrusted branch with no sandbox, record clippy and c
 `skipped-untrusted-execution` rather than running them.
 
 ```bash
-# Read before running against a diff you would not run
-rg -n 'rustc|runner|linker' .cargo/config.toml 2>/dev/null
-rg -n '^\s*\[package\]' -A20 Cargo.toml | rg -n 'build\s*='
+# Read before running against a diff you would not run. Both config names, all redirect keys,
+# and the alias table — an alias on `clippy` or `check` replaces the command outright.
+for cfg in .cargo/config.toml .cargo/config; do
+  [ -f "$cfg" ] || continue
+  echo "--- $cfg"
+  rg -n 'rustc|rustc-wrapper|rustc-workspace-wrapper|runner|linker|^\[alias\]|^\s*include' "$cfg"
+done
+rg -n '^\s*build\s*=' Cargo.toml 2>/dev/null
 ```
 
 ```bash

@@ -43,10 +43,15 @@ Detect the active shell before using a snippet. On POSIX use `command -v`, `[ -f
 >
 > 0. **The repository replaces or wraps the tool itself** — this one sits above the others and
 >    applies no matter which tool you run. Both reproduced here:
->    `.cargo/config.toml` with `build.rustc` or `build.rustc-wrapper` makes cargo invoke an
->    executable the repository names, with **no `build.rs` anywhere**; and an `.npmrc` carrying
+>    cargo config (`.cargo/config.toml` **or** the extensionless `.cargo/config`, both read) can
+>    set `build.rustc` / `rustc-wrapper` / `rustc-workspace-wrapper`, a `[target.*] runner` or
+>    `linker`, **or an `[alias]` that shadows the subcommand itself** — `clippy` is an external
+>    subcommand, so `[alias] clippy = "run --bin x"` makes `cargo clippy` build and run a binary
+>    instead of linting, with no `build.rs` anywhere. And an `.npmrc` carrying
 >    `node-options=--require ./hook.js` injects that file into **every** npm-launched tool —
 >    ESLint, Stylelint, tsc alike — regardless of their own configs.
+>    The shape to look for is **anything that decides which executable actually runs**, not just
+>    what that executable then reads.
 >    Not every ecosystem has this: Go reads `GOFLAGS` only from the environment and the user's
 >    `GOENV`, never from a file in the repository, and a repository-level `sitecustomize.py` is
 >    not loaded by ruff or mypy (both verified). The question to ask is always **whether the diff
