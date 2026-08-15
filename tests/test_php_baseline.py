@@ -1219,6 +1219,57 @@ class PhpStanTrustGateTest(PhpStanReadOnlyGateTest):
         self.assertIn("legacy-autoload", output)
         self.assertNotIn(self.ANALYSIS_MARKER, output)
 
+    def test_inline_neon_notation_does_not_slip_past(self) -> None:
+        """`includes: [danger.php]` 는 유효한 NEON 이고 실제로 실행된다 — 줄 기반 검사는 못 잡는다."""
+        output = self.run_gate(
+            "includes: [danger.php]\nparameters:\n    level: 0\n    paths:\n        - src\n",
+            extra={"src/A.php": "<?php class A {}", "danger.php": "<?php return [];"},
+            env={"UNTRUSTED_DIFF": "1"},
+        )
+        self.assertIn(self.SKIP_MARKER, output, "inline sequence 표기를 놓쳤다")
+        self.assertNotIn(self.ANALYSIS_MARKER, output)
+
+    def test_json_notation_does_not_slip_past(self) -> None:
+        """NEON 은 JSON 상위집합이다 — 전체를 JSON 으로 쓴 설정도 유효하고 실행된다.
+
+        `.php` 참조 검사만으로도 이 표본은 걸린다. 그래서 **어떤 검사가 잡았는지**까지
+        고정한다 — 그러지 않으면 `bootstrapFiles` 검사를 줄머리 앵커로 되돌려도 통과한다.
+        """
+        output = self.run_gate(
+            '{"parameters":{"level":0,"paths":["src"],"bootstrapFiles":["boot.php"]}}\n',
+            extra={"src/A.php": "<?php class A {}", "boot.php": "<?php"},
+            env={"UNTRUSTED_DIFF": "1"},
+        )
+        self.assertIn(self.SKIP_MARKER, output, "JSON 표기를 놓쳤다")
+        self.assertNotIn(self.ANALYSIS_MARKER, output)
+        self.assertIn(
+            "config-loads-code", output,
+            "`bootstrapFiles` 자체를 잡지 못하고 `.php` 참조로만 걸렸다",
+        )
+
+    def test_each_gate_check_stands_on_its_own(self) -> None:
+        """검사들이 서로를 가리면 하나가 약해져도 드러나지 않는다.
+
+        `.php` 확장자가 없는 이름으로 표본을 만들어, `bootstrapFiles` 검사 단독으로
+        걸리는지 본다.
+        """
+        output = self.run_gate(
+            "parameters: {level: 0, paths: [src], bootstrapFiles: [boot]}\n",
+            extra={"src/A.php": "<?php class A {}", "boot": "<?php"},
+            env={"UNTRUSTED_DIFF": "1"},
+        )
+        self.assertIn("config-loads-code", output, "`bootstrapFiles` 단독 검사가 동작하지 않는다")
+        self.assertNotIn(self.ANALYSIS_MARKER, output)
+
+    def test_inline_map_notation_does_not_slip_past(self) -> None:
+        output = self.run_gate(
+            "parameters: {level: 0, paths: [src], bootstrapFiles: [boot.php]}\n",
+            extra={"src/A.php": "<?php class A {}", "boot.php": "<?php"},
+            env={"UNTRUSTED_DIFF": "1"},
+        )
+        self.assertIn(self.SKIP_MARKER, output, "inline map 표기를 놓쳤다")
+        self.assertNotIn(self.ANALYSIS_MARKER, output)
+
     def test_an_untrusted_diff_with_nothing_executable_still_runs(self) -> None:
         """모든 것을 막으면 아무도 안 쓴다 — 위험이 없으면 신뢰하지 않는 diff 도 분석한다."""
         output = self.run_gate(
@@ -2470,9 +2521,19 @@ class UntrustedExecutionContractTest(unittest.TestCase):
             ).split()
         )
         self.assertIn(".cargo/config.toml", execution)
-        for route in ("rustc-wrapper", "rustc-workspace-wrapper", "[alias]", "runner"):
+        for route in ("rustc-wrapper", "rustc-workspace-wrapper", "[alias]",
+                      "credential-provider", "linker"):
             with self.subTest(route=route):
                 self.assertIn(route, execution, f"{route} 경로가 없다")
+        # alias 는 외부 서브커맨드만 가린다 — `check` 까지 위험하다고 쓰면 틀린 지시가 된다.
+        self.assertRegex(
+            execution, r"alias on `check`, `build`, or any other\s+built-in is ignored",
+            "내장 명령은 alias 로 못 가린다는 사실이 없다",
+        )
+        self.assertRegex(
+            execution, r"`\[target\.\*\] runner` is narrower",
+            "runner 의 적용 범위(run/test/bench)가 과장돼 있다",
+        )
         self.assertRegex(
             execution, r"extensionless `\.cargo/config`",
             "확장자 없는 config 도 읽힌다는 사실이 없다",

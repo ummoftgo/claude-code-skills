@@ -107,11 +107,18 @@ the run before any of your crate's code compiles. Reproduced on cargo 1.91.0:
 - `[alias] clippy = "run --bin something"` — **`cargo clippy` is an external subcommand, and an
   alias shadows it.** The command you typed then builds and runs a binary from the repository
   instead of linting. Cargo prints a `shadowing an external subcommand` warning and proceeds.
+  This works only for **external** subcommands: an alias on `check`, `build`, or any other
+  built-in is ignored, and cargo runs the built-in (verified both ways). So `clippy` is the
+  exposed one of the two commands in §4.
+- `[registry] credential-provider` and `[credential-alias]` name executables cargo runs while
+  authenticating to a registry — reachable when resolving a private dependency.
 - Both work from `.cargo/config.toml` **and** from the extensionless `.cargo/config`, which cargo
   still reads (with a deprecation warning). Checking only the `.toml` name misses half of it.
 
-`[target.*] runner` and `linker` redirect execution the same way, and `include` inside a cargo
-config is recursive — resolve it before concluding.
+`linker` redirects the toolchain the same way, and `include` inside a cargo config is recursive —
+resolve it before concluding. `[target.*] runner` is narrower than the rest: it applies to
+`cargo run`, `test`, and `bench`, so it does not replace `clippy` or `check` — note it when it is
+present, but it is not why those two commands are risky.
 
 So "this crate has no build script" does not settle the question. Read the cargo config first.
 
@@ -126,7 +133,7 @@ rule in `SKILL.md`. For an untrusted branch with no sandbox, record clippy and c
 for cfg in .cargo/config.toml .cargo/config; do
   [ -f "$cfg" ] || continue
   echo "--- $cfg"
-  rg -n 'rustc|rustc-wrapper|rustc-workspace-wrapper|runner|linker|^\[alias\]|^\s*include' "$cfg"
+  rg -n 'rustc|rustc-wrapper|rustc-workspace-wrapper|runner|linker|credential-provider|credential-alias|^\[alias\]|^\s*include' "$cfg"
 done
 rg -n '^\s*build\s*=' Cargo.toml 2>/dev/null
 ```

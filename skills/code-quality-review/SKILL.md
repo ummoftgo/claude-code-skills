@@ -44,10 +44,11 @@ Detect the active shell before using a snippet. On POSIX use `command -v`, `[ -f
 > 0. **The repository replaces or wraps the tool itself** — this one sits above the others and
 >    applies no matter which tool you run. Both reproduced here:
 >    cargo config (`.cargo/config.toml` **or** the extensionless `.cargo/config`, both read) can
->    set `build.rustc` / `rustc-wrapper` / `rustc-workspace-wrapper`, a `[target.*] runner` or
->    `linker`, **or an `[alias]` that shadows the subcommand itself** — `clippy` is an external
->    subcommand, so `[alias] clippy = "run --bin x"` makes `cargo clippy` build and run a binary
->    instead of linting, with no `build.rs` anywhere. And an `.npmrc` carrying
+>    set `build.rustc` / `rustc-wrapper` / `rustc-workspace-wrapper`, a `linker`, a
+>    `credential-provider`, **or an `[alias]` that shadows the subcommand itself** — `clippy` is
+>    an *external* subcommand, so `[alias] clippy = "run --bin x"` makes `cargo clippy` build and
+>    run a binary instead of linting, with no `build.rs` anywhere. (An alias cannot shadow a
+>    built-in like `check`; both directions verified.) And an `.npmrc` carrying
 >    `node-options=--require ./hook.js` injects that file into **every** npm-launched tool —
 >    ESLint, Stylelint, tsc alike — regardless of their own configs.
 >    The shape to look for is **anything that decides which executable actually runs**, not just

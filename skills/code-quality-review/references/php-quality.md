@@ -166,17 +166,36 @@ fi
 # Set UNTRUSTED_DIFF=1 for a branch you would not execute (outside contributor, unfamiliar
 # dependency). On a trusted branch this whole block is inert and nothing changes.
 EXEC_RISK=""
+# NEON accepts inline sequences (`includes: [danger.php]`), inline maps, and whole-JSON
+# documents — all three verified to load and run the file they name. So this gate must not
+# depend on line structure the way `collect_config` above does: a line-anchored grep passes
+# every one of them. Scan the file as text and accept the false positives; this only runs on a
+# diff you already decided not to trust.
+scan_for_exec() {
+  local f="$1"
+  if [ ! -r "$f" ]; then EXEC_RISK="$EXEC_RISK unreadable:$f"; return; fi
+  grep -qE 'bootstrapFiles' "$f" && EXEC_RISK="$EXEC_RISK config-loads-code:$f"
+  # Pre-0.12.26 spellings. Kept separate so the report says which era the project is in.
+  grep -qE '(autoload_files|autoload_directories)' "$f" &&
+    EXEC_RISK="$EXEC_RISK legacy-autoload:$f"
+  # `rules`/`services` name classes PHPStan instantiates; `.php` anywhere in a config is either
+  # a dynamic include or a file some parameter will load.
+  grep -qE '(^|[^a-zA-Z])(rules|services)[[:space:]]*[:=]' "$f" &&
+    EXEC_RISK="$EXEC_RISK config-defines-extension:$f"
+  grep -qE '\.php([^a-zA-Z0-9]|$)' "$f" && EXEC_RISK="$EXEC_RISK php-reference:$f"
+}
+
 if [ "${UNTRUSTED_DIFF:-0}" = "1" ]; then
+  # The chain the cache gate built, plus the root candidates themselves — `collect_config`
+  # follows only block-style `includes:`, so a chain that looks complete may not be.
   while IFS= read -r cfg; do
     [ -n "$cfg" ] || continue
     case "$cfg" in *.php) EXEC_RISK="$EXEC_RISK executable-config:$cfg" ;; esac
-    grep -qE '^[[:space:]]*(bootstrapFiles|rules|services):' "$cfg" 2>/dev/null &&
-      EXEC_RISK="$EXEC_RISK config-loads-code:$cfg"
-    # Older PHPStan (before 0.12.26) loaded files through these; a project pinning such a
-    # version still executes them, so check both spellings rather than the current one only.
-    grep -qE '^[[:space:]]*(autoload_files|autoload_directories):' "$cfg" 2>/dev/null &&
-      EXEC_RISK="$EXEC_RISK legacy-autoload:$cfg"
+    scan_for_exec "$cfg"
   done <<< "$CONFIG_CHAIN"
+  for candidate in phpstan.neon phpstan.neon.dist phpstan.dist.neon; do
+    [ -f "$candidate" ] && scan_for_exec "$candidate"
+  done
   # Composer runs every entry here, including dependencies' own `autoload.files`.
   # No `head`: a truncated list reads as a short list, and the entry that matters may be last.
   if [ -f vendor/composer/autoload_files.php ] &&
@@ -226,6 +245,10 @@ measured on PHPStan 2.1.42 with PHP 8.3 unless noted:
 - a PHPStan extension shipped by a dependency, which `phpstan/extension-installer` activates
   through `extra.phpstan.includes` with **nothing in the root config** (documented; not
   reproduced here);
+- **any of the above written in NEON's inline or JSON form.** `includes: [danger.php]`,
+  `parameters: {bootstrapFiles: [x.php]}`, and a whole-JSON config are all valid and all
+  execute (verified). A line-anchored search finds none of them, which is why the gate below
+  scans the config as text rather than by line structure;
 - on a project pinning **PHPStan before 0.12.26**, the old `autoload_files:` /
   `autoload_directories:` parameters, which *loaded* the files they named. They were replaced by
   `scanFiles:` / `scanDirectories:`, and the replacement is **not a rename**: the current
