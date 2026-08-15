@@ -36,10 +36,17 @@ generated output belongs to the generator.
 
 ## 1. Version Resolution
 
-1. `rust-toolchain.toml` → `channel` — what the project pins, and the strongest signal
-2. `Cargo.toml` → `rust-version` (MSRV) — the floor consumers may rely on
-3. `Cargo.toml` → `edition` (2015 / 2018 / 2021 / 2024) — changes syntax and idiom
-4. `rustc --version` — the fallback
+**Collect all of these; they answer different questions.**
+
+| Question | Source |
+|---|---|
+| What is the **floor**? | `Cargo.toml` → `rust-version` (MSRV) — what consumers may rely on |
+| What actually **runs**? | `rust-toolchain.toml` → `channel`, else `rustc --version` |
+| What is **tested**? | the CI matrix — an MSRV job in particular |
+| Which **dialect**? | `Cargo.toml` → `edition` (2015 / 2018 / 2021 / 2024) |
+
+An MSRV with no CI job pinning it is unverified: the code compiles on the developer's stable
+toolchain and breaks for the consumer who took the declared floor at its word. Say so once.
 
 The MSRV decides whether a suggestion is usable: `let ... else` needs 1.65, `impl Trait` in
 associated position needs 1.75, and edition 2024 changes closure capture and `unsafe` attribute
@@ -226,6 +233,15 @@ signature.
 
 Severity follows impact. Clippy's own group names are a useful prior — `correctness` really does
 mean "this is probably a bug" — but re-rate against reachability before reporting.
+
+**An application and a published library carry different impact.** The same defect is rated by
+who pays for it: in an application the blast radius ends at this deployment, while in a library
+it reaches every consumer and cannot be rolled back by the author alone. Raise a severity one
+step when the finding is in a **published library's public API or its documented behaviour** —
+a panic reachable from a public function, an API shape that forces every caller to allocate, a
+contract the docs promise and the code no longer honours. Lower nothing on that basis: an
+application defect is not less real, it is only narrower.
+
 
 **Run states** — `passed`, `findings`, `skipped-read-only`, `skipped-not-installed`,
 `unavailable`, `timeout`, `execution-error`, as defined in `SKILL.md`. A crate with no lockfile

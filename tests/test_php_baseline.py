@@ -2042,6 +2042,36 @@ class RustReferenceSemanticsTest(unittest.TestCase):
                 self.assertIn(surface, header)
 
 
+class SectionContractDepthTest(unittest.TestCase):
+    """§0–6 계약이 **구조만** 요구하면 절이 비어도 통과한다. 내용 계약도 함께 고정한다."""
+
+    NEW_REFERENCES = ("python-quality", "go-quality", "rust-quality")
+
+    def test_version_resolution_collects_three_axes_not_one_answer(self) -> None:
+        """floor·실행·테스트는 서로 다른 질문이다. 첫 답에서 멈추면 셋의 불일치를 못 본다."""
+        for name in self.NEW_REFERENCES:
+            section = between(
+                quality_reference(name), "## 1. Version Resolution", "## 2. Tool Roles",
+                label=f"{name} §1",
+            )
+            flat = " ".join(section.split())
+            with self.subTest(reference=name):
+                self.assertRegex(flat, r"Collect all", "첫 답에서 멈추는 방식이 남아 있다")
+                for question in ("floor", "runs", "tested"):
+                    self.assertIn(f"**{question}**", flat, f"{question} 축이 없다")
+
+    def test_severity_distinguishes_an_application_from_a_published_library(self) -> None:
+        """같은 결함도 소비자가 있으면 되돌릴 수 없다 — 영향 기반 심각도의 핵심 축이다."""
+        for name in self.NEW_REFERENCES:
+            section = " ".join(
+                between(quality_reference(name), "## 6. Severity Mapping", "**Run states**",
+                        label=f"{name} §6").split()
+            )
+            with self.subTest(reference=name):
+                self.assertRegex(section, r"published library")
+                self.assertRegex(section, r"Raise a severity one step")
+
+
 class ReadOnlyBoundaryContractTest(unittest.TestCase):
     """읽기 전용 계약의 **경계**를 하나로 고정한다.
 

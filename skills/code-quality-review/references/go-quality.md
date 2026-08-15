@@ -39,10 +39,17 @@ files with that exact line by convention — use it rather than guessing from th
 
 ## 1. Version Resolution
 
-1. `go.mod` → the `go` directive: the language version the module targets
-2. `go.mod` → a `toolchain` line, if present: the toolchain the module asks for
-3. `.go-version`, `.tool-versions`, or the CI workflow: what actually builds it
-4. `go version`: the fallback
+**Collect all three; they answer different questions.**
+
+| Question | Source |
+|---|---|
+| What is the **floor**? | `go.mod` → the `go` directive |
+| What actually **runs**? | `go.mod` → `toolchain`, `.go-version`, `.tool-versions`, or `go version` |
+| What is **tested**? | the CI workflow's Go version matrix |
+
+A gap matters here more than in most languages, because §5's loop-variable rule turns on and off
+at 1.22: a module declaring `go 1.21` that CI builds with 1.23 still compiles under the old
+semantics, so the finding is real even though the toolchain is new.
 
 The `go` directive changes what is legal. Generics need 1.18; `min`/`max`/`clear` builtins need
 1.21; range-over-function iterators need 1.23; and **loop variable semantics changed in 1.22** —
@@ -266,6 +273,15 @@ a rename.
 
 Severity follows impact. `go vet` and staticcheck do not rank by cost, so re-rate what they
 report rather than passing their labels through.
+
+**An application and a published library carry different impact.** The same defect is rated by
+who pays for it: in an application the blast radius ends at this deployment, while in a library
+it reaches every consumer and cannot be rolled back by the author alone. Raise a severity one
+step when the finding is in a **published library's public API or its documented behaviour** —
+a panic reachable from a public function, an API shape that forces every caller to allocate, a
+contract the docs promise and the code no longer honours. Lower nothing on that basis: an
+application defect is not less real, it is only narrower.
+
 
 **Run states** — `passed`, `findings`, `skipped-read-only`, `skipped-not-installed`,
 `unavailable`, `timeout`, `execution-error`, as defined in `SKILL.md`. A VCS-stamping failure is

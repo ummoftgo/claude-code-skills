@@ -44,12 +44,17 @@ Findings in vendored or generated code are noise — report the generator instea
 
 ## 1. Version Resolution
 
-Read, in this order, and stop at the first that answers:
+**Collect all three; they answer different questions and the first one found is not the answer.**
 
-1. `pyproject.toml` → `[project] requires-python` — the declared floor
-2. `.python-version` (pyenv, uv) — what the developer actually runs
-3. `tox.ini` / `noxfile.py` / CI workflow matrix — what the project tests against
-4. `python3 --version` in the environment — the fallback, and the least authoritative
+| Question | Source | Why it is separate |
+|---|---|---|
+| What is the **floor**? | `pyproject.toml` → `[project] requires-python` | what consumers may rely on; a suggestion below it breaks them |
+| What actually **runs**? | `.python-version` (pyenv, uv), the active interpreter | where the findings you reproduce come from |
+| What is **tested**? | `tox.ini`, `noxfile.py`, CI workflow matrix | a floor nothing tests is a claim, not a fact |
+
+A gap between them is itself a finding: a declared floor of 3.9 that no CI job exercises means
+the floor is unverified, and code using 3.11 syntax would still pass every check the project runs.
+Report the three values and the gap; do not collapse them into one number.
 
 **The version changes which findings are real.** `match` statements need 3.10; `X | Y` in
 annotations at runtime needs 3.10; `tomllib` needs 3.11; `@override` needs 3.12. Recommending
@@ -358,6 +363,15 @@ line by line.
 
 Severity follows impact, not the tool's own label — a ruff `E` and a ruff `F` say nothing about
 how much the defect costs. State the reasoning for anything above Medium.
+
+**An application and a published library carry different impact.** The same defect is rated by
+who pays for it: in an application the blast radius ends at this deployment, while in a library
+it reaches every consumer and cannot be rolled back by the author alone. Raise a severity one
+step when the finding is in a **published library's public API or its documented behaviour** —
+a panic reachable from a public function, an API shape that forces every caller to allocate, a
+contract the docs promise and the code no longer honours. Lower nothing on that basis: an
+application defect is not less real, it is only narrower.
+
 
 **Run states** — every invocation above resolves to exactly one of `passed`, `findings`,
 `skipped-read-only`, `skipped-not-installed`, `unavailable`, `timeout`, `execution-error`, as
