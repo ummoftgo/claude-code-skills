@@ -149,8 +149,15 @@ if [ "${UNTRUSTED_DIFF:-0}" = "1" ]; then
      grep -qE "=> .*'" vendor/composer/autoload_files.php; then
     EXEC_RISK="$EXEC_RISK composer-autoload-files"
   fi
-  if grep -rlE '"phpstan"' vendor/*/*/composer.json 2>/dev/null |
-     xargs -r grep -lE '"includes"' 2>/dev/null | grep -q .; then
+  # `extra.phpstan.includes` is what `phpstan/extension-installer` activates. Matching a bare
+  # `"phpstan"` would flag every package that merely depends on PHPStan — most projects.
+  if [ -d vendor ] && $PHP_CMD -r '
+      foreach (glob("vendor/*/*/composer.json") as $f) {
+        $j = json_decode(@file_get_contents($f), true);
+        if (!empty($j["extra"]["phpstan"]["includes"])) { exit(0); }
+      }
+      exit(1);
+    ' 2>/dev/null; then
     EXEC_RISK="$EXEC_RISK phpstan-extension"
   fi
 fi
@@ -188,18 +195,19 @@ if [ "${READ_ONLY:-0}" = "1" ] && [ -z "$EXEC_RISK" ]; then
   if [ -n "$PHPSTAN_TMP" ]; then
     PHPSTAN_OVERRIDE="$PHPSTAN_TMP/phpstan-review.neon"
     {
+      # **Every path here is quoted and escaped the same way.** Unquoted, NEON reads ` #` as a
+      # comment and `,` as a separator, so a project under `/srv/has #hash/` or `/srv/a,b/`
+      # fails to parse. Quoted, an apostrophe in the path ends the string early — `O'Brien`
+      # broke it until this escape went in. Single quotes with `''` doubling, not double
+      # quotes: NEON treats `\` as an escape inside double quotes, which would break Windows
+      # paths. All three measured on PHPStan 2.1.42.
+      neon_quote() { printf "'%s'" "$(printf '%s' "$1" | sed "s/'/''/g")"; }
+
       if [ -n "$PHPSTAN_CONFIG" ]; then
-        # **Quote the path.** Unquoted, NEON reads ` #` as a comment and `,` as a separator, so
-        # a project under `/srv/has #hash/` or `/srv/a,b/` fails to parse (measured). Single
-        # quotes, not double: NEON treats `\` as an escape inside double quotes, which would
-        # break Windows paths.
-        printf "includes:\n    - '%s'\n" "$(realpath "$PHPSTAN_CONFIG")"
+        printf 'includes:\n    - %s\n' "$(neon_quote "$(realpath "$PHPSTAN_CONFIG")")"
       fi
-      # Quote these for the same reason as the include path — `TMPDIR` can sit under a
-      # directory with a `,` or a ` #` in its name, and then the cache scalar itself is what
-      # breaks NEON (measured: an unquoted `,` gives `Unexpected ','` and no analysis at all).
-      printf "parameters:\n    tmpDir: '%s/cache'\n" "$PHPSTAN_TMP"
-      printf "    resultCachePath: '%s/cache/resultCache.php'\n" "$PHPSTAN_TMP"
+      printf 'parameters:\n    tmpDir: %s\n' "$(neon_quote "$PHPSTAN_TMP/cache")"
+      printf '    resultCachePath: %s\n' "$(neon_quote "$PHPSTAN_TMP/cache/resultCache.php")"
       [ -n "$PHPSTAN_CONFIG" ] || printf '    level: 5\n'
     } > "$PHPSTAN_OVERRIDE"
   fi
@@ -237,9 +245,9 @@ The gate and the analysis read **the same `PHPSTAN_CONFIG`**.
 
 `SKILL.md` says a Windows-native install must not require WSL or Git Bash, so the Bash block
 above cannot be the only form — without this, a PowerShell review runs PHPStan with no cache
-isolation and no trust gate at all. The logic is identical: discover the config among the same
-six names, stop on an untrusted diff that has one, and otherwise redirect both cache keys into
-a temp directory outside the workspace.
+isolation and no trust gate at all. The cache isolation is the same: discover the config among the
+same six names and redirect both cache keys into a temp directory outside the workspace. The
+trust gate is deliberately **stricter** here — see the reproduction note below.
 
 **Reproduction status — read this before relying on it.** The Bash form was measured
 end-to-end: every cache spelling, the trust gate, and the analysis actually running. This form
@@ -259,6 +267,14 @@ Until that check happens, treat Windows PHPStan as **provisional**: safe to run 
 branch, not to be relied on as the untrusted-diff barrier.
 
 ```powershell
+# Every path written into the generated NEON goes through this. Single quotes so `\` stays
+# literal (Windows paths), forward slashes because PHP accepts them and they sidestep the
+# escape question entirely, and `''` doubling because an apostrophe would otherwise end the
+# string early — `O'Brien` in a path broke the Bash form until the same escape went in.
+function ConvertTo-NeonPath($p) {
+    "'" + $p.Replace('\', '/').Replace("'", "''") + "'"
+}
+
 $PhpstanConfig = ''
 if ($env:PHPSTAN_EXPLICIT_CONFIG) {
     $PhpstanConfig = $env:PHPSTAN_EXPLICIT_CONFIG
@@ -282,8 +298,13 @@ if ($env:UNTRUSTED_DIFF -eq '1') {
         $ExecRisk += 'composer-autoload-files'
     }
     # A dependency-shipped PHPStan extension activates with nothing in the root config.
+    # Match `extra.phpstan.includes`, not a bare `"phpstan"` — the plain string appears in
+    # every package that merely *depends* on PHPStan, which would flag most projects.
     $hit = Get-ChildItem -Path 'vendor/*/*/composer.json' -ErrorAction SilentlyContinue |
-        Select-String -Pattern '"phpstan"' -SimpleMatch -List
+        Where-Object {
+            $j = Get-Content -LiteralPath $_.FullName -Raw | ConvertFrom-Json
+            $j.extra -and $j.extra.phpstan -and $j.extra.phpstan.includes
+        }
     if ($hit) { $ExecRisk += 'phpstan-extension' }
 }
 
@@ -299,30 +320,26 @@ if ($ExecRisk) {
         $scratch = Join-Path 'C:\Windows\Temp' ("phpstan-review-" + [guid]::NewGuid())
     }
     New-Item -ItemType Directory -Path $scratch -Force | Out-Null
-    $override = Join-Path $scratch 'phpstan-review.neon'
-    $lines = @()
-    if ($PhpstanConfig) {
-        $full = [System.IO.Path]::GetFullPath((Resolve-Path -LiteralPath $PhpstanConfig).Path)
-        # NEON reads `\` as an escape inside quoted strings; forward slashes avoid the question
-        # entirely and PHP accepts them on Windows.
-        $lines += 'includes:'
-        # Single-quoted for the same reason as the Bash form: an unquoted ` #` or `,` in
-        # the path breaks NEON parsing, and single quotes keep `\` literal.
-        $lines += "    - '" + $full.Replace('\', '/') + "'"
-    }
-    $cache = (Join-Path $scratch 'cache').Replace('\', '/')
-    $lines += 'parameters:'
-    # Quoted like the include path: `$env:TEMP` can sit under a directory whose name has
-    # a `,` or a ` #`, and then the cache value itself is what breaks NEON.
-    $lines += "    tmpDir: '" + $cache + "'"
-    $lines += "    resultCachePath: '" + $cache + "/resultCache.php'"
-    if (-not $PhpstanConfig) { $lines += '    level: 5' }
-    Set-Content -LiteralPath $override -Value $lines -Encoding UTF8
-
     try {
+        $override = Join-Path $scratch 'phpstan-review.neon'
+        $lines = @()
+        if ($PhpstanConfig) {
+            $full = [System.IO.Path]::GetFullPath((Resolve-Path -LiteralPath $PhpstanConfig).Path)
+            $lines += 'includes:'
+            $lines += '    - ' + (ConvertTo-NeonPath $full)
+        }
+        $cache = Join-Path $scratch 'cache'
+        $lines += 'parameters:'
+        $lines += '    tmpDir: ' + (ConvertTo-NeonPath $cache)
+        $lines += '    resultCachePath: ' + (ConvertTo-NeonPath (Join-Path $cache 'resultCache.php'))
+        if (-not $PhpstanConfig) { $lines += '    level: 5' }
+        Set-Content -LiteralPath $override -Value $lines -Encoding UTF8
+
         & $PhpCmd (Get-Command phpstan).Source analyse $SrcDir `
             --configuration="$override" --no-progress --error-format=raw
     } finally {
+        # The config we generate lives in the scratch directory too, so creating it inside
+        # the try means a failure between the two never leaves it behind.
         Remove-Item -LiteralPath $scratch -Recurse -Force -ErrorAction SilentlyContinue
     }
 }

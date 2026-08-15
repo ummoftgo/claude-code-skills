@@ -796,12 +796,12 @@ class PhpToolchainBaseline(unittest.TestCase):
                 self.assertIn(setting, reference)
         commands = code_blocks(reference)
         self.assertRegex(
-            commands, r"tmpDir: '%s/cache'", "override 가 tmpDir 을 인용해 덮지 않는다",
+            commands, r"tmpDir: %s\\n' \"\$\(neon_quote",
+            "override 가 tmpDir 을 인용 헬퍼로 덮지 않는다",
         )
         self.assertRegex(
-            commands,
-            r"resultCachePath: '%s/cache",
-            "resultCachePath 는 tmpDir 과 독립이라 따로, 인용해서 덮어야 한다",
+            commands, r"resultCachePath: %s\\n' \"\$\(neon_quote",
+            "resultCachePath 는 tmpDir 과 독립이라 따로, 같은 헬퍼로 덮어야 한다",
         )
         # 우선순위대로 고른다 — `ls | head -1` 은 사전순이라 phpstan.dist.neon 을 먼저 잡는다.
         self.assertNotRegex(
@@ -1237,6 +1237,49 @@ class PhpStanReadOnlyGateTest(unittest.TestCase):
                     ]
                     self.assertEqual(leftover, [], f"{name}: 저장소에 파일이 생겼다")
 
+    def test_a_cache_path_with_neon_metacharacters_still_analyses(self) -> None:
+        """캐시 경로도 프로젝트 경로와 같은 인용·이스케이프를 거쳐야 한다.
+
+        인용을 넣자 이번에는 아포스트로피가 문자열을 일찍 끝내 분석이 죽었다 —
+        `O'Brien` 이 그 반례다. `,`·` #`·`'` 세 가지를 `TMPDIR` 로 실제로 넣어 본다.
+        """
+        for name in ("O'Brien", "has,comma", "has #hash"):
+            with self.subTest(tmpdir=name):
+                with tempfile.TemporaryDirectory() as base:
+                    tmp = Path(base, name)
+                    tmp.mkdir()
+                    work = Path(base, "proj")
+                    (work / "src").mkdir(parents=True)
+                    (work / "src" / "A.php").write_text(
+                        "<?php class A { public function f() { return new NoSuchClassHere(); } }"
+                    )
+                    (work / "phpstan.neon").write_text(
+                        "parameters:\n    level: 0\n    paths:\n        - src\n"
+                    )
+                    (work / "gate.sh").write_text(
+                        self.gate_script().replace(
+                            f"echo {self.ANALYSIS_MARKER} #",
+                            "$PHP_CMD $(command -v phpstan) analyse",
+                        ),
+                        encoding="utf-8",
+                    )
+                    done = subprocess.run(
+                        ["bash", "gate.sh"], cwd=str(work), capture_output=True, text=True,
+                        env={**os.environ, "READ_ONLY": "1", "TMPDIR": str(tmp)},
+                        timeout=300,
+                    )
+                    output = done.stdout + done.stderr
+                    self.assertIn(
+                        "NoSuchClassHere", output,
+                        f"TMPDIR={name}: 분석이 끝나지 않았다 — 캐시 경로 인용/이스케이프 문제:"
+                        f"\n{output[:400]}",
+                    )
+                    leftover = [
+                        f.name for f in work.rglob("*")
+                        if f.is_file() and f.name not in {"gate.sh", "phpstan.neon", "A.php"}
+                    ]
+                    self.assertEqual(leftover, [], f"TMPDIR={name}: 저장소에 파일이 생겼다")
+
     def test_the_analysis_still_runs(self) -> None:
         """전부 막으면 계약은 지켜지지만 리뷰가 없다 — 분석은 돌아야 한다."""
         _, output, analysed = self.repo_unchanged(
@@ -1280,6 +1323,11 @@ class PhpStanReadOnlyGateTest(unittest.TestCase):
             "검증되지 않은 게이트가 신뢰하지 않는 diff 를 판정하려 든다",
         )
         self.assertIn("finally", block, "임시 디렉터리를 정리하지 않는다")
+        self.assertIn("ConvertTo-NeonPath", block, "경로를 공통 인용 헬퍼로 쓰지 않는다")
+        self.assertRegex(
+            block, r"Replace\(\"'\", \"''\"\)",
+            "아포스트로피를 이스케이프하지 않는다 — `O'Brien` 경로에서 깨진다",
+        )
         self.assertIn("tmpDir: ", block, "캐시를 옮기지 않는다")
         self.assertIn("resultCachePath: ", block, "resultCachePath 를 옮기지 않는다")
         self.assertRegex(
@@ -1341,6 +1389,100 @@ class PhpStanReadOnlyGateTest(unittest.TestCase):
             extra={".phpstan.neon": "parameters:\n    level: 0\n    paths:\n        - src\n    tmpDir: .cache\n"},
         )
         self.assertEqual(written, [], "점 접두 설정을 놓쳐 저장소에 썼다")
+
+
+class PhpStanTrustGateTest(PhpStanReadOnlyGateTest):
+    """신뢰 게이트(`UNTRUSTED_DIFF=1`)를 **실행해서** 검증한다.
+
+    이 클래스는 한 번 통째로 사라진 적이 있다 — 캐시 테스트를 격리 계약으로 갈아엎으면서
+    같은 구간에 있던 실행 테스트까지 교체돼 버렸고, 문자열 검사만 남았다. 게이트가
+    실제로 분석을 막는지는 돌려 봐야 안다.
+    """
+
+    SKIP_MARKER = "skipped-untrusted-execution"
+
+    def run_untrusted(self, config: str | None, extra: dict | None = None) -> str:
+        with tempfile.TemporaryDirectory() as base:
+            work = Path(base)
+            (work / "src").mkdir()
+            (work / "src" / "A.php").write_text("<?php class A {}")
+            if config is not None:
+                (work / "phpstan.neon").write_text(config)
+            for name, body in (extra or {}).items():
+                path = work / name
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(body)
+            (work / "gate.sh").write_text(self.gate_script(), encoding="utf-8")
+            done = subprocess.run(
+                ["bash", "gate.sh"], cwd=str(work), capture_output=True, text=True,
+                env={**os.environ, "READ_ONLY": "1", "UNTRUSTED_DIFF": "1"}, timeout=300,
+            )
+            return done.stdout + done.stderr
+
+    def test_a_config_at_all_stops_the_run(self) -> None:
+        """텍스트로 무해함을 증명할 수 없으므로 설정이 있으면 멈춘다."""
+        output = self.run_untrusted(
+            "parameters:\n    level: 0\n    paths:\n        - src\n"
+        )
+        self.assertIn(self.SKIP_MARKER, output, "설정이 있는데 분석이 실행됐다")
+        self.assertIn("config-present", output, "차단 사유가 보고되지 않았다")
+        self.assertNotIn(self.ANALYSIS_MARKER, output)
+
+    def test_a_project_without_any_config_still_analyses(self) -> None:
+        """전부 막으면 아무도 안 쓴다 — 설정이 없으면 설정 기반 실행 경로도 없다."""
+        output = self.run_untrusted(None)
+        self.assertIn(self.ANALYSIS_MARKER, output, "설정이 없는데도 막았다")
+        self.assertNotIn(self.SKIP_MARKER, output)
+
+    def test_a_dot_prefixed_config_stops_the_run_too(self) -> None:
+        """탐지 목록에서 빠지면 게이트도 캐시 격리도 함께 우회된다."""
+        output = self.run_untrusted(
+            None,
+            extra={".phpstan.neon": "parameters:\n    level: 0\n"},
+        )
+        self.assertIn(self.SKIP_MARKER, output, "점 접두 설정을 놓쳤다")
+        self.assertNotIn(self.ANALYSIS_MARKER, output)
+
+    def test_composer_autoload_files_stops_the_run_without_any_config(self) -> None:
+        """설정이 없어도 오토로더가 코드를 실행한다 — 설정만 보면 놓친다."""
+        output = self.run_untrusted(
+            None,
+            extra={
+                "vendor/composer/autoload_files.php":
+                    "<?php return array('abc' => __DIR__ . '/../probe/side.php');\n",
+            },
+        )
+        self.assertIn("composer-autoload-files", output, "오토로더 경로를 놓쳤다")
+        self.assertNotIn(self.ANALYSIS_MARKER, output)
+
+    def test_extension_detection_matches_meaning_not_a_bare_string(self) -> None:
+        """`"phpstan"` 문자열만 보면 PHPStan 에 의존하는 **모든** 패키지가 걸린다.
+
+        `extension-installer` 가 실제로 활성화하는 것은 `extra.phpstan.includes` 다.
+        """
+        declares = self.run_untrusted(
+            None,
+            extra={"vendor/probe/pkg/composer.json":
+                   '{"name":"p/p","extra":{"phpstan":{"includes":["e.neon"]}}}'},
+        )
+        self.assertIn("phpstan-extension", declares, "확장 선언을 탐지하지 못한다")
+
+        # `extra.phpstan` 이 있어도 `includes` 가 없으면 확장이 아니다 — 문자열 검사는
+        # 이 둘을 구분하지 못한다.
+        depends = self.run_untrusted(
+            None,
+            extra={"vendor/probe/pkg/composer.json":
+                   '{"name":"p/p","require-dev":{"phpstan/phpstan":"^2"},'
+                   '"extra":{"phpstan":{"level":5}}}'},
+        )
+        self.assertNotIn(
+            "phpstan-extension", depends,
+            "PHPStan 에 의존만 해도 확장으로 본다 — 대부분의 프로젝트가 오탐이 된다",
+        )
+        self.assertIn(
+            self.ANALYSIS_MARKER, depends,
+            "의존만 있는 프로젝트까지 막으면 신뢰하지 않는 diff 리뷰가 통째로 죽는다",
+        )
 
 
 class PhpSecurityBaseline(unittest.TestCase):
@@ -2547,9 +2689,11 @@ class UntrustedExecutionContractTest(unittest.TestCase):
         """
         commands = code_blocks(quality_reference("php-quality"))
         self.assertIn("phpstan-review.neon", commands, "override 설정을 만들지 않는다")
-        self.assertRegex(commands, r"tmpDir: '%s/cache'", "캐시를 인용해 임시 경로로 보내지 않는다")
-        self.assertRegex(commands, r"resultCachePath: '%s/cache",
-                         "resultCachePath 는 tmpDir 과 독립이라 따로, 인용해서 덮어야 한다")
+        self.assertIn("neon_quote", commands, "경로를 공통 인용 헬퍼로 쓰지 않는다")
+        self.assertRegex(
+            commands, r"sed \"s/'/''/g\"",
+            "NEON 단일 인용 안의 아포스트로피를 이스케이프하지 않는다",
+        )
         self.assertIn("includes:", commands, "프로젝트 설정을 include 하지 않는다")
         reference = " ".join(quality_reference("php-quality").split())
         self.assertRegex(
