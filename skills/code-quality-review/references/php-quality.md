@@ -96,15 +96,39 @@ with PHP 8.3:
   collected below;
 - project-defined `rules:` and `services:` in the effective config — PHPStan instantiates those
   classes and calls them during analysis;
-- `composer.json` → `autoload.files` — **not declared in `phpstan.neon` at all.** PHPStan loads
-  the composer autoloader, so those files run even when the config mentions nothing.
+- an `includes:` entry that is a `.php` file — PHPStan executes it as dynamic config;
+- `composer.json` → `autoload.files`, in the root package **or in any dependency** — **not
+  declared in `phpstan.neon` at all.** PHPStan loads the composer autoloader, and that runs every
+  entry in `vendor/composer/autoload_files.php`.
 
 For your own or your team's branch this is the ordinary case and needs no action. For a diff you
 would not run — an outside contributor, an unfamiliar dependency — read both before analysing, or
 record static analysis as `skipped-untrusted-execution` per the rule in `SKILL.md`.
 
+Checking the root config and the root `composer.json` is **not enough** — three things hide
+outside them, all reproduced:
+
+- a `bootstrapFiles:` (or `rules:` / `services:`) declared in a file reached through `includes:`;
+- an `includes:` entry that points at a **`.php` file** — PHPStan supports PHP as dynamic config
+  and executes it;
+- a **dependency's** `autoload.files`. Composer aggregates every package's entries into
+  `vendor/composer/autoload_files.php`, and loading the autoloader runs all of them.
+
+Use the config chain `collect_config` already builds below, and read the aggregated autoload list
+rather than the root manifest alone:
+
 ```bash
-rg -n '^\s*(bootstrapFiles|rules|services):' -A5 phpstan.neon phpstan.neon.dist phpstan.dist.neon 2>/dev/null
+# Every file in the resolved chain, not just the root three. CONFIG_CHAIN is built below;
+# run this after it, and include any `.php` entry in the includes list as a finding on its own.
+while IFS= read -r cfg; do
+  [ -n "$cfg" ] || continue
+  rg -n '^\s*(bootstrapFiles|rules|services):' -A5 "$cfg" 2>/dev/null
+  case "$cfg" in *.php) echo "executable config in chain: $cfg" ;; esac
+done <<< "$CONFIG_CHAIN"
+
+# Composer: the aggregated list covers dependencies, the root manifest does not.
+[ -f vendor/composer/autoload_files.php ] && \
+  rg -n "=> .*'" vendor/composer/autoload_files.php | head -40
 php -r '$c=json_decode(@file_get_contents("composer.json"),true);print_r($c["autoload"]["files"]??[]);'
 ```
 

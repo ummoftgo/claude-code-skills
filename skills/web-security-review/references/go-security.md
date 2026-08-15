@@ -114,11 +114,19 @@ rg -n '(Query|Exec|QueryRow)\w*\(\s*(fmt\.Sprintf|".*"\s*\+)' --glob "*.go"
 **Severity if violated**: High — `text/template` into HTML is an XSS sink, and that is what the
 severity should say.
 
-Raise to Critical only when execution is actually reachable. Go templates call **only** the
-functions and methods the data namespace exposes, so an attacker-controlled template text is not
-code execution by itself — it is XSS plus whatever that namespace happens to reach. Critical needs
-a named target: a `FuncMap` entry or an exported method on the data that writes, deletes, sends,
-or shells out. Name it in the finding; if you cannot, the severity is High
+Raise to Critical only when execution is actually reachable. Go templates call **only** what the
+data namespace and the `FuncMap` expose, so an attacker-controlled template text is not code
+execution by itself — it is XSS plus whatever that namespace happens to reach.
+
+Critical needs a named target. Three places to look, not one:
+
+- a `FuncMap` entry that writes, deletes, sends, or shells out;
+- an **exported method** on the data (or on anything reachable from it) that does the same;
+- a **function value** stored in a struct field or map entry — the builtin `call` invokes those,
+  so `{{ call .Wipe "x" }}` reaches a `Wipe func(string) string` field with no `FuncMap` involved
+  (reproduced on go1.22.2).
+
+Name the target in the finding. If you cannot name one, the severity is High
 
 ### MUST
 - MUST use **`html/template`** for anything rendered into HTML. `text/template` performs no

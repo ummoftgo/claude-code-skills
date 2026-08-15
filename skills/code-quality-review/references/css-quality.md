@@ -58,9 +58,15 @@ Writing a config file changes the user's repository, so the creation path is gat
 
 ## 2. Running the Tools
 
-**A `.stylelintrc.js` config is executed** — it is a JS module Stylelint imports (verified). A
-`.stylelintrc.json` or a `stylelint` key in `package.json` is data and is not. On an untrusted
-diff, check which form the project ships before running, per the rule in `SKILL.md`.
+**Stylelint loads whatever the config names, whatever the config is written in.** A
+`.stylelintrc.js` / `.mjs` / `.cjs` is a module it imports. A `.stylelintrc.json` — or a
+`stylelint` key in `package.json` — is data, but `extends`, `plugins`, and `customSyntax` in it
+resolve to packages that get `require`d and run. Both were reproduced here: a JSON `extends` and a
+`package.json` `plugins` each executed the named module.
+
+So the check is not the file extension. On an untrusted diff, resolve the config chain
+(`extends` is recursive) and see whether anything in it names host code; if it does, apply the
+untrusted-diff rule in `SKILL.md`.
 
 
 ### Stylelint

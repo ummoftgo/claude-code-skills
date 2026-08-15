@@ -1940,9 +1940,14 @@ class GoReferenceSemanticsTest(unittest.TestCase):
     def test_go_template_critical_requires_a_named_target(self) -> None:
         """Go 템플릿은 노출된 함수·메서드만 호출한다 — 입력이 템플릿이라고 RCE 가 아니다."""
         security = " ".join(self.security().split())
-        self.assertRegex(security, r"call \*\*only\*\* the functions and methods")
+        self.assertRegex(
+            security, r"call \*\*only\*\* what the data namespace and the `FuncMap` expose"
+        )
         self.assertRegex(security, r"Critical needs a named target")
-        self.assertRegex(security, r"if you cannot, the severity is High")
+        self.assertRegex(security, r"If you cannot name one, the severity is High")
+        # `call` 은 FuncMap 없이 함수값 필드·맵 항목을 호출한다 (go1.22.2 재현).
+        self.assertRegex(security, r"builtin `call` invokes those")
+        self.assertRegex(security, r"function value.{0,40}struct field or map entry")
 
     def test_supply_chain_env_vars_are_real_and_rated_by_meaning(self) -> None:
         """`GONOSUMCHECK` 는 Go 환경변수가 아니다 (go1.22.2 `go env` 로 확인) — 없는 것을 지적하게 된다.
@@ -2174,22 +2179,36 @@ class UntrustedExecutionContractTest(unittest.TestCase):
         """도구 목록은 낡는다 — 판단 기준이 남아야 새 도구에도 적용된다."""
         rule = self.rule()
         self.assertRegex(rule, r"not the config's file format")
-        for route in ("The config is a program", "The config names code",
-                      "loads code through the project manifest"):
+        for route in ("The config is a program", "The config names host code",
+                      "manifest loads code behind the tool's back",
+                      "Config chains hide all of the above"):
             with self.subTest(route=route):
-                self.assertIn(route, rule, "실행 경로 세 갈래가 다 적히지 않았다")
+                self.assertIn(route, rule, "실행 경로가 다 적히지 않았다")
         self.assertRegex(
-            rule, r"a config that names no extension at all",
-            "안전한 경우가 무엇인지 좁게 특정되지 않았다",
+            rule,
+            r"names no host code and no\s+external executable",
+            "안전한 경우가 '호스트 코드·외부 실행 파일 없음'으로 특정되지 않았다",
+        )
+        self.assertRegex(
+            rule, r"have not resolved counts as unresolved, not as safe",
+            "미해석을 안전으로 읽지 말라는 규칙이 없다",
         )
 
     def test_a_declarative_config_is_not_assumed_safe(self) -> None:
-        """`.eslintrc.json` 도 `plugins` 모듈을 실행한다 (재현) — 형식으로 판단하면 틀린다."""
+        """`.eslintrc.json`·`.stylelintrc.json` 도 모듈을 실행한다 (둘 다 재현)."""
         rule = self.rule()
         self.assertIn(".eslintrc.json", rule)
+        self.assertIn(".stylelintrc.json", rule)
         self.assertRegex(rule, r"pure JSON")
+
+    def test_naming_an_extension_is_not_sufficient_either(self) -> None:
+        """Biome 의 GritQL 은 확장이지만 호스트 코드가 아니다 — 같이 묶으면 과잉 차단이다."""
+        rule = self.rule()
+        self.assertRegex(rule, r"not sufficient either")
+        self.assertIn("GritQL", rule)
         self.assertRegex(
-            rule, r"not from whether it happens to end in `\.json`",
+            rule, r"read the plugin, not as a reason to sandbox",
+            "제한된 DSL 과 임의 코드 실행이 구분되지 않는다",
         )
 
     def test_isolation_covers_the_host_not_only_the_workspace(self) -> None:
@@ -2242,6 +2261,29 @@ class UntrustedExecutionContractTest(unittest.TestCase):
                     reference, r"untrusted[- ]diff|untrusted-execution|would not run",
                     "신뢰 경계 규칙으로 연결되지 않는다",
                 )
+
+    def test_stylelint_reference_matches_the_top_level_contract(self) -> None:
+        """상위는 JSON 도 실행된다고 하는데 하위가 안전하다고 하면 하위가 이긴다 — 명령 옆이니까."""
+        reference = " ".join(quality_reference("css-quality").split())
+        self.assertRegex(reference, r"whatever the config is written in")
+        for named in ("extends", "plugins", "customSyntax"):
+            with self.subTest(names=named):
+                self.assertIn(named, reference)
+        self.assertNotRegex(
+            reference, r"is data and is not",
+            "JSON 설정을 안전으로 단정하는 표현이 남아 있다",
+        )
+
+    def test_phpstan_precheck_covers_the_whole_chain(self) -> None:
+        """루트 설정 3개와 루트 composer.json 만 보면 세 경로를 놓친다 (전부 재현)."""
+        reference = " ".join(quality_reference("php-quality").split())
+        self.assertRegex(reference, r"not enough")
+        self.assertIn("CONFIG_CHAIN", reference, "체인을 재사용하지 않는다")
+        self.assertIn("autoload_files.php", reference, "의존 패키지 목록을 읽지 않는다")
+        self.assertRegex(
+            reference, r"executable config in chain",
+            "`.php` includes 항목을 찾지 않는다",
+        )
 
     def test_phpstan_execution_paths_are_stated_precisely(self) -> None:
         """PHPStan 은 조건부다 — 넓게 쓰면 모든 PHP 리뷰에 경고가 붙고, 빼면 두 경로를 놓친다.
@@ -2656,7 +2698,18 @@ class PhpCrossValidationBaseline(unittest.TestCase):
                     done.returncode, 0,
                     f"셸 문법 오류로 실행되지 않는다: {done.stderr.strip()[:120]}",
                 )
-        self.assertGreater(checked, 10, "POSIX 명령을 거의 못 뽑았다 — 추출이 깨졌다")
+        # 하한만 두면 추출이 절반으로 줄어도 통과한다. **보안 블록과 품질 블록 각각에서**
+        # 언어별 커버리지를 본다 — 한쪽만 검사하면 다른 쪽이 통째로 사라져도 통과한다.
+        security = between(posix, "**Security patterns**", "**Quality patterns**",
+                           label="보안 패턴 블록")
+        quality = posix.split("**Quality patterns**", 1)[1]
+        for marker in ("*.php", "*.py", "*.go", "*.rs", "*.js"):
+            with self.subTest(block="security", language=marker):
+                self.assertIn(marker, security, f"{marker} 보안 패턴이 없다")
+        for marker in ("*.php", "*.py", "*.go", "*.rs", "*.css"):
+            with self.subTest(block="quality", language=marker):
+                self.assertIn(marker, quality, f"{marker} 품질 패턴이 없다")
+        self.assertGreaterEqual(checked, 30, f"추출된 명령이 {checked}개뿐이다")
 
     def test_powershell_patterns_actually_match(self) -> None:
         """GREEN — 토큰 존재가 아니라 **패턴을 실제로 실행**해 확인한다.

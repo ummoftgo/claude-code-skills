@@ -31,30 +31,41 @@ Detect the active shell before using a snippet. On POSIX use `command -v`, `[ -f
 > not running attacker-controlled code are different guarantees, and the read-only flags above
 > only buy the first. Measured in this repository:
 >
-> **The test is not the config's file format.** A declarative config still executes code when it
-> *names* code: `.eslintrc.json` is pure JSON, and `{"plugins": ["probe"]}` in it loads and runs
-> `eslint-plugin-probe` — reproduced here. Three routes, any one of which is enough:
+> **The test is not the config's file format, and it is not "does it name an extension" either.**
+> A declarative config executes code when it *names* code: `.eslintrc.json` is pure JSON, and
+> `{"plugins": ["probe"]}` in it loads and runs `eslint-plugin-probe` — reproduced here, as was
+> the same thing through `extends` in a `.stylelintrc.json`. But naming an extension is not
+> sufficient either: Biome's `plugins` takes GritQL pattern files, which are a matching DSL, not
+> host code.
 >
-> 1. **The config is a program** — `eslint.config.js`, `.stylelintrc.js`.
-> 2. **The config names code** — `plugins`, `parser`, `processor`, an `extends` that resolves to a
->    package, mypy's `plugins`, PHPStan's `bootstrapFiles` / custom `rules` / `services`.
-> 3. **The tool loads code through the project manifest** — cargo runs `build.rs`, PHPStan loads
->    the composer autoloader and with it `autoload.files`.
+> **The question is whether the analysis ends up calling host code or an external executable that
+> the diff controls.** Answer it by resolving the whole chain before running:
 >
-> | Tool | Executes code from the diff? |
+> 1. **The config is a program** — `eslint.config.js`, `.stylelintrc.js`, `stylelint.config.mjs`,
+>    a PHPStan `includes:` entry pointing at a `.php` file (reproduced: it runs).
+> 2. **The config names host code** — `plugins`, `parser`, `processor`, `customSyntax`, an
+>    `extends` that resolves to a package, mypy's `plugins`, PHPStan's `rules` / `services`.
+> 3. **The manifest loads code behind the tool's back** — cargo runs `build.rs` and proc macros;
+>    PHPStan loads the composer autoloader, which runs `autoload.files` **from the root package
+>    and from every dependency** (reproduced).
+> 4. **Config chains hide all of the above** — `extends` and `includes` are recursive. A clean
+>    root config that includes a second file proves nothing until you have followed it.
+>
+> | Tool | Calls host code the diff controls? |
 > |---|---|
-> | `cargo clippy`, `cargo check` | **Yes if a `build.rs` or a proc-macro dependency exists** — compiled *and run*. A `build.rs` writing outside the workspace was reproduced on cargo 1.91.0 |
-> | ESLint | **Yes** with a flat config, **and yes** with a JSON config that names a plugin, parser, processor, or shared config package |
-> | Stylelint | **Yes** for a `.js` config, **and yes** for a JSON config naming `plugins` or `extends` |
+> | `cargo clippy`, `cargo check` | **Yes if a `build.rs` or proc-macro dependency exists** — compiled *and run*. A `build.rs` writing outside the workspace was reproduced on cargo 1.91.0 |
+> | ESLint | **Yes** with a flat config, and with any config naming a plugin, parser, processor, or shared-config package |
+> | Stylelint | **Yes** for a `.js`/`.mjs`/`.cjs` config, and for a JSON or `package.json` config naming `extends`, `plugins`, or `customSyntax` (both reproduced) |
 > | mypy | **Yes if `[tool.mypy] plugins` is set** |
-> | PHPStan | **Yes if `bootstrapFiles:`, project `rules`/`services`, or composer `autoload.files` is present** — see below |
+> | PHPStan | **Yes** for `bootstrapFiles`, project `rules`/`services`, a `.php` `includes:` entry, or composer `autoload.files` in the root **or any dependency** — see below |
+> | Biome | **A weaker yes** — `plugins` loads local GritQL files. That is a pattern DSL, not host code: it can distort what the analysis reports, but it does not execute arbitrary commands. Treat it as a reason to read the plugin, not as a reason to sandbox |
 > | `ruff` | No — a Rust binary with no plugin mechanism |
 > | `go vet`, `staticcheck`, `gofmt` | No. Go has no build-time hook, and even cgo is compiled without running (verified) |
-> | `tsc`, Biome | No — neither loads third-party extensions |
+> | `tsc` | No |
 >
-> So the safe case is narrow and specific: **a config that names no extension at all**. Read the
-> effective config, follow its `extends`/`includes` chain, and decide from what it names — not
-> from whether it happens to end in `.json`.
+> So the safe answer is never "the config looks declarative". It is: **the resolved chain —
+> config, its `extends`/`includes`, the manifest, and the autoloader — names no host code and no
+> external executable.** Anything you have not resolved counts as unresolved, not as safe.
 >
 > **PHPStan's condition is narrow and worth stating exactly**, because the common case is safe.
 > Measured on PHPStan 2.x with PHP 8.3, one file per case:
@@ -65,11 +76,15 @@ Detect the active shell before using a snippet. On POSIX use `command -v`, `[ -f
 > | `scanFiles:` | No |
 > | `bootstrapFiles:` in the config | **Yes** |
 > | project `rules:` / `services:` in the config | **Yes** — a project-defined rule or extension is a class PHPStan instantiates and calls during analysis |
-> | `composer.json` → `autoload.files` | **Yes**, with nothing declared in `phpstan.neon` — the composer autoloader is loaded, so those files run |
+> | an `includes:` entry pointing at a `.php` file | **Yes** — PHPStan supports PHP files as dynamic config and executes them (reproduced) |
+> | `bootstrapFiles:` reached through `includes:` | **Yes** — the chain is recursive, so a clean root config proves nothing (reproduced) |
+> | `composer.json` → `autoload.files`, root **or any dependency** | **Yes**, with nothing declared in `phpstan.neon`. The composer autoloader runs every entry in `vendor/composer/autoload_files.php`, which includes dependencies' own `autoload.files` (reproduced) |
 >
-> So a PHP project with neither `bootstrapFiles` nor `autoload.files` does not execute anything
-> during analysis, which is most projects. Check those two before running PHPStan against a diff
-> you would not run.
+> So the safe PHP case is a project whose **resolved** config chain declares no `bootstrapFiles`,
+> no project `rules`/`services`, and no `.php` include, and whose composer autoloader — root and
+> dependencies — declares no `autoload.files`. That is most projects, and for them analysis is
+> pure parsing. Resolve all four before running PHPStan against a diff you would not run; the
+> commands for it are in `references/php-quality.md` §0.
 >
 > **When the diff is untrusted** — an external contributor's branch, an unfamiliar dependency, any
 > code you would not run — the executing tools need isolation before they run. A workspace mounted
