@@ -111,7 +111,10 @@ rg -n '(Query|Exec|QueryRow)\w*\(\s*(fmt\.Sprintf|".*"\s*\+)' --glob "*.go"
 
 ## 4. Template Rendering
 
-**Severity if violated**: Critical when the wrong package is used
+**Severity if violated**: High — `text/template` into HTML is an XSS sink, and that is what the
+severity should say. Raise it to Critical only with a further condition: the template *text*
+itself comes from input, or the data namespace exposes a function with side effects, which turns
+rendering into execution rather than injection
 
 ### MUST
 - MUST use **`html/template`** for anything rendered into HTML. `text/template` performs no
@@ -186,11 +189,23 @@ govulncheck ./...
 
 # `replace` directives, and any module served from outside the proxy
 rg -n '^\s*replace ' go.mod
-rg -n 'GOPRIVATE|GONOSUMDB|GONOSUMCHECK|GOFLAGS.*insecure' --glob "*" 
+
+# Integrity settings in CI, Dockerfiles, and Makefiles
+rg -n 'GOSUMDB\s*=\s*off|GONOSUMDB|GOPRIVATE|GOINSECURE|GOFLAGS.*-mod=mod' --glob '!vendor'
 ```
 
-**`GONOSUMCHECK`, `GOFLAGS=-insecure`, and `GONOSUMDB` in CI disable the integrity check.**
-Finding one is a High on its own, whatever the stated reason.
+Read the match before rating it — these settings are not equivalent:
+
+| Setting | What it means |
+|---|---|
+| `GOSUMDB=off` | the checksum database is disabled **globally**. High: nothing verifies a module the `go.sum` has not already pinned |
+| `GOPRIVATE` / `GONOSUMDB` | the normal way to exempt an *internal* module path from the proxy and sum database. Check that the patterns are specific — a bare `*` is the `GOSUMDB=off` case wearing a different name |
+| `GOINSECURE` | allows plain HTTP for the listed patterns. Same test: how specific is the pattern |
+| `GOFLAGS=-mod=mod` | re-enables automatic `go.mod` edits during a build, so the built tree can differ from the reviewed one |
+
+`GONOSUMCHECK` is **not** a Go environment variable — it belonged to the pre-modules `vgo`
+prototype. Reporting it as a disabled integrity check is a finding about nothing; verified against
+`go env` on go1.22.2, which lists `GOSUMDB`, `GONOSUMDB`, `GOPRIVATE`, and `GOINSECURE`.
 
 ## 7. Secrets & Configuration
 

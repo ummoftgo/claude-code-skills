@@ -70,6 +70,12 @@ fi
 ## 2. Running the Tools
 
 ### ESLint
+
+**ESLint runs the project's config.** A flat `eslint.config.js` is a JavaScript module that gets
+imported and executed — verified in this repository. On an untrusted diff that config is code from
+the diff, so apply the untrusted-diff rule in `SKILL.md` before running it. A `biome.json` or a
+`.eslintrc.json` is declarative and does not carry this problem.
+
 ```bash
 # Report only (no auto-fix)
 npx --no -- eslint . --format=compact
@@ -248,4 +254,3 @@ Surface-specific duplication — repeated DOM queries, near-identical jQuery han
 `js-frontend-quality.md`. Server-side duplication patterns live in `node-quality.md`.
 
 ---
-

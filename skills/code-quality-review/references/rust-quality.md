@@ -94,6 +94,16 @@ consumes real disk; `Cargo.lock` in a library crate is a new untracked file the 
 
 The read-only-safe invocation moves the build directory out and refuses to touch the lockfile:
 
+**Neither flag stops cargo from running the crate's own code.** `cargo clippy` and `cargo check`
+compile **and execute** `build.rs` and proc macros — verified on cargo 1.91.0 with a `build.rs`
+that wrote to an absolute path outside the workspace during a `--locked` clippy run. Cargo runs a
+`build.rs` whenever the file exists, with or without a `build =` line in `Cargo.toml`.
+
+So there are two questions, not one. `CARGO_TARGET_DIR` and `--locked` answer *"does this write
+into the crate?"*. They do not answer *"is it safe to run this code?"* — see the untrusted-diff
+rule in `SKILL.md`. For an untrusted branch with no sandbox, record clippy and check as
+`skipped-untrusted-execution` rather than running them.
+
 ```bash
 # Both parts are required. CARGO_TARGET_DIR relocates the build output; --locked stops
 # cargo from creating or updating Cargo.lock.

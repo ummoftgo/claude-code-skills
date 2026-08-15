@@ -28,7 +28,12 @@ resource exhaustion, dependencies, and the same injection classes every language
 
 ## 1. `unsafe` and Its Invariants
 
-**Severity if violated**: Medium on its own; Critical when the block acts on input-derived data
+**Severity if violated**: two different findings, rated separately.
+**A missing safety comment is Medium** — a documentation defect, whatever the block touches; the
+code may well be correct. **A demonstrably violated invariant is Critical** — you can name the
+input that makes the block read out of bounds, alias mutably, or build a reference to
+uninitialised memory. Do not promote the first into the second because the data came from input;
+say which of the two you are reporting.
 
 ### MUST
 - MUST carry a comment stating the invariant that makes the block sound. An `unsafe` block with
@@ -43,11 +48,18 @@ resource exhaustion, dependencies, and the same injection classes every language
 // BAD — the length is attacker-controlled and unchecked
 let data = unsafe { std::slice::from_raw_parts(ptr, header.len) };
 
-// GOOD — validated, and the reasoning is written down
-assert!(header.len <= MAX_FRAME && !ptr.is_null());
-// SAFETY: ptr points to `header.len` initialised bytes owned by `buf`, which outlives `data`.
+// GOOD — bounded, and every condition the function requires is named
+assert!(header.len <= MAX_FRAME);
+// SAFETY: `ptr` is non-null and `u8`-aligned; it points into `buf`, a single allocation of at
+// least `header.len` initialised bytes; `buf` outlives `data` and is not mutated while it
+// lives; `header.len` is bounded by MAX_FRAME, far below `isize::MAX`.
 let data = unsafe { std::slice::from_raw_parts(ptr, header.len) };
 ```
+
+`from_raw_parts` requires **all** of: non-null, correctly aligned, one contiguous allocation,
+fully initialised for the whole length, no aliasing mutation for the lifetime, and a total size
+under `isize::MAX`. A length check alone is not the contract — when reviewing, ask which of those
+the comment actually establishes rather than accepting a bounds `assert!` as the whole argument.
 
 ```bash
 rg -n 'unsafe\s*\{' -B2 --glob "*.rs"
@@ -66,8 +78,11 @@ the process down. This is the most common real vulnerability in otherwise-safe R
 ### MUST
 - MUST NOT `unwrap`, `expect`, or index directly into a collection with a value derived from
   input. Use `get`, `ok_or`, and `?`.
-- MUST bound arithmetic on input-derived values — a debug build panics on overflow and a release
-  build wraps silently, so the same code is a crash in one profile and a wrong number in the other.
+- MUST bound arithmetic on input-derived values. Under the **default** profiles a debug build
+  panics on overflow and a release build wraps silently, so the same code is a crash in one and a
+  wrong number in the other (measured on rustc 1.91.0 with a runtime value). Read
+  `[profile.*] overflow-checks` before relying on either behaviour — it can be turned on for
+  release or off for debug, which changes which of the two failures you are looking at.
 - MUST NOT slice with input-derived ranges (`&buf[a..b]`) without checking the bounds; slicing
   panics, and it also panics on a non-char-boundary index into a `&str`.
 
@@ -85,8 +100,10 @@ rg -n '\.unwrap\(\)|\.expect\(' --glob "*.rs" -g '!tests/**' -g '!benches/**'
 rg -n 'as u\d+|as i\d+' --glob "*.rs"      # silent truncation on narrowing casts
 ```
 
-`checked_*`, `saturating_*`, and `try_into()` are the answers for arithmetic. A bare `as` cast
-truncates silently in every profile.
+`checked_*`, `saturating_*`, and `try_into()` are the answers for arithmetic. A bare `as` cast is
+only a defect when it **narrows or goes out of range** — `u8 as u32` is lossless and not a
+finding, while `300i32 as u8` is `44` (measured) and `-1i32 as usize` is enormous. Flag the
+narrowing and signed↔unsigned cases where the value comes from input, and use `try_into()` there.
 
 ## 3. Command Execution
 
@@ -180,8 +197,11 @@ Rust's deserializers do not execute arbitrary code the way `pickle` does, so the
   socket lets one request drive allocation.
 - MUST bound any length field read from input before it becomes a `Vec::with_capacity` or a
   `reserve`.
-- MUST use `#[serde(deny_unknown_fields)]` on structures that drive persistence or authorization,
-  so an unexpected field is an error rather than a silently ignored one.
+- SHOULD use `#[serde(deny_unknown_fields)]` where an unexpected field would mean the caller and
+  the server disagree about the request — mass-assignment shapes and authorization payloads.
+  It is a deliberate trade-off, not a blanket rule: it also breaks forward compatibility for any
+  API whose clients may send fields a newer version added. Report its absence where the struct
+  drives a privilege decision; do not report it on every DTO.
 - MUST NOT trust a `usize` decoded from input as a count or an index.
 
 ```rust
@@ -261,15 +281,18 @@ rg -n '#\[derive\([^)]*Debug' -A6 --glob "*.rs" | rg -i 'token|secret|password|k
 **Severity if violated**: High
 
 ### MUST
-- MUST use a cryptographically secure generator for tokens and session identifiers —
-  `rand::rngs::OsRng`, or `getrandom`. `SmallRng` and `StdRng::seed_from_u64` are not that.
+- MUST use a cryptographically secure generator for tokens and session identifiers.
+  `OsRng`, `getrandom`, **and `thread_rng()`** all qualify — `ThreadRng` implements `CryptoRng`
+  (verified in rand 0.8.7: `impl CryptoRng for ThreadRng`), so flagging it is a false positive.
+  What does not qualify: `SmallRng`, and any generator seeded from a value the code chose
+  (`StdRng::seed_from_u64`, a timestamp, a counter).
 - MUST compare secrets in constant time (`subtle::ConstantTimeEq`), never with `==`.
 - MUST NOT disable certificate verification
   (`danger_accept_invalid_certs`, a custom always-accepting verifier) outside a test.
 - MUST NOT use MD5 or SHA-1 for anything security-bearing.
 
 ```bash
-rg -n 'SmallRng|seed_from_u64|thread_rng' --glob "*.rs"
+rg -n 'SmallRng|seed_from_u64|from_seed\(' --glob "*.rs"
 rg -n 'danger_accept_invalid_certs|danger_accept_invalid_hostnames' --glob "*.rs"
 ```
 

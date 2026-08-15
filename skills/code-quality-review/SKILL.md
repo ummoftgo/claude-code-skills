@@ -26,6 +26,26 @@ Detect the active shell before using a snippet. On POSIX use `command -v`, `[ -f
 > is a different rule and it has no exceptions.
 >
 > When in doubt, treat the request as read-only and ask before installing or writing.
+>
+> **A second, separate axis: does the tool *execute* the code under review?** Not writing files and
+> not running attacker-controlled code are different guarantees, and the read-only flags above
+> only buy the first. Measured in this repository:
+>
+> | Tool | Executes code from the diff? |
+> |---|---|
+> | `cargo clippy`, `cargo check` | **Yes** — `build.rs` and proc macros are compiled *and run*. A `build.rs` writing to an absolute path outside the workspace was reproduced on cargo 1.91.0 |
+> | ESLint | **Yes** — a flat `eslint.config.js` is a JS module that is imported and run |
+> | `ruff`, `mypy` | No — parsed, never executed |
+> | `go vet`, `staticcheck`, `gofmt` | No — Go has no build-time hook |
+> | `tsc`, Biome, Stylelint | No — their configs are declarative |
+>
+> **When the diff is untrusted** — an external contributor's branch, an unfamiliar dependency, any
+> code you would not run — the executing tools need isolation before they run: a sandbox with the
+> workspace mounted read-only, `HOME` / `CARGO_HOME` / `CARGO_TARGET_DIR` pointed outside it, and
+> no network. Without that isolation, record the check as **`skipped-untrusted-execution`** and
+> say what it would have taken to run it. Reviewing your own team's branch is the ordinary case
+> and needs none of this — the rule exists so the exception is a decision, not an oversight.
+
 
 ## Reference Files
 
@@ -64,8 +84,14 @@ scheduled work, not a precondition for using this table.
 | `css-quality.md` | §1 setup · §2 execution · §3–6 manual patterns |
 
 The target: every `references/{language}-quality.md` carries the same seven sections so this
-skill can drive it without knowing the language, and adding a language means adding one
-reference file plus one detection row in Step 1 — not editing the body below.
+skill can drive it without knowing the language — the body below never needs editing for a new
+language.
+
+**That does not make it a one-file change.** Registering a language for *this* skill takes three
+edits (the reference file, its row in the list above, a detection row in Step 1, and an execution
+section in Step 2); registering it for the whole review system takes more, and
+`branch-merge-review` states the full list. Missing one fails silently: the reference exists and
+nothing loads it.
 
 | § | Contents |
 |---|---|
@@ -89,6 +115,7 @@ Do not force one tool per role. When a role has no established tool in that lang
 | `skipped-read-only` | A **command** writes, and the request is read-only, so it was withheld. This is what the contract line below records |
 | `skipped-not-installed` | A **tool role** could not run because its tool is absent — under read-only because the install was withheld, in normal mode because the install failed |
 | `unavailable` | No tool fills this role in this language |
+| `skipped-untrusted-execution` | The tool would run code from the diff and no isolation was available |
 | `timeout` / `execution-error` | Started but did not produce a usable result |
 
 The two skip states describe **different things** and often co-occur: `skipped-read-only` is

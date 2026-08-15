@@ -93,9 +93,12 @@ go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
 
 ## 4. Execution
 
-**`go build` writes a binary into the current directory.** Measured on go1.22.2: `go build ./...`
-in a module with a `main` package leaves an executable named after the module behind. That is a
-file the review promised not to create, so the read-only-safe form discards the output:
+**`go build` can write a binary into the current directory — it depends on how many packages the
+pattern matches.** Measured on go1.22.2: with a single `main` package, `go build ./...` leaves an
+executable named after the directory behind; with several packages it discards the results and
+writes nothing. Since a review does not know which case it is in before running, always discard
+the output explicitly (`-o /dev/null` is accepted in both cases, including multi-package
+patterns):
 
 ```bash
 # Type-checks and compiles without producing an artefact

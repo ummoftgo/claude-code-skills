@@ -1305,34 +1305,37 @@ class SecurityReferenceSelectionTest(unittest.TestCase):
 
     #: 행 이름이 아니라 **선택된 참조 집합 전체**를 고정한다. `assertIn` 만 쓰면 한 행이
     #: 표면을 전부 잃어도 통과한다 — 실제로 그 구멍으로 SSR 오류가 숨어 있었다.
+    #: **행 레이블 전문**을 키로 쓴다. prefix 로 두면 새 행이 기존 등록에 흡수돼
+    #: 검사 없이 통과한다 — `Node service + CLI` 가 `Node service + CLI + UI` 를 먹었다.
     REQUIRED_SELECTIONS = {
+        "PHP server-rendered app": {"php-backend-security.md", "browser-security.md"},
+        "PHP API, no HTML": {"php-backend-security.md"},
+        "Node HTTP service": {"node-security.md", "http-server-security.md"},
+        "Node CLI or daemon": {"node-security.md", "native-security.md"},
+        "Node library with no surface evidence": {"node-security.md", *ALL_SURFACES},
+        "Node service + CLI": {
+            "node-security.md", "http-server-security.md", "native-security.md",
+        },
+        "Node static build (bundler, prerender)": {
+            "node-security.md", "browser-security.md", "native-security.md",
+        },
         "Node runtime SSR": {
             "node-security.md", "http-server-security.md", "browser-security.md",
         },
         "Node service that also serves a UI": {
             "node-security.md", "http-server-security.md", "browser-security.md",
         },
-        "Node static build": {
-            "node-security.md", "browser-security.md", "native-security.md",
-        },
-        "Node service + CLI |": {
-            "node-security.md", "http-server-security.md", "native-security.md",
-        },
         "Node service + CLI + UI": {"node-security.md", *ALL_SURFACES},
-        "Node library with no surface evidence": {"node-security.md", *ALL_SURFACES},
-        "Node HTTP service": {"node-security.md", "http-server-security.md"},
-        "Node CLI or daemon": {"node-security.md", "native-security.md"},
-        "PHP server-rendered app": {"php-backend-security.md", "browser-security.md"},
-        "PHP API, no HTML": {"php-backend-security.md"},
-        "Browser assets only": {"browser-security.md"},
-        "Python HTTP service": {"python-security.md", "http-server-security.md"},
-        "Python server-rendered app": {
+        "Python HTTP service (Django, FastAPI, Flask)": {
+            "python-security.md", "http-server-security.md",
+        },
+        "Python server-rendered app (templates)": {
             "python-security.md", "http-server-security.md", "browser-security.md",
         },
         "Python CLI, job, or daemon": {"python-security.md", "native-security.md"},
         "Python library with no surface evidence": {"python-security.md", *ALL_SURFACES},
         "Go HTTP service": {"go-security.md", "http-server-security.md"},
-        "Go server-rendered app": {
+        "Go server-rendered app (html/template)": {
             "go-security.md", "http-server-security.md", "browser-security.md",
         },
         "Go CLI or daemon": {"go-security.md", "native-security.md"},
@@ -1340,6 +1343,7 @@ class SecurityReferenceSelectionTest(unittest.TestCase):
         "Rust HTTP service": {"rust-security.md", "http-server-security.md"},
         "Rust CLI or daemon": {"rust-security.md", "native-security.md"},
         "Rust library with no surface evidence": {"rust-security.md", *ALL_SURFACES},
+        "Browser assets only, no manifest change": {"browser-security.md"},
     }
 
     #: "all three" 같은 축약이 어떤 파일들을 뜻하는지. 표에서 축약이 사라지면 그냥 파일명이
@@ -1363,26 +1367,20 @@ class SecurityReferenceSelectionTest(unittest.TestCase):
 
         실제로 Python 4행이 그렇게 빠져 있었다. 표에 행을 추가하면 여기에도 추가해야 한다.
         """
-        rows = set(self.selection_rows())
-        covered = set()
-        for prefix in self.REQUIRED_SELECTIONS:
-            covered.update(
-                label for label in rows if label.startswith(prefix.rstrip(" |"))
-            )
         self.assertEqual(
-            rows - covered, set(),
-            "선택 표에 참조 집합이 고정되지 않은 행이 있다",
+            set(self.selection_rows()), set(self.REQUIRED_SELECTIONS),
+            "선택 표의 행 집합과 등록된 집합이 정확히 일치해야 한다 — "
+            "행을 추가하면 REQUIRED_SELECTIONS 에도 추가해야 검사된다",
         )
 
     def test_each_row_selects_exactly_the_right_reference_set(self) -> None:
         rows = self.selection_rows()
-        for label_prefix, required in self.REQUIRED_SELECTIONS.items():
-            match = [row for label, row in rows.items() if label.startswith(label_prefix.rstrip(" |"))]
-            with self.subTest(row=label_prefix):
-                self.assertTrue(match, f"행이 없다: {label_prefix} / 있는 행: {list(rows)}")
+        for label, required in self.REQUIRED_SELECTIONS.items():
+            with self.subTest(row=label):
+                self.assertIn(label, rows, f"행이 없다 / 있는 행: {list(rows)}")
                 self.assertEqual(
-                    self.referenced_files(match[0]), required,
-                    f"{label_prefix} 의 참조 집합이 기대와 다르다: {match[0].strip()}",
+                    self.referenced_files(rows[label]), required,
+                    f"{label} 의 참조 집합이 기대와 다르다: {rows[label].strip()}",
                 )
 
     def test_ambiguous_surface_dispatch_names_the_security_references(self) -> None:
@@ -1930,6 +1928,25 @@ class GoReferenceSemanticsTest(unittest.TestCase):
         self.assertRegex(security, r"performs no contextual escaping|no contextual escaping")
         self.assertIn("html/template", security)
 
+    def test_supply_chain_env_vars_are_real_and_rated_by_meaning(self) -> None:
+        """`GONOSUMCHECK` 는 Go 환경변수가 아니다 (go1.22.2 `go env` 로 확인) — 없는 것을 지적하게 된다.
+
+        `GOPRIVATE`/`GONOSUMDB` 는 사설 모듈의 정상 설정이므로 자동 High 도 틀렸다.
+        """
+        security = " ".join(self.security().split())
+        self.assertRegex(
+            security, r"`GONOSUMCHECK` is \*\*not\*\* a Go environment variable",
+        )
+        self.assertRegex(security, r"GOSUMDB=off", "실제 전역 비활성화를 검사하지 않는다")
+        self.assertRegex(
+            security, r"normal way to exempt an \*?\*?internal\*?\*? module",
+            "사설 모듈의 정상 설정과 구분하지 않는다",
+        )
+        for line in code_blocks(self.security()).splitlines():
+            if "GOSUMDB" in line or "GOPRIVATE" in line:
+                with self.subTest(pattern=line.strip()):
+                    self.assertNotIn("GONOSUMCHECK", line, "존재하지 않는 변수를 검색한다")
+
     def test_go_supply_chain_states_what_the_ecosystem_removes(self) -> None:
         """다른 언어 참조를 그대로 옮기면 없는 위험(install hook)을 찾게 된다."""
         security = " ".join(self.security().split())
@@ -2034,6 +2051,23 @@ class RustReferenceSemanticsTest(unittest.TestCase):
             with self.subTest(section=heading):
                 self.assertIn(heading, quality)
 
+    def test_thread_rng_is_not_flagged_as_weak(self) -> None:
+        """`ThreadRng` 는 CSPRNG 다 (rand 0.8.7: `impl CryptoRng for ThreadRng`) — 지적하면 오탐이다."""
+        security = " ".join(self.security().split())
+        self.assertRegex(security, r"`thread_rng\(\)`\*?\*? all qualify|and \*\*`thread_rng\(\)`\*\* all qualify")
+        self.assertRegex(security, r"impl CryptoRng for ThreadRng")
+        grep_lines = [
+            line for line in code_blocks(self.security()).splitlines()
+            if "SmallRng" in line
+        ]
+        self.assertTrue(grep_lines, "약한 RNG grep 패턴이 없다")
+        for line in grep_lines:
+            with self.subTest(pattern=line.strip()):
+                self.assertNotIn(
+                    "thread_rng", line,
+                    "thread_rng 를 grep 대상에 두면 모든 프로젝트에서 오탐이 난다",
+                )
+
     def test_rust_security_declares_the_two_axis_pairing(self) -> None:
         header = self.security()[:1000]
         self.assertIn("Language axis", header)
@@ -2070,6 +2104,66 @@ class SectionContractDepthTest(unittest.TestCase):
             with self.subTest(reference=name):
                 self.assertRegex(section, r"published library")
                 self.assertRegex(section, r"Raise a severity one step")
+
+
+class UntrustedExecutionContractTest(unittest.TestCase):
+    """"워크스페이스에 안 쓴다"와 "신뢰하지 않는 코드를 실행하지 않는다"는 다른 보장이다.
+
+    `cargo clippy` 는 `--locked` 와 `CARGO_TARGET_DIR` 를 다 줘도 `build.rs` 를 **실행한다**
+    (cargo 1.91.0 에서 워크스페이스 밖 절대 경로에 쓰는 build.rs 로 재현). ESLint 도 flat
+    config 를 모듈로 실행한다. 이 축을 문서가 말하지 않으면 리뷰어가 남의 코드를 돌린다.
+    """
+
+    def rule(self) -> str:
+        # 인용 블록이므로 줄머리 `>` 를 걷어내야 문장이 이어진다.
+        raw = between(
+            read("skills/code-quality-review/SKILL.md"),
+            "**Read-only mode (priority rule).**", "## Reference Files",
+            label="읽기 전용 규칙",
+        )
+        return " ".join(re.sub(r"(?m)^\s*>\s?", "", raw).split())
+
+    def test_the_execution_axis_is_stated_separately_from_the_write_axis(self) -> None:
+        rule = self.rule()
+        self.assertRegex(rule, r"does the tool \*?\*?execute\*?\*? the code under review")
+        self.assertRegex(rule, r"different guarantees")
+
+    def test_the_tools_that_execute_the_diff_are_named(self) -> None:
+        rule = self.rule()
+        for tool in ("cargo clippy", "cargo check", "build.rs", "ESLint", "eslint.config.js"):
+            with self.subTest(tool=tool):
+                self.assertIn(tool, rule, "실행하는 도구가 명시되지 않았다")
+
+    def test_the_tools_that_do_not_execute_are_named_too(self) -> None:
+        """실행하지 않는 도구까지 적어야 규칙이 과잉 적용되지 않는다."""
+        rule = self.rule()
+        for tool in ("ruff", "mypy", "go vet", "tsc"):
+            with self.subTest(tool=tool):
+                self.assertIn(tool, rule)
+
+    def test_the_untrusted_case_has_a_named_run_state(self) -> None:
+        rule = self.rule()
+        self.assertIn("skipped-untrusted-execution", rule)
+        self.assertIn(
+            "skipped-untrusted-execution",
+            read("skills/code-quality-review/SKILL.md"),
+        )
+
+    def test_the_rule_does_not_fire_on_an_ordinary_review(self) -> None:
+        """자기 팀 브랜치 리뷰가 매번 이 경고를 달면 아무도 안 읽는다."""
+        self.assertRegex(
+            self.rule(), r"ordinary case and needs none of this",
+        )
+
+    def test_the_rust_reference_repeats_the_warning_where_the_command_is(self) -> None:
+        """명령 옆에 없으면 읽는 사람이 SKILL.md 로 돌아가지 않는다."""
+        execution = between(
+            quality_reference("rust-quality"), "## 4. Execution", "## 5. Manual Patterns",
+            label="rust §4",
+        )
+        flat = " ".join(execution.split())
+        self.assertRegex(flat, r"compile \*\*and execute\*\* `build.rs`")
+        self.assertIn("skipped-untrusted-execution", flat)
 
 
 class SecurityAuditorScopeTest(unittest.TestCase):
@@ -2217,16 +2311,25 @@ class LanguageRegistrationConsistencyTest(unittest.TestCase):
                 self.assertIn(quality, mapping, "매핑 표에 참조가 없다")
                 self.assertIn(f"`{extension}`", mapping, "매핑 표에 scope 가 없다")
 
-    def test_the_completion_gate_does_not_call_a_covered_language_unreviewable(self) -> None:
-        """게이트가 지원 언어를 미지원으로 말하면 정상 리뷰가 Block 으로 떨어진다."""
-        gate = between(
-            read("skills/branch-merge-review/SKILL.md"),
-            "**Completion gate", "## Step 4", label="완료 게이트",
+    def test_the_completion_gate_lists_every_covered_language(self) -> None:
+        """게이트가 지원 언어를 빠뜨리면 정상 리뷰가 Block 으로 떨어진다.
+
+        "미지원으로 적지 않았다"만 검사하면 아예 언급이 없어도 통과한다 — 실제로 그 구멍이
+        있었다. 지원 목록에 **있어야** 통과하도록 바꾼다.
+        """
+        gate = " ".join(
+            between(
+                read("skills/branch-merge-review/SKILL.md"),
+                "**Completion gate", "## Step 4", label="완료 게이트",
+            ).split()
         )
+        covered = between(gate, "Languages covered today", "The gate still applies",
+                          label="지원 언어 목록")
         for language in self.LANGUAGES:
             with self.subTest(language=language):
+                self.assertIn(language, covered, "게이트의 지원 언어 목록에 없다")
                 self.assertNotRegex(
-                    " ".join(gate.split()),
+                    gate,
                     rf"without a language-axis reference[^.]{{0,80}}{language}",
                     f"{language} 를 여전히 미지원으로 적고 있다",
                 )
