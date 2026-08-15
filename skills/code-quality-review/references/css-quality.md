@@ -59,7 +59,7 @@ Writing a config file changes the user's repository, so the creation path is gat
 ## 2. Running the Tools
 
 **Stylelint loads whatever the config names, whatever the config is written in.** A
-`.stylelintrc.js` / `.mjs` / `.cjs` is a module it imports. A `.stylelintrc.json` — or a
+`.stylelintrc.js` / `.mjs` / `.cjs` — or a `stylelint.config.ts` — is a module it imports. A `.stylelintrc.json` — or a
 `stylelint` key in `package.json` — is data, but `extends`, `plugins`, and `customSyntax` in it
 resolve to packages that get `require`d and run. Both were reproduced here: a JSON `extends` and a
 `package.json` `plugins` each executed the named module.

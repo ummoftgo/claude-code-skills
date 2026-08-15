@@ -41,31 +41,46 @@ Detect the active shell before using a snippet. On POSIX use `command -v`, `[ -f
 > **The question is whether the analysis ends up calling host code or an external executable that
 > the diff controls.** Answer it by resolving the whole chain before running:
 >
-> 1. **The config is a program** — `eslint.config.js`, `.stylelintrc.js`, `stylelint.config.mjs`,
->    a PHPStan `includes:` entry pointing at a `.php` file (reproduced: it runs).
+> 0. **The repository replaces or wraps the tool itself** — this one sits above the others and
+>    applies no matter which tool you run. Both reproduced here:
+>    `.cargo/config.toml` with `build.rustc` or `build.rustc-wrapper` makes cargo invoke an
+>    executable the repository names, with **no `build.rs` anywhere**; and an `.npmrc` carrying
+>    `node-options=--require ./hook.js` injects that file into **every** npm-launched tool —
+>    ESLint, Stylelint, tsc alike — regardless of their own configs.
+>    Not every ecosystem has this: Go reads `GOFLAGS` only from the environment and the user's
+>    `GOENV`, never from a file in the repository, and a repository-level `sitecustomize.py` is
+>    not loaded by ruff or mypy (both verified). The question to ask is always **whether the diff
+>    can control it**, not whether the mechanism exists.
+> 1. **The config is a program** — `eslint.config.js`, `.stylelintrc.js`, `stylelint.config.mjs`
+>    or `.ts`, a PHPStan `includes:` entry pointing at a `.php` file (reproduced: it runs).
 > 2. **The config names host code** — `plugins`, `parser`, `processor`, `customSyntax`, an
 >    `extends` that resolves to a package, mypy's `plugins`, PHPStan's `rules` / `services`.
 > 3. **The manifest loads code behind the tool's back** — cargo runs `build.rs` and proc macros;
 >    PHPStan loads the composer autoloader, which runs `autoload.files` **from the root package
->    and from every dependency** (reproduced).
+>    and from every dependency** (reproduced). A PHPStan extension shipped by a dependency can be
+>    activated by `phpstan/extension-installer` with nothing in the root config at all.
 > 4. **Config chains hide all of the above** — `extends` and `includes` are recursive. A clean
 >    root config that includes a second file proves nothing until you have followed it.
+> 5. **The invocation itself** — flags like PHPStan's `-a/--autoload-file` load code too. Those
+>    come from whoever runs the review, so they are yours to control; the point is that the
+>    closure is over *config + manifest + chain + invocation*, not config alone.
 >
 > | Tool | Calls host code the diff controls? |
 > |---|---|
-> | `cargo clippy`, `cargo check` | **Yes if a `build.rs` or proc-macro dependency exists** — compiled *and run*. A `build.rs` writing outside the workspace was reproduced on cargo 1.91.0 |
+> | `cargo clippy`, `cargo check` | **Yes**, by two independent routes: a `build.rs` or proc-macro dependency is compiled *and run* (a `build.rs` writing outside the workspace was reproduced on cargo 1.91.0), **and** `.cargo/config.toml` can set `build.rustc` / `build.rustc-wrapper` to any executable, which cargo then calls with no `build.rs` present (also reproduced) |
 > | ESLint | **Yes** with a flat config, and with any config naming a plugin, parser, processor, or shared-config package |
-> | Stylelint | **Yes** for a `.js`/`.mjs`/`.cjs` config, and for a JSON or `package.json` config naming `extends`, `plugins`, or `customSyntax` (both reproduced) |
+> | Stylelint | **Yes** for a `.js`/`.mjs`/`.cjs`/`.ts` config, and for a JSON or `package.json` config naming `extends`, `plugins`, or `customSyntax` (both reproduced) |
 > | mypy | **Yes if `[tool.mypy] plugins` is set** |
 > | PHPStan | **Yes** for `bootstrapFiles`, project `rules`/`services`, a `.php` `includes:` entry, or composer `autoload.files` in the root **or any dependency** — see below |
 > | Biome | **A weaker yes** — `plugins` loads local GritQL files. That is a pattern DSL, not host code: it can distort what the analysis reports, but it does not execute arbitrary commands. Treat it as a reason to read the plugin, not as a reason to sandbox |
 > | `ruff` | No — a Rust binary with no plugin mechanism |
-> | `go vet`, `staticcheck`, `gofmt` | No. Go has no build-time hook, and even cgo is compiled without running (verified) |
+> | `go vet`, `staticcheck`, `gofmt` | No. Go has no build-time hook, cgo is compiled without running, and `-toolexec` — which *does* call an external program — can only arrive through the environment, which the diff does not control (all verified) |
 > | `tsc` | No |
 >
-> So the safe answer is never "the config looks declarative". It is: **the resolved chain —
-> config, its `extends`/`includes`, the manifest, and the autoloader — names no host code and no
-> external executable.** Anything you have not resolved counts as unresolved, not as safe.
+> So the safe answer is never "the config looks declarative". It is: **the resolved chain — the
+> repository's tool-level settings, the config, its `extends`/`includes`, the manifest and
+> lockfile, the autoloader, and the invocation — names no host code and no external executable
+> that the diff controls.** Anything you have not resolved counts as unresolved, not as safe.
 >
 > **PHPStan's condition is narrow and worth stating exactly**, because the common case is safe.
 > Measured on PHPStan 2.x with PHP 8.3, one file per case:

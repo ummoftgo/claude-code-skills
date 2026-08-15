@@ -88,50 +88,6 @@ PHPStan auto-discovers **three** config names — `phpstan.neon`, `phpstan.neon.
 `phpstan.dist.neon` look unconfigured, and the `--level=5` fallback then overrides the level the
 project actually set.
 
-**Check for code execution before running against an untrusted diff.** Analysis itself is static
-parsing — `paths:` and `scanFiles:` do not run the files. Two things do, measured on PHPStan 2.x
-with PHP 8.3:
-
-- `bootstrapFiles:` in the effective config — declared, so it is visible in the config chain
-  collected below;
-- project-defined `rules:` and `services:` in the effective config — PHPStan instantiates those
-  classes and calls them during analysis;
-- an `includes:` entry that is a `.php` file — PHPStan executes it as dynamic config;
-- `composer.json` → `autoload.files`, in the root package **or in any dependency** — **not
-  declared in `phpstan.neon` at all.** PHPStan loads the composer autoloader, and that runs every
-  entry in `vendor/composer/autoload_files.php`.
-
-For your own or your team's branch this is the ordinary case and needs no action. For a diff you
-would not run — an outside contributor, an unfamiliar dependency — read both before analysing, or
-record static analysis as `skipped-untrusted-execution` per the rule in `SKILL.md`.
-
-Checking the root config and the root `composer.json` is **not enough** — three things hide
-outside them, all reproduced:
-
-- a `bootstrapFiles:` (or `rules:` / `services:`) declared in a file reached through `includes:`;
-- an `includes:` entry that points at a **`.php` file** — PHPStan supports PHP as dynamic config
-  and executes it;
-- a **dependency's** `autoload.files`. Composer aggregates every package's entries into
-  `vendor/composer/autoload_files.php`, and loading the autoloader runs all of them.
-
-Use the config chain `collect_config` already builds below, and read the aggregated autoload list
-rather than the root manifest alone:
-
-```bash
-# Every file in the resolved chain, not just the root three. CONFIG_CHAIN is built below;
-# run this after it, and include any `.php` entry in the includes list as a finding on its own.
-while IFS= read -r cfg; do
-  [ -n "$cfg" ] || continue
-  rg -n '^\s*(bootstrapFiles|rules|services):' -A5 "$cfg" 2>/dev/null
-  case "$cfg" in *.php) echo "executable config in chain: $cfg" ;; esac
-done <<< "$CONFIG_CHAIN"
-
-# Composer: the aggregated list covers dependencies, the root manifest does not.
-[ -f vendor/composer/autoload_files.php ] && \
-  rg -n "=> .*'" vendor/composer/autoload_files.php | head -40
-php -r '$c=json_decode(@file_get_contents("composer.json"),true);print_r($c["autoload"]["files"]??[]);'
-```
-
 **Check the cache location before running under a read-only request.** PHPStan writes its result
 cache to `sys_get_temp_dir()/phpstan` by default — outside the repository, so the default is
 safe. Two settings can move it inside:
@@ -223,7 +179,53 @@ phpmd <src> text cleancode,codesize,naming,unusedcode
 phpcpd <src>
 ```
 
-The gate and the analysis read **the same `PHPSTAN_CONFIG`**. Splitting them is how a check
+The gate and the analysis read **the same `PHPSTAN_CONFIG`**.
+
+### Before analysing an untrusted diff
+
+Analysis itself is static parsing — `paths:` and `scanFiles:` do not run the files. These do,
+all measured on PHPStan 2.x with PHP 8.3:
+
+- `bootstrapFiles:` in the **effective** config — including one declared in a file reached
+  through `includes:`, which the root config alone never shows;
+- project-defined `rules:` and `services:` — PHPStan instantiates those classes and calls them;
+- an `includes:` entry that is a **`.php` file** — PHPStan executes it as dynamic config;
+- `composer.json` → `autoload.files`, in the root package **or in any dependency** — declared
+  nowhere in `phpstan.neon`. PHPStan loads the composer autoloader, which runs every entry in
+  `vendor/composer/autoload_files.php`;
+- a PHPStan extension shipped by a dependency, which `phpstan/extension-installer` activates
+  through `extra.phpstan.includes` with **nothing in the root config** (documented; not
+  reproduced here);
+- the invocation's own `-a` / `--autoload-file`, which loads a file the flag names. That flag is
+  yours, not the diff's — but it belongs in the closure.
+
+Parameter names moved between major versions (`autoload_files` / `autoload_directories` became
+`scanFiles` / `scanDirectories`), so read the config against **the PHPStan version the project
+pins**, not against a remembered spelling.
+
+This runs **after** the config chain above, so `CONFIG_CHAIN` is populated:
+
+```bash
+# Every file in the resolved chain, not just the three root names.
+while IFS= read -r cfg; do
+  [ -n "$cfg" ] || continue
+  rg -n '^\s*(bootstrapFiles|rules|services):' -A5 "$cfg" 2>/dev/null
+  case "$cfg" in *.php) echo "executable config in chain: $cfg" ;; esac
+done <<< "$CONFIG_CHAIN"
+
+# Composer: the aggregated list covers dependencies; the root manifest does not.
+# No `head` — a truncated list reads as a short list, and the entry that matters may be last.
+[ -f vendor/composer/autoload_files.php ] && rg -n "=> .*'" vendor/composer/autoload_files.php
+
+# Dependency-shipped PHPStan extensions, auto-activated by phpstan/extension-installer
+rg -n '"phpstan"' -A5 vendor/*/*/composer.json 2>/dev/null | rg -n 'includes' | head -20
+```
+
+For your own or your team's branch this is the ordinary case and needs no action — but a hook,
+extension, or dependency the diff **adds** is new code whoever wrote it. For a diff you would not
+run, resolve the list above first, or record static analysis as `skipped-untrusted-execution`
+per the rule in `SKILL.md`.
+ Splitting them is how a check
 inspects one file while the run uses another and the repository-internal cache slips through.
 
 ---

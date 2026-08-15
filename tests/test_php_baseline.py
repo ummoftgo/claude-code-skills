@@ -2201,6 +2201,27 @@ class UntrustedExecutionContractTest(unittest.TestCase):
         self.assertIn(".stylelintrc.json", rule)
         self.assertRegex(rule, r"pure JSON")
 
+    def test_the_repository_can_replace_the_tool_itself(self) -> None:
+        """도구 설정보다 한 단계 위다 — `.cargo/config.toml` 과 `.npmrc` 는 도구를 바꾼다 (둘 다 재현)."""
+        rule = self.rule()
+        self.assertRegex(rule, r"replaces or wraps the tool itself")
+        for knob in ("build.rustc-wrapper", ".npmrc", "node-options=--require"):
+            with self.subTest(knob=knob):
+                self.assertIn(knob, rule)
+        self.assertRegex(
+            rule, r"regardless of their own configs",
+            "npm 주입이 도구별 설정과 무관하다는 점이 없다",
+        )
+
+    def test_the_criterion_is_whether_the_diff_controls_it(self) -> None:
+        """메커니즘의 존재가 아니라 diff 가 제어하느냐가 기준이다 — Go 가 반례다."""
+        rule = self.rule()
+        self.assertRegex(rule, r"whether the diff\s+can control it")
+        self.assertRegex(
+            rule, r"never from a file in the repository",
+            "Go 가 왜 안전한지(저장소가 GOFLAGS 를 못 준다)가 없다",
+        )
+
     def test_naming_an_extension_is_not_sufficient_either(self) -> None:
         """Biome 의 GritQL 은 확장이지만 호스트 코드가 아니다 — 같이 묶으면 과잉 차단이다."""
         rule = self.rule()
@@ -2262,6 +2283,32 @@ class UntrustedExecutionContractTest(unittest.TestCase):
                     "신뢰 경계 규칙으로 연결되지 않는다",
                 )
 
+    def test_the_phpstan_precheck_runs_after_the_chain_is_built(self) -> None:
+        """`CONFIG_CHAIN` 을 정의 전에 소비하면 빈 체인으로 조용히 통과한다."""
+        reference = quality_reference("php-quality")
+        definition = reference.index("collect_config() {")
+        consumption = reference.index("executable config in chain")
+        self.assertLess(
+            definition, consumption,
+            "사전 확인 블록이 collect_config 정의보다 앞에 있다 — 문서 순서대로 실행하면 빈 체인이다",
+        )
+
+    def test_the_autoload_list_is_not_truncated(self) -> None:
+        """`head` 로 자르면 잘린 목록이 짧은 목록으로 읽힌다 — 중요한 항목이 마지막일 수 있다."""
+        for line in code_blocks(quality_reference("php-quality")).splitlines():
+            if "autoload_files.php" in line:
+                with self.subTest(command=line.strip()):
+                    self.assertNotIn("head", line, "목록을 잘라 읽는다")
+
+    def test_the_precheck_covers_dependency_extensions_and_versions(self) -> None:
+        reference = " ".join(quality_reference("php-quality").split())
+        self.assertIn("extension-installer", reference, "의존 패키지 확장 자동 활성화가 없다")
+        self.assertIn("--autoload-file", reference, "실행 인자 경로가 없다")
+        self.assertRegex(
+            reference, r"Parameter names moved between major versions",
+            "버전별 파라미터 차이가 없다",
+        )
+
     def test_stylelint_reference_matches_the_top_level_contract(self) -> None:
         """상위는 JSON 도 실행된다고 하는데 하위가 안전하다고 하면 하위가 이긴다 — 명령 옆이니까."""
         reference = " ".join(quality_reference("css-quality").split())
@@ -2314,6 +2361,21 @@ class UntrustedExecutionContractTest(unittest.TestCase):
         self.assertRegex(
             reference, r"own or your team's branch this is the ordinary case",
             "기존 PHP 리뷰가 그대로라는 점이 명시되지 않았다",
+        )
+
+    def test_the_rust_reference_names_the_cargo_config_route(self) -> None:
+        """"이 크레이트엔 build.rs 가 없다"로는 안 끝난다 — `.cargo/config.toml` 이 rustc 를 바꾼다."""
+        execution = " ".join(
+            between(
+                quality_reference("rust-quality"), "## 4. Execution", "## 5. Manual Patterns",
+                label="rust §4",
+            ).split()
+        )
+        self.assertIn(".cargo/config.toml", execution)
+        self.assertRegex(execution, r"build\.rustc-wrapper")
+        self.assertRegex(
+            execution, r"does not settle the question",
+            "build.rs 부재가 결론이 아니라는 점이 없다",
         )
 
     def test_the_rust_reference_repeats_the_warning_where_the_command_is(self) -> None:

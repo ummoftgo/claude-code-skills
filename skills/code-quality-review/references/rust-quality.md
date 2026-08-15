@@ -99,10 +99,21 @@ compile **and execute** `build.rs` and proc macros — verified on cargo 1.91.0 
 that wrote to an absolute path outside the workspace during a `--locked` clippy run. Cargo runs a
 `build.rs` whenever the file exists, with or without a `build =` line in `Cargo.toml`.
 
+**And `build.rs` is not the only route.** `.cargo/config.toml` — a file the repository ships — can
+set `build.rustc` or `build.rustc-wrapper` to any executable, and cargo then calls it on every
+compilation, with no `build.rs` anywhere in the crate (reproduced on cargo 1.91.0). So "this crate
+has no build script" does not settle the question; read `.cargo/config.toml` too.
+
 So there are two questions, not one. `CARGO_TARGET_DIR` and `--locked` answer *"does this write
 into the crate?"*. They do not answer *"is it safe to run this code?"* — see the untrusted-diff
 rule in `SKILL.md`. For an untrusted branch with no sandbox, record clippy and check as
 `skipped-untrusted-execution` rather than running them.
+
+```bash
+# Read before running against a diff you would not run
+rg -n 'rustc|runner|linker' .cargo/config.toml 2>/dev/null
+rg -n '^\s*\[package\]' -A20 Cargo.toml | rg -n 'build\s*='
+```
 
 ```bash
 # Both parts are required. CARGO_TARGET_DIR relocates the build output; --locked stops
