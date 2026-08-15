@@ -61,17 +61,17 @@ Writing a config file changes the user's repository, so the creation path is gat
 ### Stylelint
 ```bash
 # Compact output for review
-npx --no stylelint "**/*.css" "**/*.scss" --formatter=compact
+npx --no -- stylelint "**/*.css" "**/*.scss" --formatter=compact
 
 # Verbose (shows rule names — useful for diagnosing findings)
-npx --no stylelint "**/*.css" "**/*.scss"
+npx --no -- stylelint "**/*.css" "**/*.scss"
 
 # Auto-fix safe issues (formatting, property order)
 # **Read-only:** skip this command; record it as `skipped-read-only`.
-npx --no stylelint "**/*.css" "**/*.scss" --fix
+npx --no -- stylelint "**/*.css" "**/*.scss" --fix
 
 # Specific directory
-npx --no stylelint "src/**/*.scss" --formatter=compact
+npx --no -- stylelint "src/**/*.scss" --formatter=compact
 ```
 
 ---

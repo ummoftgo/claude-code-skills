@@ -23,7 +23,11 @@
 """
 
 import json
+import os
 import re
+import shutil
+import subprocess
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -853,10 +857,11 @@ class PhpToolchainBaseline(unittest.TestCase):
                     line.strip()
                     for line in code_blocks(text).splitlines()
                     # `--no-install` 은 deprecated 별칭이다. 계약은 `--no` 하나로 고정한다.
-                    if re.search(r"\bnpx\s+(?!--no(?:\s|$))", line)
+                    # `--` 없이 쓰면 npx 가 도구의 인자를 가로챈다 (아래 테스트 참조).
+                    if re.search(r"\bnpx\s+(?!--no --\s)", line)
                 ]
                 self.assertEqual(
-                    bare, [], f"{name}: `npx --no` 또는 node_modules/.bin 을 써야 한다"
+                    bare, [], f"{name}: `npx --no -- ` 또는 node_modules/.bin 을 써야 한다"
                 )
 
     def test_the_bare_npx_check_rejects_deprecated_and_unclosed_forms(self) -> None:
@@ -865,14 +870,56 @@ class PhpToolchainBaseline(unittest.TestCase):
             return [
                 line.strip()
                 for line in code_blocks(text).splitlines()
-                if re.search(r"\bnpx\s+(?!--no(?:\s|$))", line)
+                if re.search(r"\bnpx\s+(?!--no --\s)", line)
             ]
 
         self.assertTrue(bare("```bash\nnpx --no-install eslint .\n```"),
                         "`--no-install` 은 deprecated 별칭이므로 거부해야 한다")
         self.assertTrue(bare("```bash\nnpx eslint ."),
                         "닫히지 않은 펜스의 명령도 검사 대상이다")
-        self.assertFalse(bare("```bash\nnpx --no eslint .\n```"))
+        self.assertTrue(bare("```bash\nnpx --no tsc --version\n```"),
+                        "`--` 가 없으면 npx 가 도구의 인자를 가로챈다")
+        self.assertFalse(bare("```bash\nnpx --no -- eslint .\n```"))
+
+    def test_windows_gets_the_cmd_wrapper_form(self) -> None:
+        """`node_modules/.bin/eslint` 은 Windows 에서 실행되지 않는다 — 확장자 없는 셸 스크립트다."""
+        skill = " ".join(read("skills/code-quality-review/SKILL.md").split())
+        self.assertRegex(
+            skill, r"node_modules\\\.bin\\<tool>\.cmd",
+            "Windows 용 `.cmd` 래퍼 형태가 없다",
+        )
+
+    def test_npx_without_a_separator_really_swallows_the_tool_arguments(self) -> None:
+        """이 계약은 추측이 아니라 실측이다 — npm 11.16.0 에서 재현된다.
+
+        `npx --no tsc --version` 은 TypeScript 가 없는 환경에서도 **npm 자신의 버전을 찍고
+        0 으로 끝난다.** 리뷰어는 이걸 "타입 검사 통과"로 기록한다. `--` 를 넣으면 실패한다.
+        """
+        if shutil.which("npx") is None:
+            self.skipTest("npx 없음")
+        with tempfile.TemporaryDirectory() as tmp:
+            Path(tmp, "package.json").write_text('{"name":"t","version":"1.0.0"}')
+            env = {**os.environ, "CI": "1"}
+
+            def run(argv: list[str]):
+                return subprocess.run(
+                    argv, cwd=tmp, env=env, capture_output=True, text=True, timeout=180
+                )
+
+            absent = "definitely-not-a-real-package-9d2f1a"
+            guarded = run(["npx", "--no", "--", absent, "--version"])
+            self.assertNotEqual(
+                guarded.returncode, 0,
+                "`npx --no -- <미설치>` 가 성공했다 — 설치 차단 계약이 깨졌다",
+            )
+            self.assertNotIn(
+                absent, os.listdir(tmp),
+                "읽기 전용 호출이 작업 디렉터리에 무언가를 남겼다",
+            )
+            self.assertEqual(
+                sorted(os.listdir(tmp)), ["package.json"],
+                "npx 호출이 node_modules 등 부산물을 남겼다",
+            )
 
     def test_php_version_resolution_has_a_single_source(self) -> None:
         """GREEN (3단계에서 전환됨) — 버전 해석 네 조각이 본문과 참조에 흩어져 있다.
@@ -967,7 +1014,6 @@ class PhpStanReadOnlyGateTest(unittest.TestCase):
         subdir: str = "",
     ) -> str:
         """게이트 블록을 실제로 실행한다. `extra` 로 include 대상 파일을 함께 놓는다."""
-        import subprocess, tempfile, os
         with tempfile.TemporaryDirectory() as base:
             work = Path(base, subdir) if subdir else Path(base)
             work.mkdir(parents=True, exist_ok=True)
@@ -1418,6 +1464,176 @@ class NodeSecuritySemanticsTest(unittest.TestCase):
             section, r"node_modules/\*/package\.json' \| head",
             "scoped·중첩 의존성을 놓치는 감사 명령이 되살아났다",
         )
+
+
+class TypeScriptReadOnlyRuleTest(unittest.TestCase):
+    """`tsc --noEmit` 의 3분기 규칙을 **실측**으로 고정한다.
+
+    문서가 "읽기 전용에서 안전하다"고 말하는 형태가 실제로 파일을 쓰지 않는지, 그리고
+    "안전한 형태가 없다"고 말하는 형태가 실제로 파일을 남기는지는 문자열 검사로는 알 수 없다.
+    TypeScript 가 없는 환경에서는 skip 한다 — 저장소에 node_modules 를 두지 않기 위해서다.
+    """
+
+    BASE = '{"compilerOptions":{"target":"ES2022","strict":true%s},"include":["src"]}'
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        local = Path("node_modules/.bin/tsc")
+        cls.tsc = [str(local.resolve())] if local.exists() else None
+        if cls.tsc is None and shutil.which("tsc"):
+            cls.tsc = [shutil.which("tsc")]
+        if cls.tsc is None and shutil.which("npx"):
+            probe = subprocess.run(
+                ["npx", "--no", "--", "tsc", "--version"],
+                capture_output=True, text=True, timeout=180,
+            )
+            if probe.returncode == 0 and "Version" in probe.stdout:
+                cls.tsc = ["npx", "--no", "--", "tsc"]
+        if cls.tsc is None:
+            raise unittest.SkipTest("tsc 없음 — 설치 없이 검증할 수 없다")
+
+    def run_check(self, options: str, extra_args: list[str]) -> tuple[int, list[str]]:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "src").mkdir()
+            (root / "src" / "a.ts").write_text("export const x: number = 1;\n")
+            (root / "tsconfig.json").write_text(self.BASE % options)
+            before = {p.name for p in root.iterdir()}
+            done = subprocess.run(
+                [*self.tsc, "--noEmit", *extra_args],
+                cwd=tmp, capture_output=True, text=True, timeout=300,
+            )
+            written = sorted({p.name for p in root.iterdir()} - before)
+            return done.returncode, written
+
+    def test_plain_noemit_writes_nothing(self) -> None:
+        rc, written = self.run_check("", [])
+        self.assertEqual(rc, 0)
+        self.assertEqual(written, [], "옵션 없는 --noEmit 이 파일을 남겼다")
+
+    def test_incremental_noemit_still_writes_buildinfo(self) -> None:
+        """이 쓰기가 사실이기 때문에 `--incremental false` 규칙이 존재한다."""
+        _, written = self.run_check(',"incremental":true', [])
+        self.assertTrue(
+            any(name.endswith(".tsbuildinfo") for name in written),
+            "incremental 프로젝트에서 --noEmit 이 아무것도 안 썼다 — 규칙의 전제가 무너진다",
+        )
+
+    def test_incremental_false_is_the_read_only_safe_form(self) -> None:
+        rc, written = self.run_check(',"incremental":true', ["--incremental", "false"])
+        self.assertEqual(rc, 0, "읽기 전용 안전 형태가 실행에 실패했다")
+        self.assertEqual(written, [], "--incremental false 가 파일을 남겼다")
+
+    def test_composite_has_no_safe_form(self) -> None:
+        """composite 는 회피 시도가 더 나쁘다 — 실패하면서 파일을 남긴다. 그래서 skip 이다."""
+        rc, written = self.run_check(',"composite":true', ["--incremental", "false"])
+        self.assertNotEqual(rc, 0, "composite + --incremental false 가 성공했다")
+        self.assertTrue(
+            any(name.endswith(".tsbuildinfo") for name in written),
+            "실패 실행이 파일을 남기지 않았다면 문서의 경고 근거가 달라진다",
+        )
+
+    def test_the_document_tells_the_same_three_way_rule(self) -> None:
+        reference = read("skills/code-quality-review/references/js-toolchain.md")
+        self.assertIn("--incremental false", reference)
+        self.assertIn("TS6379", reference)
+        composite = between(
+            reference, "`composite: true` is the one case", "So the rule is three-way",
+            label="composite rule",
+        )
+        self.assertIn("skipped-read-only", composite)
+
+
+class NodeSurfacePilotTest(unittest.TestCase):
+    """Node 파일럿 완료 기준 1 — 표본이 오분류되지도, 누락되지도 않는지.
+
+    표의 증거 항목을 **실제로 읽어** 표본 매니페스트와 대조한다. 표본에 필요한 증거가 표에서
+    사라지면 그 표본은 어느 표면에도 걸리지 않고, 리뷰는 조용히 그 파일을 건너뛴다.
+    """
+
+    #: (표본 이름, package.json, 형제 파일들, 기대 표면)
+    WORKSPACES = (
+        ("Vite + Svelte 앱", {"devDependencies": {"vite": "^5", "svelte": "^4"}},
+         ["App.svelte"], {"browser"}),
+        ("Express 서비스", {"dependencies": {"express": "^4"}}, ["server.js"], {"http-server"}),
+        ("bin 을 가진 CLI", {"bin": {"tool": "./cli.js"}}, ["cli.js"], {"native"}),
+        ("서비스 + CLI 겸용", {"dependencies": {"fastify": "^4"}, "bin": {"t": "./c.js"}},
+         ["c.js"], {"http-server", "native"}),
+        ("browser 필드만 있는 패키지", {"browser": "./dist/b.js"}, ["b.js"], {"browser"}),
+        ("표면 증거 없는 라이브러리", {"main": "./index.js"}, ["index.js"], set()),
+    )
+
+    #: 표의 증거 문구 → 표본 매니페스트에서 그 증거를 읽어내는 방법.
+    #: 문구가 표에서 빠지면 EVIDENCE 조회가 실패하고 그 줄이 RED 가 된다.
+    EVIDENCE = {
+        "browser": (
+            ("Vite", lambda m, f: "vite" in _deps(m)),
+            ("webpack", lambda m, f: "webpack" in _deps(m)),
+            ("`*.svelte`", lambda m, f: any(n.endswith(".svelte") for n in f)),
+            ("a `browser` field", lambda m, f: "browser" in m),
+        ),
+        "http-server": (
+            ("Express", lambda m, f: "express" in _deps(m)),
+            ("Fastify", lambda m, f: "fastify" in _deps(m)),
+        ),
+        "native": (
+            ("a `bin` entry", lambda m, f: "bin" in m),
+        ),
+    }
+
+    def surface_table(self) -> str:
+        return between(
+            read("skills/branch-merge-review/SKILL.md"),
+            "### Deciding the JS/TS surface",
+            "A workspace can carry more than one surface",
+            label="surface evidence table",
+        )
+
+    def test_every_sample_workspace_lands_on_its_surface(self) -> None:
+        table = self.surface_table()
+        for name, manifest, siblings, expected in self.WORKSPACES:
+            with self.subTest(workspace=name):
+                found = set()
+                for surface, rules in self.EVIDENCE.items():
+                    for phrase, matches in rules:
+                        self.assertIn(
+                            phrase, table,
+                            f"증거 문구가 표에서 사라졌다: {phrase!r} ({surface})",
+                        )
+                        if matches(manifest, siblings):
+                            found.add(surface)
+                self.assertEqual(
+                    found, expected,
+                    f"{name}: 표의 증거로 {sorted(found)} 가 나왔다 (기대 {sorted(expected)})",
+                )
+
+    def test_a_library_with_no_evidence_is_not_silently_dropped(self) -> None:
+        """증거가 하나도 없는 표본이야말로 규칙이 필요한 곳이다 — 건너뛰기는 답이 아니다."""
+        skill = read("skills/branch-merge-review/SKILL.md")
+        rule = between(
+            skill, "A library with no `bin` entry", "### Deciding the JS/TS surface",
+            label="ambiguous rule",
+        )
+        self.assertIn("ambiguous", rule)
+        self.assertRegex(rule, r"[Dd]o\s+not\s+default it to `native`")
+
+    def test_a_manifest_outranks_the_directory_name(self) -> None:
+        """`server/` 밑의 브라우저 번들을 경로만 보고 HTTP 로 넘기면 CSP·XSS 검토가 빠진다."""
+        skill = " ".join(read("skills/branch-merge-review/SKILL.md").split())
+        self.assertRegex(skill, r"supporting evidence only.{0,40}manifest outranks")
+
+    def test_the_workspace_is_the_unit_not_the_repository(self) -> None:
+        skill = " ".join(read("skills/branch-merge-review/SKILL.md").split())
+        self.assertRegex(skill, r"per workspace, not per repository")
+        self.assertIn("nearest enclosing `package.json`", skill)
+
+
+def _deps(manifest: dict) -> set:
+    return {
+        *manifest.get("dependencies", {}),
+        *manifest.get("devDependencies", {}),
+        *manifest.get("peerDependencies", {}),
+    }
 
 
 class SecurityMetadataAndGuidanceTest(unittest.TestCase):

@@ -1,6 +1,6 @@
 ---
 name: code-quality-review
-description: "Review code for quality and performance issues. Trigger when user asks for code quality review, refactoring advice, or code cleanup. Covers: (1) unnecessary or misleading comments, (2) style inconsistencies vs project conventions, (3) duplicated/redundant code, (4) performance inefficiencies — especially evaluation order (cheap checks before expensive ones). Runs CLI tools automatically (PHPStan/phpcs/phpmd/phpcpd for PHP; ESLint/Biome/svelte-check/knip for JS; Stylelint for CSS/SCSS). Adapts per detected language and framework. Do not use when the request names security as the subject (use web-security-review) or when the scope is a whole branch/PR before merge (use branch-merge-review)."
+description: "Review code for quality and performance issues. Trigger when user asks for code quality review, refactoring advice, or code cleanup. Covers: (1) unnecessary or misleading comments, (2) style inconsistencies vs project conventions, (3) duplicated/redundant code, (4) performance inefficiencies — especially evaluation order (cheap checks before expensive ones). Covers PHP, JavaScript/TypeScript on both sides — browser code and Node services, CLIs, and libraries — and CSS/SCSS. Runs CLI tools automatically (PHPStan/phpcs/phpmd/phpcpd for PHP; ESLint/Biome/oxlint/tsc/svelte-check/knip for JS/TS; Stylelint for CSS/SCSS). Adapts per detected language and framework; a language with no reference here is reported as unsupported rather than checked against another language's rules. Do not use when the request names security as the subject (use web-security-review) or when the scope is a whole branch/PR before merge (use branch-merge-review)."
 ---
 
 # Code Quality Review
@@ -107,13 +107,21 @@ be mistaken for a guard on one command while the rest run unguarded.
 today and fails when one loses its contract line. It does not discover a new reference
 on its own — **when you add a language, add its write-causing commands to that list too.**
 
-**Always invoke npm-hosted tools as `npx --no <tool>`.** Plain `npx` falls back to downloading a
+**Always invoke npm-hosted tools as `npx --no -- <tool>`.** Plain `npx` falls back to downloading a
 missing package into the npm cache, and [npm's docs](https://docs.npmjs.com/cli/commands/npx)
 state that in non-TTY or CI environments `--yes` is assumed — so an agent running `npx eslint`
 non-interactively installs silently, which a read-only review must never do. `--no` makes the
 command fail instead. (`--no-install` is a deprecated alias that npm converts to `--no`; write
-`--no` so the contract has one spelling.) Running
-`node_modules/.bin/<tool>` directly is equally acceptable.
+`--no` so the contract has one spelling.) Running the project-local binary directly is equally
+acceptable — `node_modules/.bin/<tool>` on POSIX, `node_modules\.bin\<tool>.cmd` on Windows,
+where the extensionless file is a shell script that does not execute.
+
+**The `--` separator is not optional.** Without it npx claims flags it recognises before the tool
+ever runs: `npx --no tsc --version` prints *npm's* version and exits `0` on a machine with no
+TypeScript installed — a review would record that as a passing type check. `npx --no -- tsc
+--version` fails loudly instead. Verified on both platforms (npm 11.16.0 on Linux, npm 11.12.1
+under Windows PowerShell 5.1); neither left anything in the working directory. Everything after
+`--` belongs to the tool.
 
 ## Step 1: Detect Stack and Infer Conventions
 

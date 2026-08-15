@@ -39,7 +39,7 @@ fi
 # Biome — use if biome.json exists (replaces ESLint + Prettier)
 if [ ! -f node_modules/.bin/biome ]; then
   npm install --save-dev --save-exact @biomejs/biome
-  # First time: npx --no @biomejs/biome init
+  # First time: npx --no -- @biomejs/biome init
 fi
 
 # Oxlint — use for large codebases or alongside ESLint for speed
@@ -72,44 +72,44 @@ fi
 ### ESLint
 ```bash
 # Report only (no auto-fix)
-npx --no eslint . --format=compact
+npx --no -- eslint . --format=compact
 
 # With specific directories
-npx --no eslint src/ --format=compact --max-warnings=0
+npx --no -- eslint src/ --format=compact --max-warnings=0
 
 # JSON output for scripting
 # **Read-only:** skip this command; record it as `skipped-read-only`.
-npx --no eslint . --format=json -o eslint-report.json
+npx --no -- eslint . --format=json -o eslint-report.json
 
 # Auto-fix safe issues
 # **Read-only:** skip this command; record it as `skipped-read-only`.
-npx --no eslint . --fix
+npx --no -- eslint . --fix
 ```
 
 ### Biome
 ```bash
 # Lint + format check combined
-npx --no @biomejs/biome check .
+npx --no -- @biomejs/biome check .
 
 # CI mode (stricter — fails on warnings too)
-npx --no @biomejs/biome ci .
+npx --no -- @biomejs/biome ci .
 
 # Auto-fix
 # **Read-only:** skip this command; record it as `skipped-read-only`.
-npx --no @biomejs/biome check --write .
+npx --no -- @biomejs/biome check --write .
 ```
 
 ### Oxlint
 ```bash
 # Fast lint pass (good for large codebases)
-npx --no oxlint .
+npx --no -- oxlint .
 
 # With TypeScript support
-npx --no oxlint --tsconfig tsconfig.json .
+npx --no -- oxlint --tsconfig tsconfig.json .
 
 # Auto-fix
 # **Read-only:** skip this command; record it as `skipped-read-only`.
-npx --no oxlint --fix .
+npx --no -- oxlint --fix .
 ```
 
 ### TypeScript — `tsc --noEmit`
@@ -125,22 +125,24 @@ file in the user's repository during a review that promised not to.
 
 ```bash
 # Neither incremental nor composite → --noEmit writes nothing
-npx --no tsc --noEmit
+npx --no -- tsc --noEmit
 
 # A specific project file in a monorepo
-npx --no tsc --noEmit --project packages/api/tsconfig.json
+npx --no -- tsc --noEmit --project packages/api/tsconfig.json
 ```
 
 ```bash
 # incremental: true → turn the build-info write off explicitly. This is the read-only-safe
 # form: it writes nothing, so it runs under a read-only request like any other check.
-npx --no tsc --noEmit --incremental false
+npx --no -- tsc --noEmit --incremental false
 ```
 
-`composite: true` is the one case with no safe form — the project requires emit, and the
-build-info write cannot simply be turned off. Under a read-only request do not improvise a
-redirect: record type checking as `skipped-read-only` and say it needs write permission or a
-non-composite project reference.
+`composite: true` is the one case with no safe form, and trying the incremental escape hatch
+makes it worse rather than better: `tsc --noEmit --incremental false` on a composite project
+fails with `TS6379: Composite projects may not disable incremental compilation` **and still
+leaves `tsconfig.tsbuildinfo` behind** — a failed run that wrote a file (measured on TypeScript
+5.9.3). Under a read-only request do not improvise a redirect: record type checking as
+`skipped-read-only` and say it needs write permission or a non-composite project reference.
 
 So the rule is three-way, not two: **no incremental/composite** → run plain `--noEmit`;
 **incremental** → run `--incremental false`; **composite** → skip and report.
@@ -148,28 +150,28 @@ So the rule is three-way, not two: **no incremental/composite** → run plain `-
 ### svelte-check
 ```bash
 # Machine-readable output
-npx --no svelte-check --output machine
+npx --no -- svelte-check --output machine
 
 # Verbose (includes warnings)
-npx --no svelte-check --output machine-verbose
+npx --no -- svelte-check --output machine-verbose
 
 # Check specific directory
-npx --no svelte-check --workspace src/
+npx --no -- svelte-check --workspace src/
 ```
 
 ### knip — unused code & dependencies
 ```bash
 # Full report: unused files, exports, dependencies
-npx --no knip
+npx --no -- knip
 
 # Fix automatically where possible
 # **Read-only:** skip this command; record it as `skipped-read-only`.
-npx --no knip --fix
+npx --no -- knip --fix
 
 # Specific category
-npx --no knip --include files          # only unused files
-npx --no knip --include dependencies   # only unused npm packages
-npx --no knip --include exports        # only unused exports
+npx --no -- knip --include files          # only unused files
+npx --no -- knip --include dependencies   # only unused npm packages
+npx --no -- knip --include exports        # only unused exports
 ```
 
 ---
