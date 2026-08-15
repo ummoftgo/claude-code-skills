@@ -85,7 +85,7 @@ The last row is the only one without a language axis, and it is narrow on purpos
 
 **If a changed file's language has no language-axis reference, report that language as
 unreviewed and name the paths.** Do not substitute another language's rules — a PHP checklist
-applied to Go produces confident findings about code it does not understand. Review the
+applied to Kotlin produces confident findings about code it does not understand. Review the
 languages that are covered and let the report show the gap.
 
 ## Operating Modes

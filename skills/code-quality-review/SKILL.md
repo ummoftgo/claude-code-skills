@@ -34,9 +34,9 @@ Load all applicable files for full-stack review.
 
 **If no reference exists for a detected language, report that language as unsupported and skip
 its files — do not stop the whole review.** A mixed repository still gets a full PHP review when
-its Go service has no reference yet; what must never happen is substituting another language's
-rules, because a PHP checklist applied to Go produces confident findings about code it does not
-understand. Name the unreviewed paths in the report so the gap is visible.
+its Kotlin service has no reference yet; what must never happen is substituting another
+language's rules, because a PHP checklist applied to Kotlin produces confident findings about
+code it does not understand. Name the unreviewed paths in the report so the gap is visible.
 
 ### What a language reference must contain
 

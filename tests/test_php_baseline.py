@@ -1948,6 +1948,86 @@ class RustReferenceSemanticsTest(unittest.TestCase):
                 self.assertIn(surface, header)
 
 
+class LanguageRegistrationConsistencyTest(unittest.TestCase):
+    """언어 하나를 지원하려면 네 곳에 등록해야 한다. 한 곳을 빠뜨리는 것이 이 구조의 기본 실패다.
+
+    빠뜨리면 조용히 실패한다 — 참조 파일은 있는데 리뷰어가 로드하지 않거나, 분류는 되는데
+    프롬프트가 없어 해당 파일이 아무에게도 안 간다.
+    """
+
+    #: 언어 → (품질 참조, 보안 참조, 분류 표에 쓰이는 확장자)
+    LANGUAGES = {
+        "PHP": ("php-quality.md", "php-backend-security.md", "*.php"),
+        "Python": ("python-quality.md", "python-security.md", "*.py"),
+        "Go": ("go-quality.md", "go-security.md", "*.go"),
+        "Rust": ("rust-quality.md", "rust-security.md", "*.rs"),
+    }
+
+    def test_every_language_has_both_reference_files_on_disk(self) -> None:
+        for language, (quality, security, _) in self.LANGUAGES.items():
+            with self.subTest(language=language):
+                self.assertTrue(
+                    Path("skills/code-quality-review/references", quality).is_file(),
+                    f"{quality} 가 없다",
+                )
+                self.assertTrue(
+                    Path("skills/web-security-review/references", security).is_file(),
+                    f"{security} 가 없다",
+                )
+
+    def test_every_language_is_listed_in_the_quality_skill(self) -> None:
+        skill = read("skills/code-quality-review/SKILL.md")
+        for language, (quality, _, _) in self.LANGUAGES.items():
+            with self.subTest(language=language):
+                self.assertIn(f"references/{quality}", skill, "참조 목록에 없다 — 로드되지 않는다")
+
+    def test_every_language_is_listed_in_the_security_skill(self) -> None:
+        skill = read("skills/web-security-review/SKILL.md")
+        for language, (_, security, _) in self.LANGUAGES.items():
+            with self.subTest(language=language):
+                self.assertIn(f"references/{security}", skill, "참조 표에 없다")
+                self.assertIn(security, skill.split("| Change | Language axis")[1],
+                              "선택 표에 그 언어의 행이 없다")
+
+    def test_every_language_is_classified_by_the_branch_review(self) -> None:
+        skill = read("skills/branch-merge-review/SKILL.md")
+        for language, (_, _, extension) in self.LANGUAGES.items():
+            with self.subTest(language=language):
+                self.assertIn(f"`{extension}`", skill, "분류 표에 확장자가 없다")
+
+    def test_every_language_has_a_reviewer_prompt_focus(self) -> None:
+        """focus 행이 없으면 그 언어는 dispatch 되지 않고 unreviewed 로 보고된다."""
+        prompts = read("skills/branch-merge-review/references/reviewer-prompts.md")
+        focus_table = between(prompts, "| `{language}` | `{focus}` |",
+                              "When a language has no row here", label="focus 표")
+        for language in self.LANGUAGES:
+            expected = "Node/TS" if language == "Node" else language
+            with self.subTest(language=language):
+                self.assertIn(f"| {expected} |", focus_table, "focus 행이 없다")
+
+    def test_the_security_prompt_table_covers_every_language(self) -> None:
+        prompts = read("skills/branch-merge-review/references/reviewer-prompts.md")
+        load_table = between(prompts, "| Changed files | Load |",
+                             "Browser assets only", label="보안 로드 표")
+        for language, (_, security, _) in self.LANGUAGES.items():
+            with self.subTest(language=language):
+                self.assertIn(security, load_table, "보안 리뷰어가 이 언어를 로드하지 않는다")
+
+    def test_the_unsupported_language_example_is_actually_unsupported(self) -> None:
+        """지원 언어를 "참조가 없는 언어" 예시로 쓰면 문서가 자기 자신과 모순된다."""
+        for path in (
+            "skills/code-quality-review/SKILL.md",
+            "skills/web-security-review/SKILL.md",
+        ):
+            text = " ".join(read(path).split())
+            for language in self.LANGUAGES:
+                with self.subTest(skill=path, language=language):
+                    self.assertNotRegex(
+                        text, rf"checklist applied to {language}\b",
+                        f"{language} 는 이제 지원 언어다 — 미지원 예시로 쓸 수 없다",
+                    )
+
+
 class SecurityMetadataAndGuidanceTest(unittest.TestCase):
     """4단계에서 넓힌 라우팅 표면과 표면 참조의 지침 정확성을 고정한다."""
 
