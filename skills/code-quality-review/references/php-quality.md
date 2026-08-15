@@ -195,8 +195,11 @@ if [ "${READ_ONLY:-0}" = "1" ] && [ -z "$EXEC_RISK" ]; then
         # break Windows paths.
         printf "includes:\n    - '%s'\n" "$(realpath "$PHPSTAN_CONFIG")"
       fi
-      printf 'parameters:\n    tmpDir: %s/cache\n' "$PHPSTAN_TMP"
-      printf '    resultCachePath: %s/cache/resultCache.php\n' "$PHPSTAN_TMP"
+      # Quote these for the same reason as the include path — `TMPDIR` can sit under a
+      # directory with a `,` or a ` #` in its name, and then the cache scalar itself is what
+      # breaks NEON (measured: an unquoted `,` gives `Unexpected ','` and no analysis at all).
+      printf "parameters:\n    tmpDir: '%s/cache'\n" "$PHPSTAN_TMP"
+      printf "    resultCachePath: '%s/cache/resultCache.php'\n" "$PHPSTAN_TMP"
       [ -n "$PHPSTAN_CONFIG" ] || printf '    level: 5\n'
     } > "$PHPSTAN_OVERRIDE"
   fi
@@ -238,10 +241,22 @@ isolation and no trust gate at all. The logic is identical: discover the config 
 six names, stop on an untrusted diff that has one, and otherwise redirect both cache keys into
 a temp directory outside the workspace.
 
-**Reproduction status:** the Bash form was measured end-to-end. This form was checked for
-PowerShell 5.1 syntax only — the Windows host used for development has no PHP or PHPStan
-installed. Treat a first Windows run as worth verifying: confirm the repository is unchanged
-afterwards.
+**Reproduction status — read this before relying on it.** The Bash form was measured
+end-to-end: every cache spelling, the trust gate, and the analysis actually running. This form
+was checked for **PowerShell 5.1 syntax only**, because the Windows host used for development
+has no PHP or PHPStan installed.
+
+Two consequences, both deliberate:
+
+- On an untrusted diff this form **stops unconditionally** (`windows-gate-unverified`). It does
+  not try to reproduce the Bash gate's per-risk judgement, because nobody has measured whether
+  it would. A Windows reviewer gets an explicit skip, not a silent gap.
+- For an ordinary review it does isolate the cache, and that path is the one worth checking on
+  first use: run it, then confirm `git status` is clean. If it is, this form can be promoted to
+  measured support; if not, report what appeared.
+
+Until that check happens, treat Windows PHPStan as **provisional**: safe to run on your own
+branch, not to be relied on as the untrusted-diff barrier.
 
 ```powershell
 $PhpstanConfig = ''
@@ -255,12 +270,21 @@ if ($env:PHPSTAN_EXPLICIT_CONFIG) {
 }
 
 # Trust gate — before PHPStan is started in any form.
+# **This form has not been verified end-to-end**, so on an untrusted diff it stops
+# unconditionally rather than imitating the Bash gate's judgement. That is the honest position
+# while the reproduction gap stands: a Windows reviewer gets a clear
+# `skipped-untrusted-execution` instead of a check whose coverage nobody has measured.
 $ExecRisk = @()
 if ($env:UNTRUSTED_DIFF -eq '1') {
+    $ExecRisk += 'windows-gate-unverified'
     if ($PhpstanConfig) { $ExecRisk += "config-present:$PhpstanConfig" }
     if (Test-Path -LiteralPath 'vendor/composer/autoload_files.php') {
         $ExecRisk += 'composer-autoload-files'
     }
+    # A dependency-shipped PHPStan extension activates with nothing in the root config.
+    $hit = Get-ChildItem -Path 'vendor/*/*/composer.json' -ErrorAction SilentlyContinue |
+        Select-String -Pattern '"phpstan"' -SimpleMatch -List
+    if ($hit) { $ExecRisk += 'phpstan-extension' }
 }
 
 if ($ExecRisk) {
@@ -288,13 +312,19 @@ if ($ExecRisk) {
     }
     $cache = (Join-Path $scratch 'cache').Replace('\', '/')
     $lines += 'parameters:'
-    $lines += '    tmpDir: ' + $cache
-    $lines += '    resultCachePath: ' + $cache + '/resultCache.php'
+    # Quoted like the include path: `$env:TEMP` can sit under a directory whose name has
+    # a `,` or a ` #`, and then the cache value itself is what breaks NEON.
+    $lines += "    tmpDir: '" + $cache + "'"
+    $lines += "    resultCachePath: '" + $cache + "/resultCache.php'"
     if (-not $PhpstanConfig) { $lines += '    level: 5' }
     Set-Content -LiteralPath $override -Value $lines -Encoding UTF8
 
-    & $PhpCmd (Get-Command phpstan).Source analyse $SrcDir `
-        --configuration="$override" --no-progress --error-format=raw
+    try {
+        & $PhpCmd (Get-Command phpstan).Source analyse $SrcDir `
+            --configuration="$override" --no-progress --error-format=raw
+    } finally {
+        Remove-Item -LiteralPath $scratch -Recurse -Force -ErrorAction SilentlyContinue
+    }
 }
 ```
 

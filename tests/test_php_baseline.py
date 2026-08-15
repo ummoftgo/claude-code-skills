@@ -796,12 +796,12 @@ class PhpToolchainBaseline(unittest.TestCase):
                 self.assertIn(setting, reference)
         commands = code_blocks(reference)
         self.assertRegex(
-            commands, r"tmpDir: %s/cache", "override 가 tmpDir 을 덮지 않는다",
+            commands, r"tmpDir: '%s/cache'", "override 가 tmpDir 을 인용해 덮지 않는다",
         )
         self.assertRegex(
             commands,
-            r"resultCachePath: %s/cache",
-            "resultCachePath 는 tmpDir 과 독립이라 따로 덮어야 한다",
+            r"resultCachePath: '%s/cache",
+            "resultCachePath 는 tmpDir 과 독립이라 따로, 인용해서 덮어야 한다",
         )
         # 우선순위대로 고른다 — `ls | head -1` 은 사전순이라 phpstan.dist.neon 을 먼저 잡는다.
         self.assertNotRegex(
@@ -1265,10 +1265,21 @@ class PhpStanReadOnlyGateTest(unittest.TestCase):
         reference = quality_reference("php-quality")
         self.assertIn("```powershell", reference, "PowerShell 형태가 없다")
         block = between(reference, "```powershell", "```", label="PowerShell 게이트")
-        for name in (".phpstan.neon", "phpstan.dist.neon"):
+        for name in (".phpstan.neon", "phpstan.neon", ".phpstan.neon.dist",
+                     "phpstan.neon.dist", ".phpstan.dist.neon", "phpstan.dist.neon"):
             with self.subTest(config=name):
-                self.assertIn(name, block, "설정 탐지 목록이 POSIX 와 다르다")
+                self.assertIn(f"'{name}'", block, "설정 탐지 목록이 POSIX 와 다르다")
         self.assertIn("skipped-untrusted-execution", block, "신뢰 게이트가 없다")
+        # POSIX 와 같은 위험을 봐야 한다 — 한쪽만 탐지하면 Windows 리뷰만 코드를 실행한다.
+        for risk in ("config-present", "composer-autoload-files", "phpstan-extension"):
+            with self.subTest(risk=risk):
+                self.assertIn(risk, block, f"{risk} 를 POSIX 만 탐지한다")
+        # end-to-end 미검증 상태에서는 판정을 흉내내지 말고 멈춘다.
+        self.assertIn(
+            "windows-gate-unverified", block,
+            "검증되지 않은 게이트가 신뢰하지 않는 diff 를 판정하려 든다",
+        )
+        self.assertIn("finally", block, "임시 디렉터리를 정리하지 않는다")
         self.assertIn("tmpDir: ", block, "캐시를 옮기지 않는다")
         self.assertIn("resultCachePath: ", block, "resultCachePath 를 옮기지 않는다")
         self.assertRegex(
@@ -1279,10 +1290,18 @@ class PhpStanReadOnlyGateTest(unittest.TestCase):
             block, r"StartsWith\(\$repoRoot",
             "임시 경로가 저장소 안인지 확인하지 않는다",
         )
+        flat = " ".join(reference.split())
         self.assertRegex(
-            " ".join(reference.split()),
-            r"checked for PowerShell 5\.1 syntax only",
+            flat, r"checked for \*\*PowerShell 5\.1 syntax only\*\*|PowerShell 5\.1 syntax only",
             "재현하지 못한 형태라는 사실이 표시되지 않았다",
+        )
+        self.assertRegex(
+            flat, r"treat Windows PHPStan as \*\*provisional\*\*",
+            "검증 상태가 '잠정'으로 명시되지 않았다 — 측정된 형태와 같아 보인다",
+        )
+        self.assertRegex(
+            flat, r"stops unconditionally",
+            "미검증 상태에서 판정을 흉내내지 않는다는 점이 산문에 없다",
         )
 
     def test_the_windows_form_parses_as_powershell(self) -> None:
@@ -2528,9 +2547,9 @@ class UntrustedExecutionContractTest(unittest.TestCase):
         """
         commands = code_blocks(quality_reference("php-quality"))
         self.assertIn("phpstan-review.neon", commands, "override 설정을 만들지 않는다")
-        self.assertRegex(commands, r"tmpDir: %s/cache", "캐시를 임시 경로로 보내지 않는다")
-        self.assertRegex(commands, r"resultCachePath: %s/cache",
-                         "resultCachePath 는 tmpDir 과 독립이라 따로 덮어야 한다")
+        self.assertRegex(commands, r"tmpDir: '%s/cache'", "캐시를 인용해 임시 경로로 보내지 않는다")
+        self.assertRegex(commands, r"resultCachePath: '%s/cache",
+                         "resultCachePath 는 tmpDir 과 독립이라 따로, 인용해서 덮어야 한다")
         self.assertIn("includes:", commands, "프로젝트 설정을 include 하지 않는다")
         reference = " ".join(quality_reference("php-quality").split())
         self.assertRegex(
