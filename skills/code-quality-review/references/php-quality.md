@@ -83,22 +83,21 @@ A project config takes precedence over `--level`. Use `if`/`else` rather than `&
 PHPStan exits non-zero when it finds errors, which would trigger a `||` fallback and run the
 analysis twice.
 
-PHPStan auto-discovers **three** config names — `phpstan.neon`, `phpstan.neon.dist`, and
-`phpstan.dist.neon`. Checking only the first two makes a project that ships just
-`phpstan.dist.neon` look unconfigured, and the `--level=5` fallback then overrides the level the
-project actually set.
+PHPStan auto-discovers **six** config names, in this order — `.phpstan.neon`, `phpstan.neon`,
+`.phpstan.neon.dist`, `phpstan.neon.dist`, `.phpstan.dist.neon`, `phpstan.dist.neon`. The three
+dot-prefixed ones are the easy ones to forget: a project shipping only `.phpstan.neon` looks
+unconfigured, the `--level=5` fallback then overrides the level the project actually set, and
+the read-only cache isolation below never fires because it keys off the same variable.
 
-**Check the cache location before running under a read-only request.** PHPStan writes its result
-cache to `sys_get_temp_dir()/phpstan` by default — outside the repository, so the default is
-safe. Two settings can move it inside:
+**Under a read-only request the cache is relocated, not inspected.** PHPStan writes its result
+cache to `sys_get_temp_dir()/phpstan` by default — outside the repository — but two settings move
+it inside, `tmpDir` and `resultCachePath`, and the second is independent of the first. Finding
+them reliably would mean parsing NEON across the whole `includes:` graph, and **unknown is not
+safe**: a config that could not be read is exactly the case where a write would be a surprise.
 
-- `tmpDir` — a **relative** value resolves against the config file's directory;
-- `resultCachePath` — sets the cache file directly, **independently of `tmpDir`**, so checking
-  `tmpDir` alone misses it.
-
-Read **the config actually in effect**, not just the root auto-discovered names, and follow
-`includes:` **all the way down** — a grandparent config can set the cache path, and each include
-list resolves against the directory of the file that declares it.
+So the block below does not look for them. It writes an override config outside the workspace
+that `includes:` the project's own and points both cache keys at a temp directory. Whatever the
+project declared, and in whichever of NEON's spellings, the cache lands outside.
 
 ```bash
 # One variable decides everything below: which config PHPStan will actually use.
@@ -190,7 +189,11 @@ if [ "${READ_ONLY:-0}" = "1" ] && [ -z "$EXEC_RISK" ]; then
     PHPSTAN_OVERRIDE="$PHPSTAN_TMP/phpstan-review.neon"
     {
       if [ -n "$PHPSTAN_CONFIG" ]; then
-        printf 'includes:\n    - %s\n' "$(realpath "$PHPSTAN_CONFIG")"
+        # **Quote the path.** Unquoted, NEON reads ` #` as a comment and `,` as a separator, so
+        # a project under `/srv/has #hash/` or `/srv/a,b/` fails to parse (measured). Single
+        # quotes, not double: NEON treats `\` as an escape inside double quotes, which would
+        # break Windows paths.
+        printf "includes:\n    - '%s'\n" "$(realpath "$PHPSTAN_CONFIG")"
       fi
       printf 'parameters:\n    tmpDir: %s/cache\n' "$PHPSTAN_TMP"
       printf '    resultCachePath: %s/cache/resultCache.php\n' "$PHPSTAN_TMP"
@@ -198,6 +201,10 @@ if [ "${READ_ONLY:-0}" = "1" ] && [ -z "$EXEC_RISK" ]; then
     } > "$PHPSTAN_OVERRIDE"
   fi
 fi
+
+# Clean the scratch directory up when the shell exits — it is outside the workspace, but a
+# review that leaves one per run still litters the machine.
+[ -n "${PHPSTAN_TMP:-}" ] && trap 'rm -rf "$PHPSTAN_TMP"' EXIT
 
 # PHPStan — run under the correct PHP binary
 if [ -n "$EXEC_RISK" ]; then
@@ -275,7 +282,9 @@ if ($ExecRisk) {
         # NEON reads `\` as an escape inside quoted strings; forward slashes avoid the question
         # entirely and PHP accepts them on Windows.
         $lines += 'includes:'
-        $lines += '    - ' + $full.Replace('\', '/')
+        # Single-quoted for the same reason as the Bash form: an unquoted ` #` or `,` in
+        # the path breaks NEON parsing, and single quotes keep `\` literal.
+        $lines += "    - '" + $full.Replace('\', '/') + "'"
     }
     $cache = (Join-Path $scratch 'cache').Replace('\', '/')
     $lines += 'parameters:'
@@ -387,11 +396,11 @@ Replace `<src>` with the actual source directory (e.g., `src/`, `.`, `app/`).
 `--configuration` variant. Nothing here repeats a command: a second spelling would drift, and a
 bare `phpstan analyse --level=5` would override the level the project deliberately set.
 
-If either setting resolves inside the repository — or the effective config cannot be determined —
-do not run the analysis under a read-only request. Record static analysis as `skipped-read-only`
-and say it needs write permission or a cache path outside the repository. **Unknown is not safe**:
-a config that could not be read is exactly the case where a write would be a surprise. In normal
-mode the cache write is expected and desirable.
+Under a read-only request the cache is **relocated, not judged** — §0 writes an override config
+outside the workspace that includes the project's own and redirects both cache keys there. So
+there is no "cache path is inside, therefore skip" decision to make any more: the analysis runs,
+the findings are the project's own, and the repository is untouched. In normal mode PHPStan uses
+the project's cache exactly as before, which is what makes repeat runs fast.
 
 Output: one line per error — `file.php:line:message`. Feed directly into report.
 

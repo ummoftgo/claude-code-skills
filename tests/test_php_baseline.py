@@ -828,14 +828,27 @@ class PhpToolchainBaseline(unittest.TestCase):
             "부모 설정이 캐시 경로를 정할 수 있으므로 includes 를 따라야 한다",
         )
         self.assertRegex(
-            reference, r"independently of `tmpDir`|독립",
+            " ".join(reference.split()),
+            r"independent of the first|independently of `tmpDir`|독립",
             "resultCachePath 가 tmpDir 과 독립이라는 사실이 이 항목의 실질이다",
         )
         self.assertRegex(
-            reference, r"[Uu]nknown is not safe|판정할 수 없|cannot be determined",
+            " ".join(reference.split()),
+            r"[Uu]nknown is not\s+\*\*safe\*\*|[Uu]nknown is not safe|판정할 수 없|cannot be determined",
             "실효 설정을 못 읽는 경우를 안전으로 처리하면 게이트가 뚫린다",
         )
-        self.assertRegex(reference, r"skipped-read-only")
+        # 계약이 "차단"에서 "격리"로 바뀌었다 — 캐시 때문에 분석을 건너뛰라는 옛 지시가
+        # 남으면 리뷰어가 그쪽을 따라 리뷰를 통째로 빠뜨린다.
+        self.assertNotRegex(
+            " ".join(reference.split()),
+            r"(?i)do not run the analysis under a read-only request",
+            "옛 '캐시가 안이면 건너뛴다' 지시가 남아 있다",
+        )
+        self.assertRegex(
+            " ".join(reference.split()),
+            r"cache is relocated, not inspected|relocated, not judged",
+            "새 정책(격리)이 산문에 없다",
+        )
 
     def test_normal_mode_still_installs_missing_tools(self) -> None:
         """GREEN — 읽기 전용 조건을 잘못 걸어 일반 모드까지 죽이면 리뷰가 빈 껍데기가 된다.
@@ -1032,9 +1045,9 @@ class PhpStanReadOnlyGateTest(unittest.TestCase):
     def php_cmd(cls) -> str:
         """PHPStan 이 실제로 도는 PHP 를 고른다.
 
-        게이트가 `dump-parameters` 로 유효 설정을 얻으므로, PHPStan 이 뜨지 않는 PHP 를
-        쓰면 **모든** 케이스가 판정 불가(fail-closed)로 차단된다 — 그건 게이트가 아니라
-        환경을 시험하는 것이다.
+        게이트는 override 설정으로 PHPStan 을 돌린다. PHPStan 이 뜨지 않는 PHP 를 쓰면
+        분석이 시작도 못 하고, 그러면 "저장소가 그대로다"가 격리의 증거가 아니라 실패의
+        부산물이 된다 — 게이트가 아니라 환경을 시험하는 셈이다.
         """
         if getattr(cls, "_php_cmd", None):
             return cls._php_cmd
@@ -1111,7 +1124,12 @@ class PhpStanReadOnlyGateTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as base:
             work = Path(base)
             (work / "src").mkdir()
-            (work / "src" / "A.php").write_text("<?php class A {}")
+            # 분석이 **실제로 돌았는지** 알아야 하므로, level 0 에서도 잡히는 오류를 심는다.
+            # `--error-format=raw` 는 정상 종료 시 아무것도 출력하지 않아서, 빈 출력만으로는
+            # "분석 성공"과 "시작도 못 함"을 구분할 수 없다.
+            (work / "src" / "A.php").write_text(
+                "<?php class A { public function f() { return new NoSuchClassHere(); } }"
+            )
             if config is not None:
                 (work / "phpstan.neon").write_text(config)
             for name, body in (extra or {}).items():
@@ -1129,7 +1147,13 @@ class PhpStanReadOnlyGateTest(unittest.TestCase):
                 env={**os.environ, "READ_ONLY": "1", **(env or {})}, timeout=300,
             )
             after = {str(f.relative_to(work)) for f in work.rglob("*") if f.is_file()}
-            return sorted(after - before), done.stdout + done.stderr
+            output = done.stdout + done.stderr
+            # PHPStan 이 설정 오류로 분석 전에 죽어도 "새 파일 없음"은 성립한다. 그러면
+            # 격리를 검증한 게 아니라 실패를 검증한 것이 된다 — 같은 유형의 검증 설계
+            # 결함이 이 작업에서 두 번 있었다. 분석이 실제로 끝났는지 함께 본다.
+            # 심어 둔 오류가 보고되면 분석이 끝까지 갔다는 뜻이다.
+            analysed = "NoSuchClassHere" in output
+            return sorted(after - before), output, analysed
 
     #: 캐시를 저장소 안으로 보내려는 유효 NEON 표기들. 판정이 아니라 **격리**로 막으므로
     #: 전부 분석이 돌면서 저장소는 그대로여야 한다.
@@ -1146,37 +1170,84 @@ class PhpStanReadOnlyGateTest(unittest.TestCase):
     def test_no_spelling_of_an_inside_cache_writes_to_the_repository(self) -> None:
         for name, config in self.CACHE_INSIDE_SPELLINGS.items():
             with self.subTest(spelling=name):
-                written, _ = self.repo_unchanged(config)
+                written, output, analysed = self.repo_unchanged(config)
                 self.assertEqual(
                     written, [], f"{name}: 저장소에 파일이 생겼다",
+                )
+                self.assertTrue(
+                    analysed,
+                    f"{name}: 분석이 끝나지 않았다 — 격리가 아니라 실패를 본 것이다:\n"
+                    f"{output[:400]}",
                 )
 
     def test_a_cache_setting_inside_an_include_is_neutralised_too(self) -> None:
         """include 안에 있어도 마찬가지다 — 체인을 따라갈 필요가 없다."""
-        written, _ = self.repo_unchanged(
+        written, output, analysed = self.repo_unchanged(
             "includes: [\n    inner.neon\n]\nparameters:\n    level: 0\n",
             extra={"inner.neon": "parameters:\n    tmpDir: .cache\n"},
         )
         self.assertEqual(written, [], "include 안의 캐시 설정이 저장소에 썼다")
+        self.assertTrue(analysed, f"분석이 끝나지 않았다:\n{output[:400]}")
 
     def test_a_repository_pointing_tmpdir_env_is_neutralised(self) -> None:
         """`TMPDIR` 이 저장소 안이면 설정이 없어도 기본 캐시가 안으로 들어온다."""
-        written, _ = self.repo_unchanged(
+        written, output, analysed = self.repo_unchanged(
             "parameters:\n    level: 0\n    paths:\n        - src\n",
             env={"TMPDIR": "."},
         )
         self.assertEqual(written, [], "TMPDIR 경유로 저장소에 썼다")
+        self.assertTrue(analysed, f"분석이 끝나지 않았다:\n{output[:400]}")
+
+    def test_a_path_with_neon_metacharacters_still_works(self) -> None:
+        """생성한 override 가 프로젝트 경로를 인용하지 않으면 NEON 파싱이 깨진다.
+
+        ` #` 는 주석 시작이고 `,` 는 구분자다. 그런 디렉터리 밑의 프로젝트에서는
+        include 가 통째로 무시되거나 분석이 실패한다 (실측).
+        """
+        for name in ("has #hash", "has,comma"):
+            with self.subTest(directory=name):
+                with tempfile.TemporaryDirectory() as base:
+                    work = Path(base, name)
+                    (work / "src").mkdir(parents=True)
+                    (work / "src" / "A.php").write_text(
+                        "<?php class A { public function f() { return new NoSuchClassHere(); } }"
+                    )
+                    (work / "phpstan.neon").write_text(
+                        "parameters:\n    level: 0\n    paths:\n        - src\n    tmpDir: .cache\n"
+                    )
+                    (work / "gate.sh").write_text(
+                        self.gate_script().replace(
+                            f"echo {self.ANALYSIS_MARKER} #",
+                            "$PHP_CMD $(command -v phpstan) analyse",
+                        ),
+                        encoding="utf-8",
+                    )
+                    done = subprocess.run(
+                        ["bash", "gate.sh"], cwd=str(work), capture_output=True, text=True,
+                        env={**os.environ, "READ_ONLY": "1"}, timeout=300,
+                    )
+                    output = done.stdout + done.stderr
+                    self.assertIn(
+                        "NoSuchClassHere", output,
+                        f"{name}: 분석이 끝나지 않았다 — 경로 인용이 빠졌을 수 있다:\n{output[:400]}",
+                    )
+                    leftover = [
+                        f for f in work.rglob("*")
+                        if f.is_file() and f.name not in {"gate.sh", "phpstan.neon", "A.php"}
+                    ]
+                    self.assertEqual(leftover, [], f"{name}: 저장소에 파일이 생겼다")
 
     def test_the_analysis_still_runs(self) -> None:
         """전부 막으면 계약은 지켜지지만 리뷰가 없다 — 분석은 돌아야 한다."""
-        _, output = self.repo_unchanged(
+        _, output, analysed = self.repo_unchanged(
             "parameters:\n    level: 0\n    paths:\n        - src\n    tmpDir: .cache\n"
         )
         self.assertNotIn("skipped", output, "분석이 건너뛰어졌다")
+        self.assertTrue(analysed, f"분석이 끝나지 않았다:\n{output[:400]}")
 
     def test_the_project_configuration_still_applies(self) -> None:
         """override 가 프로젝트 설정을 덮어쓰면 리뷰 내용이 달라진다 — include 로 살린다."""
-        _, output = self.repo_unchanged(
+        _, output, _analysed = self.repo_unchanged(
             "parameters:\n    level: 9\n    paths:\n        - src\n    tmpDir: .cache\n",
             extra={"src/B.php": "<?php class B { public function f(): int { return 'x'; } }"},
         )
@@ -1246,7 +1317,7 @@ class PhpStanReadOnlyGateTest(unittest.TestCase):
 
     def test_a_dot_prefixed_config_is_not_missed(self) -> None:
         """`.phpstan.neon` 만 있는 프로젝트도 격리되어야 한다."""
-        written, _ = self.repo_unchanged(
+        written, _output, _analysed = self.repo_unchanged(
             None,
             extra={".phpstan.neon": "parameters:\n    level: 0\n    paths:\n        - src\n    tmpDir: .cache\n"},
         )
