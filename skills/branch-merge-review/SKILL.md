@@ -393,14 +393,14 @@ grep -rn "{@html" --include="*.svelte" <implicated_files>
 grep -rnP "localStorage|sessionStorage" --include="*.js" --include="*.svelte" <implicated_files>
 
 # Python — injection sinks, unsafe deserialization, template escape hatches, weak randomness
-grep -rnP "execute\(f["']|execute\(.*%\s*\(|\.raw\(|\.extra\(" --include="*.py" <implicated_files>
+grep -rnP 'execute\(f["'"'"']|execute\(.*%\s*\(|\.raw\(|\.extra\(' --include="*.py" <implicated_files>
 grep -rnP "shell\s*=\s*True|os\.system|os\.popen" --include="*.py" <implicated_files>
 grep -rnP "pickle\.loads?|yaml\.load\(|\beval\(|\bexec\(" --include="*.py" <implicated_files>
 grep -rnP "mark_safe|\|safe|Markup\(|Template\(" --include="*.py" <implicated_files>
 grep -rnP "random\.(choice|randint|choices)|md5\(|sha1\(|verify\s*=\s*False" --include="*.py" <implicated_files>
 
 # Go — shell re-entry, formatted SQL, the wrong template package, weak randomness
-grep -rnP "exec\.Command\("(sh|bash|cmd|powershell)"" --include="*.go" <implicated_files>
+grep -rnP 'exec\.Command\("(sh|bash|cmd|powershell)"' --include="*.go" <implicated_files>
 grep -rnP "(Query|Exec|QueryRow)\w*\(\s*fmt\.Sprintf" --include="*.go" <implicated_files>
 grep -rn '"text/template"' --include="*.go" <implicated_files>
 grep -rnP "math/rand|InsecureSkipVerify|crypto/(md5|sha1)" --include="*.go" <implicated_files>
@@ -408,7 +408,7 @@ grep -rnP "math/rand|InsecureSkipVerify|crypto/(md5|sha1)" --include="*.go" <imp
 # Rust — reachable panics, formatted SQL, shell re-entry, unsafe, TLS bypass
 grep -rnP "\.unwrap\(\)|\.expect\(" --include="*.rs" <implicated_files>
 grep -rnP "query\(&?format!|sql_query\(|execute\(&?format!" --include="*.rs" <implicated_files>
-grep -rnP "Command::new\("(sh|bash|cmd|powershell)"" --include="*.rs" <implicated_files>
+grep -rnP 'Command::new\("(sh|bash|cmd|powershell)"' --include="*.rs" <implicated_files>
 grep -rnP "unsafe\s*\{|from_raw_parts|get_unchecked|transmute" --include="*.rs" <implicated_files>
 grep -rnP "danger_accept_invalid_certs|SmallRng|seed_from_u64" --include="*.rs" <implicated_files>
 ```

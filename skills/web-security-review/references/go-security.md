@@ -112,9 +112,13 @@ rg -n '(Query|Exec|QueryRow)\w*\(\s*(fmt\.Sprintf|".*"\s*\+)' --glob "*.go"
 ## 4. Template Rendering
 
 **Severity if violated**: High — `text/template` into HTML is an XSS sink, and that is what the
-severity should say. Raise it to Critical only with a further condition: the template *text*
-itself comes from input, or the data namespace exposes a function with side effects, which turns
-rendering into execution rather than injection
+severity should say.
+
+Raise to Critical only when execution is actually reachable. Go templates call **only** the
+functions and methods the data namespace exposes, so an attacker-controlled template text is not
+code execution by itself — it is XSS plus whatever that namespace happens to reach. Critical needs
+a named target: a `FuncMap` entry or an exported method on the data that writes, deletes, sends,
+or shells out. Name it in the finding; if you cannot, the severity is High
 
 ### MUST
 - MUST use **`html/template`** for anything rendered into HTML. `text/template` performs no
@@ -200,7 +204,7 @@ Read the match before rating it — these settings are not equivalent:
 |---|---|
 | `GOSUMDB=off` | the checksum database is disabled **globally**. High: nothing verifies a module the `go.sum` has not already pinned |
 | `GOPRIVATE` / `GONOSUMDB` | the normal way to exempt an *internal* module path from the proxy and sum database. Check that the patterns are specific — a bare `*` is the `GOSUMDB=off` case wearing a different name |
-| `GOINSECURE` | allows plain HTTP for the listed patterns. Same test: how specific is the pattern |
+| `GOINSECURE` | allows module fetch over plain HTTP for the listed patterns — **specificity narrows the blast radius, it does not make it safe.** Report it, and say which paths it covers; a narrow pattern is a smaller finding, not a non-finding |
 | `GOFLAGS=-mod=mod` | re-enables automatic `go.mod` edits during a build, so the built tree can differ from the reviewed one |
 
 `GONOSUMCHECK` is **not** a Go environment variable — it belonged to the pre-modules `vgo`

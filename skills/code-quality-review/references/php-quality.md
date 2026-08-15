@@ -94,6 +94,8 @@ with PHP 8.3:
 
 - `bootstrapFiles:` in the effective config — declared, so it is visible in the config chain
   collected below;
+- project-defined `rules:` and `services:` in the effective config — PHPStan instantiates those
+  classes and calls them during analysis;
 - `composer.json` → `autoload.files` — **not declared in `phpstan.neon` at all.** PHPStan loads
   the composer autoloader, so those files run even when the config mentions nothing.
 
@@ -102,7 +104,7 @@ would not run — an outside contributor, an unfamiliar dependency — read both
 record static analysis as `skipped-untrusted-execution` per the rule in `SKILL.md`.
 
 ```bash
-rg -n '^\s*bootstrapFiles:' -A5 phpstan.neon phpstan.neon.dist phpstan.dist.neon 2>/dev/null
+rg -n '^\s*(bootstrapFiles|rules|services):' -A5 phpstan.neon phpstan.neon.dist phpstan.dist.neon 2>/dev/null
 php -r '$c=json_decode(@file_get_contents("composer.json"),true);print_r($c["autoload"]["files"]??[]);'
 ```
 

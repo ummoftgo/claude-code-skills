@@ -71,10 +71,12 @@ fi
 
 ### ESLint
 
-**ESLint runs the project's config.** A flat `eslint.config.js` is a JavaScript module that gets
-imported and executed — verified in this repository. On an untrusted diff that config is code from
-the diff, so apply the untrusted-diff rule in `SKILL.md` before running it. A `biome.json` or a
-`.eslintrc.json` is declarative and does not carry this problem.
+**ESLint runs the project's config, and a JSON config is not an exception.** A flat
+`eslint.config.js` is a JavaScript module that gets imported and executed. A `.eslintrc.json` is
+pure data — but `{"plugins": ["probe"]}` in it still loads and runs `eslint-plugin-probe`, and the
+same holds for `parser`, `processor`, and an `extends` that resolves to a package. Both were
+reproduced here. Read what the effective config *names*, not what it is written in, and apply the
+untrusted-diff rule in `SKILL.md`. `biome.json` does not load third-party extensions.
 
 ```bash
 # Report only (no auto-fix)

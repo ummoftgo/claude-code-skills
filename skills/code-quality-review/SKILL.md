@@ -31,19 +31,30 @@ Detect the active shell before using a snippet. On POSIX use `command -v`, `[ -f
 > not running attacker-controlled code are different guarantees, and the read-only flags above
 > only buy the first. Measured in this repository:
 >
+> **The test is not the config's file format.** A declarative config still executes code when it
+> *names* code: `.eslintrc.json` is pure JSON, and `{"plugins": ["probe"]}` in it loads and runs
+> `eslint-plugin-probe` — reproduced here. Three routes, any one of which is enough:
+>
+> 1. **The config is a program** — `eslint.config.js`, `.stylelintrc.js`.
+> 2. **The config names code** — `plugins`, `parser`, `processor`, an `extends` that resolves to a
+>    package, mypy's `plugins`, PHPStan's `bootstrapFiles` / custom `rules` / `services`.
+> 3. **The tool loads code through the project manifest** — cargo runs `build.rs`, PHPStan loads
+>    the composer autoloader and with it `autoload.files`.
+>
 > | Tool | Executes code from the diff? |
 > |---|---|
-> | `cargo clippy`, `cargo check` | **Always, if a `build.rs` exists** — it and proc macros are compiled *and run*. A `build.rs` writing outside the workspace was reproduced on cargo 1.91.0 |
-> | ESLint | **Always with a flat config** — `eslint.config.js` is a JS module that is imported and run |
-> | Stylelint | **If the config is `.stylelintrc.js`** (a JSON/YAML config is not executed) |
-> | mypy | **If `[tool.mypy] plugins` is set** — the plugin module is imported |
-> | PHPStan | **If `bootstrapFiles:` or composer `autoload.files` is present** — see below |
+> | `cargo clippy`, `cargo check` | **Yes if a `build.rs` or a proc-macro dependency exists** — compiled *and run*. A `build.rs` writing outside the workspace was reproduced on cargo 1.91.0 |
+> | ESLint | **Yes** with a flat config, **and yes** with a JSON config that names a plugin, parser, processor, or shared config package |
+> | Stylelint | **Yes** for a `.js` config, **and yes** for a JSON config naming `plugins` or `extends` |
+> | mypy | **Yes if `[tool.mypy] plugins` is set** |
+> | PHPStan | **Yes if `bootstrapFiles:`, project `rules`/`services`, or composer `autoload.files` is present** — see below |
 > | `ruff` | No — a Rust binary with no plugin mechanism |
 > | `go vet`, `staticcheck`, `gofmt` | No. Go has no build-time hook, and even cgo is compiled without running (verified) |
-> | `tsc`, Biome | No — `tsconfig.json` and `biome.json` are declarative |
+> | `tsc`, Biome | No — neither loads third-party extensions |
 >
-> The pattern is **the config format, not the tool**: a config that is a program runs, a config
-> that is data does not. Check which one the project ships before deciding.
+> So the safe case is narrow and specific: **a config that names no extension at all**. Read the
+> effective config, follow its `extends`/`includes` chain, and decide from what it names — not
+> from whether it happens to end in `.json`.
 >
 > **PHPStan's condition is narrow and worth stating exactly**, because the common case is safe.
 > Measured on PHPStan 2.x with PHP 8.3, one file per case:
@@ -53,6 +64,7 @@ Detect the active shell before using a snippet. On POSIX use `command -v`, `[ -f
 > | `paths:` — the files being analysed | No. Analysis is static parsing |
 > | `scanFiles:` | No |
 > | `bootstrapFiles:` in the config | **Yes** |
+> | project `rules:` / `services:` in the config | **Yes** — a project-defined rule or extension is a class PHPStan instantiates and calls during analysis |
 > | `composer.json` → `autoload.files` | **Yes**, with nothing declared in `phpstan.neon` — the composer autoloader is loaded, so those files run |
 >
 > So a PHP project with neither `bootstrapFiles` nor `autoload.files` does not execute anything
@@ -60,11 +72,18 @@ Detect the active shell before using a snippet. On POSIX use `command -v`, `[ -f
 > you would not run.
 >
 > **When the diff is untrusted** — an external contributor's branch, an unfamiliar dependency, any
-> code you would not run — the executing tools need isolation before they run: a sandbox with the
-> workspace mounted read-only, `HOME` / `CARGO_HOME` / `CARGO_TARGET_DIR` pointed outside it, and
-> no network. Without that isolation, record the check as **`skipped-untrusted-execution`** and
-> say what it would have taken to run it. Reviewing your own team's branch is the ordinary case
-> and needs none of this — the rule exists so the exception is a decision, not an oversight.
+> code you would not run — the executing tools need isolation before they run. A workspace mounted
+> read-only is **not** enough on its own: the `build.rs` reproduced above wrote to an absolute path
+> outside the workspace, which a workspace-only restriction does nothing about. The isolation has
+> to cover the host: every writable path the process can reach, the network, and the environment
+> (`HOME`, `CARGO_HOME`, `CARGO_TARGET_DIR`, `npm_config_cache`, `GOPATH`) pointed into the
+> sandbox. Without that, record the check as **`skipped-untrusted-execution`** and say what it
+> would have taken to run it.
+>
+> Reviewing your own team's branch is the ordinary case and needs none of this. But "our repo" is
+> not a standing exemption for what the diff *adds*: a newly introduced build hook, plugin, or
+> dependency is code that was not there before, and it earns its own look regardless of who wrote
+> it. The rule exists so the exception is a decision, not an oversight.
 
 
 ## Reference Files

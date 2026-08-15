@@ -1928,6 +1928,22 @@ class GoReferenceSemanticsTest(unittest.TestCase):
         self.assertRegex(security, r"performs no contextual escaping|no contextual escaping")
         self.assertIn("html/template", security)
 
+    def test_goinsecure_specificity_is_not_treated_as_safety(self) -> None:
+        """구체적인 패턴도 평문 HTTP 를 허용한다 — 범위가 줄 뿐 안전해지지 않는다."""
+        security = " ".join(self.security().split())
+        self.assertRegex(
+            security,
+            r"specificity narrows the blast radius, it does not make it safe",
+        )
+        self.assertRegex(security, r"smaller finding, not a non-finding")
+
+    def test_go_template_critical_requires_a_named_target(self) -> None:
+        """Go 템플릿은 노출된 함수·메서드만 호출한다 — 입력이 템플릿이라고 RCE 가 아니다."""
+        security = " ".join(self.security().split())
+        self.assertRegex(security, r"call \*\*only\*\* the functions and methods")
+        self.assertRegex(security, r"Critical needs a named target")
+        self.assertRegex(security, r"if you cannot, the severity is High")
+
     def test_supply_chain_env_vars_are_real_and_rated_by_meaning(self) -> None:
         """`GONOSUMCHECK` 는 Go 환경변수가 아니다 (go1.22.2 `go env` 로 확인) — 없는 것을 지적하게 된다.
 
@@ -2154,11 +2170,42 @@ class UntrustedExecutionContractTest(unittest.TestCase):
             with self.subTest(tool=tool):
                 self.assertIn(tool, rule)
 
-    def test_the_rule_is_stated_as_config_format_not_tool_identity(self) -> None:
+    def test_the_rule_is_stated_as_a_criterion_not_a_tool_list(self) -> None:
         """도구 목록은 낡는다 — 판단 기준이 남아야 새 도구에도 적용된다."""
+        rule = self.rule()
+        self.assertRegex(rule, r"not the config's file format")
+        for route in ("The config is a program", "The config names code",
+                      "loads code through the project manifest"):
+            with self.subTest(route=route):
+                self.assertIn(route, rule, "실행 경로 세 갈래가 다 적히지 않았다")
+        self.assertRegex(
+            rule, r"a config that names no extension at all",
+            "안전한 경우가 무엇인지 좁게 특정되지 않았다",
+        )
+
+    def test_a_declarative_config_is_not_assumed_safe(self) -> None:
+        """`.eslintrc.json` 도 `plugins` 모듈을 실행한다 (재현) — 형식으로 판단하면 틀린다."""
+        rule = self.rule()
+        self.assertIn(".eslintrc.json", rule)
+        self.assertRegex(rule, r"pure JSON")
+        self.assertRegex(
+            rule, r"not from whether it happens to end in `\.json`",
+        )
+
+    def test_isolation_covers_the_host_not_only_the_workspace(self) -> None:
+        """재현한 build.rs 는 워크스페이스 밖 절대 경로에 썼다 — read-only mount 로는 안 막힌다."""
+        rule = self.rule()
+        self.assertRegex(rule, r"not\*?\*? enough on its own|is \*\*not\*\* enough")
+        self.assertRegex(rule, r"absolute path outside the workspace")
+        for knob in ("HOME", "CARGO_HOME", "npm_config_cache", "GOPATH"):
+            with self.subTest(knob=knob):
+                self.assertIn(knob, rule)
+
+    def test_an_internal_branch_is_not_a_standing_exemption(self) -> None:
+        """"우리 저장소"라고 새로 들어온 훅·플러그인까지 신뢰되는 것은 아니다."""
         self.assertRegex(
             self.rule(),
-            r"config that is a program runs, a config that is data does not",
+            r"newly introduced build hook, plugin, or dependency is code that was not there before",
         )
 
     def test_the_untrusted_case_has_a_named_run_state(self) -> None:
@@ -2178,18 +2225,21 @@ class UntrustedExecutionContractTest(unittest.TestCase):
     def test_every_executing_tool_repeats_the_condition_in_its_reference(self) -> None:
         """SKILL.md 표만 있으면 명령을 읽는 사람이 조건을 못 본다."""
         places = {
-            "rust-quality": "build.rs",
-            "js-toolchain": "eslint.config.js",
-            "css-quality": ".stylelintrc.js",
-            "python-quality": "plugins",
-            "php-quality": "bootstrapFiles",
+            "rust-quality": ("build.rs",),
+            # 선언형 설정도 코드를 부른다 — 두 경로를 다 적어야 한다.
+            "js-toolchain": ("eslint.config.js", ".eslintrc.json", "plugins"),
+            "css-quality": (".stylelintrc.js",),
+            "python-quality": ("plugins",),
+            "php-quality": ("bootstrapFiles", "autoload.files", "rules"),
         }
-        for name, condition in places.items():
+        for name, conditions in places.items():
             reference = " ".join(quality_reference(name).split())
+            for condition in conditions:
+                with self.subTest(reference=name, condition=condition):
+                    self.assertIn(condition, reference, "실행 조건이 참조에 없다")
             with self.subTest(reference=name):
-                self.assertIn(condition, reference, "실행 조건이 참조에 없다")
                 self.assertRegex(
-                    reference, r"untrusted diff|untrusted-execution|would not run",
+                    reference, r"untrusted[- ]diff|untrusted-execution|would not run",
                     "신뢰 경계 규칙으로 연결되지 않는다",
                 )
 
@@ -2329,6 +2379,10 @@ class LanguageRegistrationConsistencyTest(unittest.TestCase):
         "Rust": ("rust-quality.md", "rust-security.md", "*.rs"),
     }
 
+    #: JS/TS 는 참조가 표면별로 갈려 위 표의 1:1 구조에 맞지 않는다. 그래서 빠져 있었고,
+    #: 게이트에서 JS/TS 를 지워도 테스트가 통과했다. 게이트 검사에는 반드시 포함한다.
+    GATE_LANGUAGES = (*LANGUAGES, "JS/TS")
+
     def test_every_language_has_both_reference_files_on_disk(self) -> None:
         for language, (quality, security, _) in self.LANGUAGES.items():
             with self.subTest(language=language):
@@ -2394,7 +2448,7 @@ class LanguageRegistrationConsistencyTest(unittest.TestCase):
         )
         covered = between(gate, "Languages covered today", "The gate still applies",
                           label="지원 언어 목록")
-        for language in self.LANGUAGES:
+        for language in self.GATE_LANGUAGES:
             with self.subTest(language=language):
                 self.assertIn(language, covered, "게이트의 지원 언어 목록에 없다")
                 self.assertNotRegex(
@@ -2575,6 +2629,34 @@ class PhpCrossValidationBaseline(unittest.TestCase):
             with self.subTest(token=token):
                 self.assertIn(token, posix, f"POSIX 블록에서 {token} 이 사라졌다")
                 self.assertIn(token, powershell, f"PowerShell 블록에서 {token} 이 사라졌다")
+
+    def test_posix_patterns_are_valid_shell(self) -> None:
+        """PowerShell 쪽만 검사하고 POSIX 명령의 문법 게이트가 없었다.
+
+        실제로 세 명령이 인용 오류로 실행조차 되지 않았다 — 큰따옴표 문자열 안에
+        큰따옴표를 그대로 둔 형태다. 문서를 **원문 그대로** `bash -n` 에 넣는다:
+        손으로 다시 타이핑하면 이스케이프가 조용히 고쳐져 결함이 사라진다.
+        """
+        if shutil.which("bash") is None:
+            self.skipTest("bash 없음")
+        block = self.cross_validation_block()
+        posix = block.split("On native Windows", 1)[0]
+        checked = 0
+        for line in posix.splitlines():
+            command = line.strip()
+            if not command.startswith(("grep ", "rg ")) or "<implicated_files>" not in command:
+                continue
+            checked += 1
+            probe = command.replace("<implicated_files>", "sample.txt")
+            done = subprocess.run(
+                ["bash", "-n", "-c", probe], capture_output=True, text=True, timeout=30
+            )
+            with self.subTest(command=command[:60]):
+                self.assertEqual(
+                    done.returncode, 0,
+                    f"셸 문법 오류로 실행되지 않는다: {done.stderr.strip()[:120]}",
+                )
+        self.assertGreater(checked, 10, "POSIX 명령을 거의 못 뽑았다 — 추출이 깨졌다")
 
     def test_powershell_patterns_actually_match(self) -> None:
         """GREEN — 토큰 존재가 아니라 **패턴을 실제로 실행**해 확인한다.
