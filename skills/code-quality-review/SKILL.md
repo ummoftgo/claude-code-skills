@@ -33,12 +33,17 @@ Detect the active shell before using a snippet. On POSIX use `command -v`, `[ -f
 >
 > | Tool | Executes code from the diff? |
 > |---|---|
-> | `cargo clippy`, `cargo check` | **Yes** — `build.rs` and proc macros are compiled *and run*. A `build.rs` writing to an absolute path outside the workspace was reproduced on cargo 1.91.0 |
-> | ESLint | **Yes** — a flat `eslint.config.js` is a JS module that is imported and run |
-> | PHPStan | **Conditionally** — see below |
-> | `ruff`, `mypy` | No — parsed, never executed |
-> | `go vet`, `staticcheck`, `gofmt` | No — Go has no build-time hook |
-> | `tsc`, Biome, Stylelint | No — their configs are declarative |
+> | `cargo clippy`, `cargo check` | **Always, if a `build.rs` exists** — it and proc macros are compiled *and run*. A `build.rs` writing outside the workspace was reproduced on cargo 1.91.0 |
+> | ESLint | **Always with a flat config** — `eslint.config.js` is a JS module that is imported and run |
+> | Stylelint | **If the config is `.stylelintrc.js`** (a JSON/YAML config is not executed) |
+> | mypy | **If `[tool.mypy] plugins` is set** — the plugin module is imported |
+> | PHPStan | **If `bootstrapFiles:` or composer `autoload.files` is present** — see below |
+> | `ruff` | No — a Rust binary with no plugin mechanism |
+> | `go vet`, `staticcheck`, `gofmt` | No. Go has no build-time hook, and even cgo is compiled without running (verified) |
+> | `tsc`, Biome | No — `tsconfig.json` and `biome.json` are declarative |
+>
+> The pattern is **the config format, not the tool**: a config that is a program runs, a config
+> that is data does not. Check which one the project ships before deciding.
 >
 > **PHPStan's condition is narrow and worth stating exactly**, because the common case is safe.
 > Measured on PHPStan 2.x with PHP 8.3, one file per case:

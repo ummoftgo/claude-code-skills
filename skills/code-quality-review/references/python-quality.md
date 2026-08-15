@@ -167,6 +167,10 @@ mypy --cache-dir=nul .
 This is the opposite of the TypeScript rule in `js-toolchain.md`, where `--incremental false` is
 the safe form — do not carry the habit across.
 
+**mypy runs the project's plugins.** `[tool.mypy] plugins = [...]` imports those modules, so on a
+diff you would not run, check that setting first and apply the untrusted-diff rule in `SKILL.md`.
+ruff has no plugin mechanism (it is a single Rust binary), so it carries no such condition.
+
 Read the project's strictness before reporting. `[tool.mypy] strict = true` and a bare default
 produce different findings from the same code, and a strictness gap explains a class of runtime
 errors better than any single line (see §5).

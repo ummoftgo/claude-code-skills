@@ -58,6 +58,11 @@ Writing a config file changes the user's repository, so the creation path is gat
 
 ## 2. Running the Tools
 
+**A `.stylelintrc.js` config is executed** — it is a JS module Stylelint imports (verified). A
+`.stylelintrc.json` or a `stylelint` key in `package.json` is data and is not. On an untrusted
+diff, check which form the project ships before running, per the rule in `SKILL.md`.
+
+
 ### Stylelint
 ```bash
 # Compact output for review

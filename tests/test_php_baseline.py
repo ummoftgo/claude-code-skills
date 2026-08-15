@@ -2128,18 +2128,38 @@ class UntrustedExecutionContractTest(unittest.TestCase):
         self.assertRegex(rule, r"does the tool \*?\*?execute\*?\*? the code under review")
         self.assertRegex(rule, r"different guarantees")
 
-    def test_the_tools_that_execute_the_diff_are_named(self) -> None:
+    #: 실행 조건이 **도구가 아니라 설정 형식**이라는 것이 이 표의 요지다. 조건을 빠뜨리면
+    #: 리뷰어가 도구 이름만 보고 판단하게 된다 — 실제로 처음엔 mypy/Stylelint 를 안전으로
+    #: 단정했다가 실측에서 뒤집혔다.
+    EXECUTES = {
+        "cargo clippy": "build.rs",
+        "ESLint": "eslint.config.js",
+        "Stylelint": ".stylelintrc.js",
+        "mypy": "plugins",
+        "PHPStan": "bootstrapFiles",
+    }
+    DOES_NOT_EXECUTE = ("ruff", "go vet", "tsc", "Biome")
+
+    def test_each_executing_tool_states_the_condition_not_just_the_name(self) -> None:
         rule = self.rule()
-        for tool in ("cargo clippy", "cargo check", "build.rs", "ESLint", "eslint.config.js"):
+        for tool, condition in self.EXECUTES.items():
             with self.subTest(tool=tool):
                 self.assertIn(tool, rule, "실행하는 도구가 명시되지 않았다")
+                self.assertIn(condition, rule, f"{tool} 의 실행 조건이 없다")
 
     def test_the_tools_that_do_not_execute_are_named_too(self) -> None:
         """실행하지 않는 도구까지 적어야 규칙이 과잉 적용되지 않는다."""
         rule = self.rule()
-        for tool in ("ruff", "mypy", "go vet", "tsc"):
+        for tool in self.DOES_NOT_EXECUTE:
             with self.subTest(tool=tool):
                 self.assertIn(tool, rule)
+
+    def test_the_rule_is_stated_as_config_format_not_tool_identity(self) -> None:
+        """도구 목록은 낡는다 — 판단 기준이 남아야 새 도구에도 적용된다."""
+        self.assertRegex(
+            self.rule(),
+            r"config that is a program runs, a config that is data does not",
+        )
 
     def test_the_untrusted_case_has_a_named_run_state(self) -> None:
         rule = self.rule()
@@ -2154,6 +2174,24 @@ class UntrustedExecutionContractTest(unittest.TestCase):
         self.assertRegex(
             self.rule(), r"ordinary case and needs none of this",
         )
+
+    def test_every_executing_tool_repeats_the_condition_in_its_reference(self) -> None:
+        """SKILL.md 표만 있으면 명령을 읽는 사람이 조건을 못 본다."""
+        places = {
+            "rust-quality": "build.rs",
+            "js-toolchain": "eslint.config.js",
+            "css-quality": ".stylelintrc.js",
+            "python-quality": "plugins",
+            "php-quality": "bootstrapFiles",
+        }
+        for name, condition in places.items():
+            reference = " ".join(quality_reference(name).split())
+            with self.subTest(reference=name):
+                self.assertIn(condition, reference, "실행 조건이 참조에 없다")
+                self.assertRegex(
+                    reference, r"untrusted diff|untrusted-execution|would not run",
+                    "신뢰 경계 규칙으로 연결되지 않는다",
+                )
 
     def test_phpstan_execution_paths_are_stated_precisely(self) -> None:
         """PHPStan 은 조건부다 — 넓게 쓰면 모든 PHP 리뷰에 경고가 붙고, 빼면 두 경로를 놓친다.
