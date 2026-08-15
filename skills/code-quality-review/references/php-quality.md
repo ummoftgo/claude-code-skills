@@ -152,12 +152,17 @@ if [ -n "$PHPSTAN_CONFIG" ]; then
   while IFS= read -r cfg; do
     [ -n "$cfg" ] || continue
     cfg_dir=$(cd "$(dirname "$cfg")" 2>/dev/null && pwd) || { CACHE_RISK="unresolvable: $cfg"; continue; }
+    # A `\uXXXX` escape reconstructs a key or value the raw text does not contain
+    # (`"danger\u002ephp"` parses as `danger.php`), so a text scan cannot judge such a file.
+    grep -q '\\u[0-9a-fA-F]\{4\}' "$cfg" 2>/dev/null &&
+      { CACHE_RISK="$cfg: contains \\u escapes — cannot judge from text"; continue; }
+    # Not line-anchored: NEON also accepts `parameters: {tmpDir: .cache}` on one line.
     while IFS= read -r setting; do
-      value=$(printf '%s' "${setting#*:}" | tr -d " \"'")
-      [ -n "$value" ] || continue
+      value=$(printf '%s' "${setting#*:}" | tr -d " \"'" | tr -d ',}')
+      [ -n "$value" ] || { CACHE_RISK="$cfg: $setting (unreadable value)"; continue; }
       case "$value" in /*) resolved="$value" ;; *) resolved="$cfg_dir/$value" ;; esac
       case "$resolved" in "$PWD"|"$PWD"/*) CACHE_RISK="$cfg: $setting" ;; esac
-    done < <(grep -hE '^[[:space:]]*(tmpDir|resultCachePath):' "$cfg" 2>/dev/null)
+    done < <(grep -ohE '(tmpDir|resultCachePath)[[:space:]]*:[^,}]*' "$cfg" 2>/dev/null)
   done <<< "$CONFIG_CHAIN"
 fi
 # No config at all is safe: PHPStan then uses sys_get_temp_dir()/phpstan, outside the repository.
@@ -186,8 +191,15 @@ scan_for_exec() {
 }
 
 if [ "${UNTRUSTED_DIFF:-0}" = "1" ]; then
-  # The chain the cache gate built, plus the root candidates themselves — `collect_config`
-  # follows only block-style `includes:`, so a chain that looks complete may not be.
+  # **Any config at all is a stop.** Text scanning cannot be made fail-closed here: NEON's
+  # inline forms, an inline `includes: [inner.neon]` whose target the chain never collects, and
+  # `\uXXXX` escapes that reconstruct `.php` from text containing no `.php` all defeat it. A
+  # config might be harmless, but proving that needs a real NEON parser over the whole include
+  # graph — so on a diff you already decided not to trust, do not analyse it.
+  # The scan below does not decide anything; it only says *why* in the report.
+  if [ -n "$PHPSTAN_CONFIG" ]; then
+    EXEC_RISK="$EXEC_RISK config-present:$PHPSTAN_CONFIG"
+  fi
   while IFS= read -r cfg; do
     [ -n "$cfg" ] || continue
     case "$cfg" in *.php) EXEC_RISK="$EXEC_RISK executable-config:$cfg" ;; esac
@@ -261,6 +273,14 @@ measured on PHPStan 2.1.42 with PHP 8.3 unless noted:
 `if`/`elif` chain that launches PHPStan, so a risk found there prevents the run rather than
 reporting on one that already happened. For your own or your team's branch it is inert; a hook,
 extension, or dependency the diff **adds** is new code whoever wrote it.
+
+**On an untrusted diff the rule is simply "a config at all stops the run."** Reading the config
+as text cannot be made sound: NEON's inline forms, an `includes: [inner.neon]` whose target the
+block-style chain collector never reaches, and `\uXXXX` escapes that reconstruct `.php` from
+text containing no `.php` each defeat it. Proving a config harmless needs a real NEON parser over
+the whole include graph, which is not what a shell gate should attempt. So the gate stops, and
+the text scan exists only to say **why** in the report. A project with no PHPStan config has no
+config-driven execution path and still gets analysed.
 
 ---
 

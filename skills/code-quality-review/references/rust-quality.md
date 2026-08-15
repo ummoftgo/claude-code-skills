@@ -115,8 +115,7 @@ the run before any of your crate's code compiles. Reproduced on cargo 1.91.0:
 - Both work from `.cargo/config.toml` **and** from the extensionless `.cargo/config`, which cargo
   still reads (with a deprecation warning). Checking only the `.toml` name misses half of it.
 
-`linker` redirects the toolchain the same way, and `include` inside a cargo config is recursive —
-resolve it before concluding. `[target.*] runner` is narrower than the rest: it applies to
+`linker` redirects the toolchain the same way. A cargo config `include` is recursive but **unstable** — it needs `-Zconfig-include` on nightly, so on a stable toolchain it is not a live path; note it if the project pins nightly. `[target.*] runner` is narrower than the rest: it applies to
 `cargo run`, `test`, and `bench`, so it does not replace `clippy` or `check` — note it when it is
 present, but it is not why those two commands are risky.
 
@@ -129,7 +128,7 @@ rule in `SKILL.md`. For an untrusted branch with no sandbox, record clippy and c
 
 ```bash
 # Read before running against a diff you would not run. Both config names, all redirect keys,
-# and the alias table — an alias on `clippy` or `check` replaces the command outright.
+# and the alias table — an alias on `clippy` replaces the command outright.
 for cfg in .cargo/config.toml .cargo/config; do
   [ -f "$cfg" ] || continue
   echo "--- $cfg"

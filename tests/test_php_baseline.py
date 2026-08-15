@@ -1157,6 +1157,51 @@ class PhpStanReadOnlyGateTest(unittest.TestCase):
         )
 
 
+class PhpStanInlineCacheGateTest(PhpStanReadOnlyGateTest):
+    """캐시 게이트도 NEON inline 표기를 봐야 한다 — 읽기 전용 계약이 걸린 자리다.
+
+    실행 게이트와 달리 이것은 **일상 경로**에서 돈다. 그래서 "설정이 있으면 무조건 skip"
+    으로 갈 수 없고, inline 표기까지 값을 읽어 판정해야 한다.
+    """
+
+    SKIP_MARKER = "skipped-read-only"
+
+    def test_inline_tmpdir_is_caught(self) -> None:
+        """`parameters: {tmpDir: .cache}` 는 유효하고, 줄머리 grep 은 못 잡는다."""
+        output = self.run_gate(
+            "parameters: {level: 0, paths: [src], tmpDir: .cache}\n",
+            extra={"src/A.php": "<?php class A {}"},
+        )
+        self.assertIn(self.SKIP_MARKER, output, "inline tmpDir 을 놓쳤다")
+        self.assertNotIn(self.ANALYSIS_MARKER, output)
+
+    def test_inline_result_cache_path_is_caught(self) -> None:
+        output = self.run_gate(
+            "parameters: {level: 0, paths: [src], resultCachePath: .rc/cache.php}\n",
+            extra={"src/A.php": "<?php class A {}"},
+        )
+        self.assertIn(self.SKIP_MARKER, output)
+        self.assertNotIn(self.ANALYSIS_MARKER, output)
+
+    def test_a_cache_path_outside_the_repository_still_runs(self) -> None:
+        """저장소 밖을 가리키면 안전하다 — 전부 막으면 일상 리뷰가 망가진다."""
+        output = self.run_gate(
+            "parameters: {level: 0, paths: [src], tmpDir: /tmp/phpstan-cache}\n",
+            extra={"src/A.php": "<?php class A {}"},
+        )
+        self.assertIn(self.ANALYSIS_MARKER, output, "저장소 밖 캐시인데 막았다")
+        self.assertNotIn(self.SKIP_MARKER, output)
+
+    def test_an_escaped_config_cannot_be_judged_from_text(self) -> None:
+        r"""`\uXXXX` 는 원문에 없는 값을 만든다 — 판정 불가는 안전이 아니다."""
+        output = self.run_gate(
+            '{"parameters":{"level":0,"paths":["src"],"tmpDir":"\\u002ecache"}}\n',
+            extra={"src/A.php": "<?php class A {}"},
+        )
+        self.assertIn(self.SKIP_MARKER, output, "이스케이프된 설정을 안전으로 봤다")
+        self.assertNotIn(self.ANALYSIS_MARKER, output)
+
+
 class PhpStanTrustGateTest(PhpStanReadOnlyGateTest):
     """신뢰 경계 게이트도 **실행해서** 검증한다.
 
@@ -1270,15 +1315,55 @@ class PhpStanTrustGateTest(PhpStanReadOnlyGateTest):
         self.assertIn(self.SKIP_MARKER, output, "inline map 표기를 놓쳤다")
         self.assertNotIn(self.ANALYSIS_MARKER, output)
 
-    def test_an_untrusted_diff_with_nothing_executable_still_runs(self) -> None:
-        """모든 것을 막으면 아무도 안 쓴다 — 위험이 없으면 신뢰하지 않는 diff 도 분석한다."""
+    def test_a_config_at_all_stops_an_untrusted_run(self) -> None:
+        r"""텍스트 스캔으로는 fail-closed 를 만들 수 없다 — 설정이 있으면 멈춘다.
+
+        inline `includes:` 대상은 체인이 수집하지 못하고, `\uXXXX` 이스케이프는 원문에
+        없는 `.php` 를 복원한다. 무해한 설정도 많지만 그걸 증명하려면 진짜 NEON 파서로
+        include 그래프 전체를 봐야 한다.
+        """
         output = self.run_gate(
             "parameters:\n    level: 0\n    paths:\n        - src\n",
             extra={"src/A.php": "<?php class A {}"},
             env={"UNTRUSTED_DIFF": "1"},
         )
-        self.assertIn(self.ANALYSIS_MARKER, output, "위험이 없는데도 막았다")
+        self.assertIn(self.SKIP_MARKER, output, "설정이 있는데 분석이 실행됐다")
+        self.assertIn("config-present", output, "차단 사유가 보고되지 않았다")
+        self.assertNotIn(self.ANALYSIS_MARKER, output)
+
+    def test_a_project_without_any_config_still_analyses(self) -> None:
+        """전부 막으면 아무도 안 쓴다 — 설정이 없으면 실행 경로가 없으므로 분석한다."""
+        output = self.run_gate(
+            None,
+            extra={"src/A.php": "<?php class A {}"},
+            env={"UNTRUSTED_DIFF": "1"},
+        )
+        self.assertIn(self.ANALYSIS_MARKER, output, "설정이 없는데도 막았다")
         self.assertNotIn(self.SKIP_MARKER, output)
+
+    def test_an_inline_include_target_cannot_slip_through(self) -> None:
+        """`includes: [inner.neon]` 의 대상은 체인이 수집하지 못한다 — 코덱스가 든 반례다."""
+        output = self.run_gate(
+            "includes: [inner.neon]\n",
+            extra={
+                "src/A.php": "<?php class A {}",
+                "inner.neon": "parameters: {level: 0, paths: [src], bootstrapFiles: [boot]}\n",
+                "boot": "<?php",
+            },
+            env={"UNTRUSTED_DIFF": "1"},
+        )
+        self.assertIn(self.SKIP_MARKER, output, "inline include 체인이 통과했다")
+        self.assertNotIn(self.ANALYSIS_MARKER, output)
+
+    def test_a_unicode_escape_cannot_hide_a_php_reference(self) -> None:
+        r"""`danger\u002ephp` 는 파서가 `danger.php` 로 복원한다 — 원문에는 `.php` 가 없다."""
+        output = self.run_gate(
+            '{"includes":["danger\\u002ephp"],"parameters":{"level":0,"paths":["src"]}}\n',
+            extra={"src/A.php": "<?php class A {}", "danger.php": "<?php return [];"},
+            env={"UNTRUSTED_DIFF": "1"},
+        )
+        self.assertIn(self.SKIP_MARKER, output, "이스케이프된 참조가 통과했다")
+        self.assertNotIn(self.ANALYSIS_MARKER, output)
 
 
 class PhpSecurityBaseline(unittest.TestCase):
@@ -2521,6 +2606,11 @@ class UntrustedExecutionContractTest(unittest.TestCase):
             ).split()
         )
         self.assertIn(".cargo/config.toml", execution)
+        # 올바른 문장이 있어도 모순되는 옛 문장이 남으면 지시가 갈린다.
+        self.assertNotRegex(
+            execution, r"alias on `clippy` or `check` replaces",
+            "내장 `check` 도 대체된다는 모순 문장이 남아 있다",
+        )
         for route in ("rustc-wrapper", "rustc-workspace-wrapper", "[alias]",
                       "credential-provider", "linker"):
             with self.subTest(route=route):
