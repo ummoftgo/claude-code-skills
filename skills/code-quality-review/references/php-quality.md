@@ -113,73 +113,50 @@ else
   done
 fi
 
-# Read-only gate. Decide first, then run — printing the grep result and running anyway is
-# not a gate. `CACHE_RISK` non-empty means the cache would land inside the repository, or we
-# could not tell.
-CONFIG_CHAIN=""
+# Read-only gate. Decide first, then run — printing a grep result and running anyway is not a
+# gate. `CACHE_RISK` non-empty means the cache would land inside the repository, or we could
+# not tell.
+#
+# **Ask PHPStan, do not parse NEON.** Five rounds of review found five valid spellings that a
+# line-based grep missed — `parameters: {tmpDir: .cache}` on one line, a quoted `"tmpDir":` in
+# JSON, `tmpDir = .cache` with an equals sign, a multi-line `includes: [\n x.neon\n]`, and a
+# trailing `# comment` that a naive value-strip glued onto the path. NEON also has `\uXXXX`
+# escapes. Chasing that grammar with regexes is a losing game; `dump-parameters --json` hands
+# back the **effective** configuration with the include graph already resolved and the paths
+# already absolute. Measured on PHPStan 2.1.42: it writes nothing while doing so.
 CACHE_RISK=""
 
-# Walk `includes:` **recursively**. One level is not enough: a grandparent config can set the
-# cache path, and stopping at the parent lets it through. Paths inside an include list resolve
-# against the including file's directory, not the working directory.
-collect_config() {
-  local file="$1" dir inc target canonical
-  if [ ! -r "$file" ]; then
-    CACHE_RISK="config unreadable: $file"      # cannot judge → not safe
-    return
-  fi
-  # Compare canonical paths: `phpstan.neon`, `./phpstan.neon`, and `././phpstan.neon` are the
-  # same file, and a raw string compare would recurse forever on a self-include.
-  canonical=$(cd "$(dirname "$file")" 2>/dev/null && printf '%s/%s' "$(pwd)" "$(basename "$file")") \
-    || { CACHE_RISK="unresolvable: $file"; return; }
-  # Newline-separated, not space-separated: a project path containing a space would otherwise
-  # split into fragments and every config would look unresolvable, skipping analysis for good
-  # projects. Windows paths (`C:\Users\First Last\...`) hit this immediately.
-  case "$(printf '%s\n' "$CONFIG_CHAIN")" in *"$canonical"$'\n'*) return ;; esac
-  CONFIG_CHAIN="$CONFIG_CHAIN$canonical"$'\n'
-  dir=$(dirname "$file")
-  # Two forms, both valid NEON: a block list under `includes:`, and an inline
-  # `includes: [a.neon, b.neon]` on one line. Collecting only the first leaves the second's
-  # targets out of the chain entirely, so every later check silently skips them.
-  while IFS= read -r inc; do
-    inc=$(printf '%s' "$inc" | sed "s/^[[:space:]]*-[[:space:]]*//; s/[\"']//g; s/^[[:space:]]*//; s/[[:space:]]*$//")
-    [ -n "$inc" ] || continue
-    case "$inc" in /*) target="$inc" ;; *) target="$dir/$inc" ;; esac
-    collect_config "$target"
-  done < <(
-    awk '/^includes:/{f=1;next} f&&/^[[:space:]]*-/{print} f&&/^[^[:space:]-]/{f=0}' "$file"
-    # inline: pull what is between the brackets and split on commas
-    grep -oE '^[[:space:]]*"?includes"?[[:space:]]*:[[:space:]]*\[[^]]*\]' "$file" 2>/dev/null |
-      sed 's/.*\[//; s/\]//' | tr ',' '\n'
-  )
-}
-
 if [ -n "$PHPSTAN_CONFIG" ]; then
-  collect_config "$PHPSTAN_CONFIG"
-  # Judge each cache setting against the directory of the file that declares it.
-  while IFS= read -r cfg; do
-    [ -n "$cfg" ] || continue
-    cfg_dir=$(cd "$(dirname "$cfg")" 2>/dev/null && pwd) || { CACHE_RISK="unresolvable: $cfg"; continue; }
-    # A `\uXXXX` escape reconstructs a key or value the raw text does not contain
-    # (`"danger\u002ephp"` parses as `danger.php`), so a text scan cannot judge such a file.
-    grep -q '\\u[0-9a-fA-F]\{4\}' "$cfg" 2>/dev/null &&
-      { CACHE_RISK="$cfg: contains \\u escapes — cannot judge from text"; continue; }
-    # Not line-anchored: NEON also accepts `parameters: {tmpDir: .cache}` on one line, and a
-    # JSON config quotes the key (`"tmpDir":`), which an unquoted pattern never matches.
-    while IFS= read -r setting; do
-      value=$(printf '%s' "${setting#*:}" | tr -d " \"'" | tr -d ',}')
-      [ -n "$value" ] || { CACHE_RISK="$cfg: $setting (unreadable value)"; continue; }
-      case "$value" in /*) resolved="$value" ;; *) resolved="$cfg_dir/$value" ;; esac
-      # Canonicalise before comparing. A `.` or `..` anywhere in the path makes a string
-      # prefix test wrong in the dangerous direction: `/srv/./app/.cache` does not start with
-      # `/srv/app`, yet that is exactly where it lands. `-m` so a not-yet-created cache
-      # directory still resolves.
-      resolved=$(realpath -m "$resolved" 2>/dev/null) ||
-        { CACHE_RISK="$cfg: $setting (unresolvable path)"; continue; }
-      case "$resolved" in "$PWD"|"$PWD"/*) CACHE_RISK="$cfg: $setting" ;; esac
-    done < <(grep -ohE '["'"'"']?(tmpDir|resultCachePath)["'"'"']?[[:space:]]*:[^,}]*' "$cfg" 2>/dev/null)
-  done <<< "$CONFIG_CHAIN"
+  PHPSTAN_PARAMS=$($PHP_CMD "$(command -v phpstan)" dump-parameters --json \
+    --configuration="$PHPSTAN_CONFIG" 2>/dev/null) || PHPSTAN_PARAMS=""
+  if [ -z "$PHPSTAN_PARAMS" ]; then
+    # Could not resolve — an unreadable config, a PHPStan too old for `dump-parameters`, or a
+    # config error. Unknown is not safe.
+    CACHE_RISK="cannot resolve parameters (dump-parameters failed)"
+  else
+    # Read both keys — `resultCachePath` is independent of `tmpDir`.
+    # **They are not normalised the same way**: measured on 2.1.42, `tmpDir` comes back
+    # absolute but a relative `resultCachePath` comes back verbatim. A relative cache path
+    # resolves against the run's working directory, which is the repository, so treat any
+    # non-absolute value as inside it rather than guessing a base.
+    while IFS= read -r resolved; do
+      [ -n "$resolved" ] || continue
+      case "$resolved" in
+        /*) resolved=$(realpath -m "$resolved" 2>/dev/null) ||
+              { CACHE_RISK="unresolvable cache path"; continue; } ;;
+        *)  CACHE_RISK="relative cache path resolves inside the repository: $resolved"; continue ;;
+      esac
+      case "$resolved" in "$PWD"|"$PWD"/*) CACHE_RISK="cache path inside repository: $resolved" ;; esac
+    done < <(printf '%s' "$PHPSTAN_PARAMS" | $PHP_CMD -r '
+      $p = json_decode(stream_get_contents(STDIN), true);
+      if (!is_array($p)) { exit(1); }
+      foreach (["tmpDir", "resultCachePath"] as $k) {
+        if (!empty($p[$k]) && is_string($p[$k])) { echo $p[$k], "\n"; }
+      }
+    ') || CACHE_RISK="cannot read parameters JSON"
+  fi
 fi
+
 # No config at all is safe: PHPStan then uses sys_get_temp_dir()/phpstan, outside the repository.
 
 # Trust gate — decided BEFORE the analysis runs, using the chain collected above.
@@ -215,13 +192,10 @@ if [ "${UNTRUSTED_DIFF:-0}" = "1" ]; then
   if [ -n "$PHPSTAN_CONFIG" ]; then
     EXEC_RISK="$EXEC_RISK config-present:$PHPSTAN_CONFIG"
   fi
-  while IFS= read -r cfg; do
-    [ -n "$cfg" ] || continue
-    case "$cfg" in *.php) EXEC_RISK="$EXEC_RISK executable-config:$cfg" ;; esac
-    scan_for_exec "$cfg"
-  done <<< "$CONFIG_CHAIN"
-  for candidate in phpstan.neon phpstan.neon.dist phpstan.dist.neon; do
-    [ -f "$candidate" ] && scan_for_exec "$candidate"
+  for candidate in phpstan.neon phpstan.neon.dist phpstan.dist.neon "$PHPSTAN_CONFIG"; do
+    [ -f "$candidate" ] || continue
+    case "$candidate" in *.php) EXEC_RISK="$EXEC_RISK executable-config:$candidate" ;; esac
+    scan_for_exec "$candidate"
   done
   # Composer runs every entry here, including dependencies' own `autoload.files`.
   # No `head`: a truncated list reads as a short list, and the entry that matters may be last.

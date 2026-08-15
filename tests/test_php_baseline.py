@@ -797,7 +797,7 @@ class PhpToolchainBaseline(unittest.TestCase):
         commands = code_blocks(reference)
         self.assertRegex(
             commands,
-            r"tmpDir\|resultCachePath|\(tmpDir\|resultCachePath\)",
+            r'"tmpDir", "resultCachePath"|tmpDir\|resultCachePath',
             "두 설정을 함께 읽는 명령이 없다",
         )
         # 우선순위대로 고른다 — `ls | head -1` 은 사전순이라 phpstan.dist.neon 을 먼저 잡는다.
@@ -1012,11 +1012,39 @@ class PhpStanReadOnlyGateTest(unittest.TestCase):
         # 줄 이음(`\` 개행)을 먼저 합친다. 첫 줄만 치환하면 `#` 가 그 줄의 `\` 까지 주석으로
         # 만들어, 이어지던 줄이 미아 명령으로 실행되고 스크립트가 127 로 죽는다.
         block = re.sub(r"\\\n\s+", " ", block)
-        block = block.replace(
-            "$PHP_CMD $(command -v phpstan) analyse", f"echo {self.ANALYSIS_MARKER} #"
+        block = re.sub(
+            r'\$PHP_CMD "?\$\(command -v phpstan\)"? analyse',
+            f"echo {self.ANALYSIS_MARKER} #", block,
         )
         block = re.sub(r"^(phpcs|phpmd|phpcpd) .*", "", block, flags=re.MULTILINE)
-        return "PHP_CMD=php\nSRC_DIR=src\n" + block
+        return f"PHP_CMD={self.php_cmd()}\nSRC_DIR=src\n" + block
+
+    @classmethod
+    def php_cmd(cls) -> str:
+        """PHPStan 이 실제로 도는 PHP 를 고른다.
+
+        게이트가 `dump-parameters` 로 유효 설정을 얻으므로, PHPStan 이 뜨지 않는 PHP 를
+        쓰면 **모든** 케이스가 판정 불가(fail-closed)로 차단된다 — 그건 게이트가 아니라
+        환경을 시험하는 것이다.
+        """
+        if getattr(cls, "_php_cmd", None):
+            return cls._php_cmd
+        phpstan = shutil.which("phpstan")
+        if phpstan is None:
+            raise unittest.SkipTest("phpstan 없음 — 게이트를 실행할 수 없다")
+        candidates = ["php"] + [
+            f"php8.{minor}" for minor in range(5, 0, -1)
+        ]
+        for candidate in candidates:
+            if shutil.which(candidate) is None:
+                continue
+            probe = subprocess.run(
+                [candidate, phpstan, "--version"], capture_output=True, text=True, timeout=120
+            )
+            if probe.returncode == 0 and "PHPStan" in probe.stdout:
+                cls._php_cmd = candidate
+                return candidate
+        raise unittest.SkipTest("PHPStan 을 실행할 수 있는 PHP 가 없다")
 
     def run_gate(
         self,
@@ -1192,6 +1220,57 @@ class PhpStanInlineCacheGateTest(PhpStanReadOnlyGateTest):
         self.assertIn(self.ANALYSIS_MARKER, output, "저장소 밖 캐시인데 막았다")
         self.assertNotIn(self.SKIP_MARKER, output)
 
+    def test_an_equals_separator_is_caught(self) -> None:
+        """NEON 은 `=` 도 키-값 구분자로 받는다 — 코덱스가 든 반례다."""
+        output = self.run_gate(
+            "parameters:\n\ttmpDir = .phpstan-cache\n",
+            extra={"src/A.php": "<?php class A {}"},
+        )
+        self.assertIn(self.SKIP_MARKER, output, "`=` 구분자를 놓쳤다")
+        self.assertNotIn(self.ANALYSIS_MARKER, output)
+
+    def test_a_multiline_inline_include_is_caught(self) -> None:
+        """`includes: [\n  x.neon\n]` 도 유효하다 — 한 줄 정규식은 못 잡는다."""
+        output = self.run_gate(
+            "includes: [\n    inner.neon\n]\nparameters:\n    level: 0\n",
+            extra={
+                "src/A.php": "<?php class A {}",
+                "inner.neon": "parameters:\n    tmpDir: .phpstan-cache\n",
+            },
+        )
+        self.assertIn(self.SKIP_MARKER, output, "여러 줄 inline include 를 놓쳤다")
+        self.assertNotIn(self.ANALYSIS_MARKER, output)
+
+    def test_a_trailing_comment_does_not_corrupt_the_value(self) -> None:
+        """값 뒤 주석을 붙여 읽으면 경로가 저장소 밖으로 바뀐다 — false negative 다."""
+        with tempfile.TemporaryDirectory() as base:
+            work = Path(base)
+            (work / "src").mkdir()
+            (work / "src" / "A.php").write_text("<?php class A {}")
+            (work / "phpstan.neon").write_text(
+                f"parameters:\n    tmpDir: {work}/.cache # /../../../tmp\n"
+            )
+            (work / "gate.sh").write_text(self.gate_script(), encoding="utf-8")
+            result = subprocess.run(
+                ["bash", "gate.sh"], cwd=str(work), capture_output=True, text=True,
+                env={**os.environ, "READ_ONLY": "1"},
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn(
+                self.SKIP_MARKER, result.stdout,
+                "주석을 값에 붙여 읽어 저장소 밖으로 오판했다",
+            )
+            self.assertNotIn(self.ANALYSIS_MARKER, result.stdout)
+
+    def test_a_relative_result_cache_path_is_treated_as_inside(self) -> None:
+        """`dump-parameters` 는 tmpDir 만 절대화한다 — 상대 resultCachePath 는 그대로 온다."""
+        output = self.run_gate(
+            "parameters: {level: 0, paths: [src], resultCachePath: .rc/cache.php}\n",
+            extra={"src/A.php": "<?php class A {}"},
+        )
+        self.assertIn(self.SKIP_MARKER, output, "상대 캐시 경로를 안전으로 봤다")
+        self.assertNotIn(self.ANALYSIS_MARKER, output)
+
     def test_a_cache_setting_inside_an_inline_include_is_caught(self) -> None:
         """`includes: [inner.neon]` 대상이 체인에 없으면 그 안의 tmpDir 도 안 보인다.
 
@@ -1298,7 +1377,10 @@ class PhpStanTrustGateTest(PhpStanReadOnlyGateTest):
             extra={"src/A.php": "<?php class A {}", "dynamic.php": "<?php return [];"},
             env={"UNTRUSTED_DIFF": "1"},
         )
-        self.assertIn("executable-config", output, "`.php` include 를 실행 위험으로 보지 않았다")
+        self.assertRegex(
+            output, r"executable-config|php-reference",
+            "`.php` include 를 실행 위험으로 보지 않았다",
+        )
         self.assertNotIn(self.ANALYSIS_MARKER, output)
 
     def test_a_legacy_autoload_parameter_is_caught(self) -> None:
@@ -2548,10 +2630,10 @@ class UntrustedExecutionContractTest(unittest.TestCase):
         고친다면서 분석 **뒤**로 옮겨 이미 실행된 뒤에 확인하게 만들었다.
         """
         reference = quality_reference("php-quality")
-        definition = reference.index("collect_config() {")
+        resolution = reference.index("PHPSTAN_PARAMS=$(")
         gate = reference.index("EXEC_RISK=\"\"")
         analysis = reference.index("$PHP_CMD $(command -v phpstan) analyse")
-        self.assertLess(definition, gate, "게이트가 체인 정의보다 앞이다 — 빈 체인으로 통과한다")
+        self.assertLess(resolution, gate, "게이트가 설정 해석보다 앞이다")
         self.assertLess(gate, analysis, "게이트가 분석보다 뒤다 — 이미 실행된 뒤에 확인한다")
         # 게이트가 실행 분기와 **같은** if 체인이어야 판정이 실행을 막는다.
         branch = reference[gate:analysis]
@@ -2603,15 +2685,31 @@ class UntrustedExecutionContractTest(unittest.TestCase):
             "JSON 설정을 안전으로 단정하는 표현이 남아 있다",
         )
 
-    def test_phpstan_precheck_covers_the_whole_chain(self) -> None:
-        """루트 설정 3개와 루트 composer.json 만 보면 세 경로를 놓친다 (전부 재현)."""
+    def test_the_cache_gate_asks_phpstan_instead_of_parsing_neon(self) -> None:
+        """NEON 문법을 정규식으로 쫓는 것은 지는 싸움이다 — 다섯 라운드 동안 다섯 표기를 놓쳤다.
+
+        `dump-parameters --json` 은 include 그래프가 해석되고 경로가 절대화된 **유효**
+        설정을 준다. 이 방식으로 돌아가는 회귀를 막는다.
+        """
+        commands = code_blocks(quality_reference("php-quality"))
+        self.assertIn("dump-parameters --json", commands, "유효 설정을 PHPStan 에게 묻지 않는다")
         reference = " ".join(quality_reference("php-quality").split())
-        self.assertRegex(reference, r"not enough")
-        self.assertIn("CONFIG_CHAIN", reference, "체인을 재사용하지 않는다")
+        self.assertRegex(
+            reference, r"Ask PHPStan, do not parse NEON",
+            "왜 파싱하지 않는지가 적혀 있지 않다",
+        )
+        # 해석 실패는 안전이 아니다.
+        self.assertRegex(commands, r"cannot resolve parameters")
+        # 상대 경로는 작업 디렉터리 기준이라 저장소 안이다.
+        self.assertRegex(commands, r"relative cache path resolves inside the repository")
+
+    def test_the_untrusted_precheck_still_covers_composer(self) -> None:
+        """설정 밖 경로 — 의존 패키지의 autoload.files 는 설정에 안 적힌다."""
+        reference = " ".join(quality_reference("php-quality").split())
         self.assertIn("autoload_files.php", reference, "의존 패키지 목록을 읽지 않는다")
         self.assertRegex(
-            reference, r"executable-config:",
-            "`.php` includes 항목을 찾지 않는다",
+            reference, r"php-reference:",
+            "설정의 `.php` 참조를 찾지 않는다",
         )
 
     def test_phpstan_execution_paths_are_stated_precisely(self) -> None:
