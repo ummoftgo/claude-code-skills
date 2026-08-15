@@ -2072,6 +2072,50 @@ class SectionContractDepthTest(unittest.TestCase):
                 self.assertRegex(section, r"Raise a severity one step")
 
 
+class SecurityAuditorScopeTest(unittest.TestCase):
+    """PHP 전용 체크리스트를 가진 에이전트가 다른 언어에 적용되지 않도록 경계를 고정한다.
+
+    체크리스트 자체는 손대지 않는다 — 주 스택이고 잘 돌고 있다. 막아야 하는 것은
+    PHP 패턴을 Go·Python 에 대입하는 것뿐이다.
+    """
+
+    AGENT_FILES = (
+        "agents/security-auditor/claude.md",
+        "agents/security-auditor/codex.toml",
+    )
+
+    def test_the_agent_names_its_language_scope_and_the_way_out(self) -> None:
+        for path in self.AGENT_FILES:
+            text = " ".join(read(path).split())
+            with self.subTest(agent=path):
+                self.assertRegex(text, r"Language Scope")
+                self.assertIn("web-security-review", text, "다른 언어를 넘길 곳이 없다")
+                self.assertRegex(
+                    text, r"non-match is not evidence of safety",
+                    "패턴 불일치를 안전으로 읽지 말라는 경고가 없다",
+                )
+
+    def test_the_php_checklist_itself_is_untouched(self) -> None:
+        """주 스택의 감사 내용은 이 작업의 대상이 아니다 — 경계만 추가한다."""
+        for path in self.AGENT_FILES:
+            text = read(path)
+            with self.subTest(agent=path):
+                self.assertIn("PHP", text)
+                self.assertRegex(
+                    text, r"(?i)sql injection|injection",
+                    "PHP 체크리스트가 사라졌다",
+                )
+
+    def test_the_codex_variant_is_still_valid_toml(self) -> None:
+        """설명을 넣다가 TOML 을 깨면 Codex 쪽 에이전트가 통째로 로드되지 않는다."""
+        import tomllib
+
+        data = tomllib.loads(read("agents/security-auditor/codex.toml"))
+        self.assertEqual(data["name"], "security-auditor")
+        self.assertIn("developer_instructions", data)
+        self.assertIn("Language Scope", data["developer_instructions"])
+
+
 class ReadOnlyBoundaryContractTest(unittest.TestCase):
     """읽기 전용 계약의 **경계**를 하나로 고정한다.
 

@@ -14,6 +14,20 @@ sandbox_mode = "read-only" above is a worthwhile DEFAULT: left alone, it blocks 
 - Medium: Conditional risk, defense-in-depth gap
 - Low: Best-practice violations
 
+
+## Language Scope — and What Falls Outside It
+
+The checklists below are **PHP and browser-surface** checklists. They are deliberately unchanged:
+this is the stack the audit is tuned for, and its findings are trustworthy because the checks
+match the language.
+
+**When the code under audit is in another language** — Python, Go, Rust, Node, or anything else —
+do not translate a PHP check into it. A PHP injection pattern run over Go proves nothing about the
+Go code, and a non-match is not evidence of safety. Instead, say which files fall outside this
+agent's checklists and point the request at the `web-security-review` skill, which carries a
+language-axis reference per language plus surface references for HTTP, browser, and native
+processes. Audit the PHP and browser files that *are* in scope, and let the report show the gap.
+
 ## PHP Audit Checklist
 
 Injection (Critical):
