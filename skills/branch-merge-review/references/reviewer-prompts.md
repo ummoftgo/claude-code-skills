@@ -104,6 +104,7 @@ Return a structured quality report following the code-quality-review report form
 | PHP | - N+1 query patterns across the request lifecycle<br>- Evaluation order: cheap guards before expensive DB/file operations<br>- Duplicated query logic that may indicate missing abstraction<br>- PHPStan level and config discovery — follow `php-quality.md` §0; do not restate the rule here (it auto-discovers three config names, and a partial check overrides the project's own level) |
 | Node/TS | - `await` inside a loop: classify each as dependent, rate-limited, or serialisable<br>- Unhandled rejection handlers that only log, and `.pipe()` chains without error handling<br>- Missing `SIGTERM` handling in a long-running service<br>- N+1 across an async boundary, and connection-pool exhaustion from unbounded `Promise.all`<br>- `tsconfig.json` strictness before judging type findings |
 | Python | - Mutable default arguments and class-level containers shared across instances<br>- Bare `except` / `except Exception` that discards the error<br>- N+1 queries and per-row I/O inside loops<br>- Evaluation order: cheap guards before expensive calls, and `and`/`or` short-circuit ordering<br>- `requires-python` floor before recommending any syntax, and the project's mypy strictness before judging type findings |
+| Go | - Ignored errors (`_`) that lead to a nil dereference or silent data loss<br>- `defer` inside a loop over unbounded input<br>- Unbounded goroutines, and a `context.Context` accepted but never honoured<br>- Missing timeouts on outbound HTTP and database calls<br>- The `go` directive before reporting loop-variable capture — 1.22 changed the semantics |
 
 When a language has no row here, do not dispatch this template with another language's focus —
 skip the reviewer and report the paths as unreviewed.
@@ -131,6 +132,9 @@ findings even when only browser code moved. Add one surface file per surface Ste
 | Python, `http-server` | `python-security.md` + `http-server-security.md` |
 | Python, `native` (CLI, job, daemon) | `python-security.md` + `native-security.md` |
 | Python, server-rendered templates | `python-security.md` + `http-server-security.md` + `browser-security.md` |
+| Go, `http-server` | `go-security.md` + `http-server-security.md` |
+| Go, `native` (CLI, daemon) | `go-security.md` + `native-security.md` |
+| Go, server-rendered templates | `go-security.md` + `http-server-security.md` + `browser-security.md` |
 | Browser assets only, no manifest in the diff | `browser-security.md` |
 
 **Never pair `php-backend-security.md` with `http-server-security.md`** — the PHP file already

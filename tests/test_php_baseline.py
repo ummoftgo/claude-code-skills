@@ -42,6 +42,7 @@ QUALITY_REFERENCES = (
     "js-frontend-quality",   # 브라우저 표면
     "node-quality",          # 서버·CLI·데몬·라이브러리
     "python-quality",        # 6단계: Python
+    "go-quality",            # 6단계: Go
     "css-quality",
 )
 
@@ -85,6 +86,9 @@ WRITE_CAUSING = (
     ("python-quality", "Python 도구 설치(pip)", r"pip install", r"pip install"),
     ("python-quality", "ruff 자동수정", r"ruff check --fix", r"ruff check --fix"),
     ("python-quality", "ruff 포매팅 적용", r"(?m)^ruff format \.$", r"(?m)^ruff format \.$"),
+    ("go-quality", "staticcheck 설치", r"go install[^\n]*staticcheck", r"go install[^\n]*staticcheck"),
+    ("go-quality", "golangci-lint 설치", r"go install[^\n]*golangci-lint", r"go install[^\n]*golangci-lint"),
+    ("go-quality", "gofmt 자동수정", r"gofmt -w", r"gofmt -w"),
 )
 
 #: 절 이름 → 선언된 심각도. 개수가 아니라 **의미**를 고정한다. 같은 `MUST` 문법에 서로 다른
@@ -959,7 +963,7 @@ class PhpToolchainBaseline(unittest.TestCase):
         """GREEN (1단계에서 전환됨) — 쓰기를 유발하는 **명령 각각**이 읽기 전용 가드를 동반해야 한다.
 
         Step 2의 게이트는 "도구 설치"만 가리므로 설정 생성·자동수정·보고서 출력은 걸리지
-        않는다. 그래서 쓰기를 유발하는 능력마다 계약 문구를 요구한다(현재 31개 — `WRITE_CAUSING` 이 정본).
+        않는다. 그래서 쓰기를 유발하는 능력마다 계약 문구를 요구한다(현재 34개 — `WRITE_CAUSING` 이 정본).
 
         **파일 상단에 문구 한 줄을 추가하는 것으로는 통과할 수 없다** — 각 명령이 자기
         계약 문구를 갖거나, 범위를 명시한 블록 문구가 그 블록을 덮어야 한다.
@@ -1776,6 +1780,86 @@ class PythonReferenceSemanticsTest(unittest.TestCase):
         ):
             with self.subTest(section=heading):
                 self.assertIn(heading, quality)
+
+
+class GoReferenceSemanticsTest(unittest.TestCase):
+    """Go 참조의 실측된 사실을 고정한다 (go1.22.2, staticcheck 2026.1, govulncheck)."""
+
+    def quality(self) -> str:
+        return read("skills/code-quality-review/references/go-quality.md")
+
+    def security(self) -> str:
+        return read("skills/web-security-review/references/go-security.md")
+
+    def test_go_build_is_never_told_to_write_a_binary(self) -> None:
+        """`go build ./...` 는 현재 디렉터리에 실행 파일을 남긴다 — 리뷰가 만들면 안 되는 파일이다."""
+        for line in code_blocks(self.quality()).splitlines():
+            stripped = line.strip()
+            if stripped.startswith("go build"):
+                with self.subTest(command=stripped):
+                    self.assertIn("-o /dev/null", stripped, "빌드 산출물이 작업 트리에 남는다")
+
+    def test_gofmt_exit_code_trap_is_stated(self) -> None:
+        """`gofmt -l` 은 미포맷 파일이 있어도 0 으로 끝난다 — 종료 코드만 보면 항상 통과다."""
+        quality = " ".join(self.quality().split())
+        self.assertRegex(quality, r"gofmt -l` exits `0` whether or not")
+
+    def test_go_vet_load_failure_is_not_reported_as_findings(self) -> None:
+        """컴파일 실패도 findings 와 똑같이 1 이다 — 구분하지 않으면 검사가 안 돈 걸 모른다."""
+        quality = " ".join(self.quality().split())
+        self.assertRegex(quality, r"go vet` returns `1` for a compile failure")
+        self.assertIn("execution-error", quality)
+
+    def test_readonly_dependency_default_is_stated(self) -> None:
+        """Go 1.16+ 는 `-mod=readonly` 가 기본이라 go.mod 를 고치지 않고 실패한다 — 실측."""
+        quality = " ".join(self.quality().split())
+        self.assertIn("-mod=readonly", quality)
+        self.assertRegex(quality, r"go mod tidy|go get", "쓰기로 취급할 명령을 명시하지 않는다")
+
+    def test_loop_variable_finding_is_version_gated(self) -> None:
+        """1.22 에서 의미가 바뀌었다 — 버전을 안 보면 정상 코드에 High 를 낸다."""
+        quality = " ".join(self.quality().split())
+        self.assertRegex(quality, r"Go 1\.22 changed the semantics")
+        severity = between(self.quality(), "## 6. Severity Mapping", "Severity follows impact",
+                           label="심각도 표")
+        self.assertRegex(severity, r"not a finding.{0,30}1\.22")
+
+    def test_text_template_is_named_as_the_xss_sink(self) -> None:
+        """`text/template` 는 이스케이프하지 않는다 — API 가 같아서 import 한 줄이 전부다 (실측)."""
+        security = " ".join(self.security().split())
+        self.assertIn("text/template", security)
+        self.assertRegex(security, r"performs no contextual escaping|no contextual escaping")
+        self.assertIn("html/template", security)
+
+    def test_go_supply_chain_states_what_the_ecosystem_removes(self) -> None:
+        """다른 언어 참조를 그대로 옮기면 없는 위험(install hook)을 찾게 된다."""
+        security = " ".join(self.security().split())
+        self.assertRegex(security, r"no install-time hook")
+        self.assertIn("go.sum", security)
+        self.assertIn("govulncheck", security)
+
+    def test_math_rand_is_judged_by_import_not_by_seeding(self) -> None:
+        """Go 1.20 이후 시드가 필요 없어져 오용이 오히려 현대적으로 보인다."""
+        security = " ".join(self.security().split())
+        self.assertIn("crypto/rand", security)
+        self.assertRegex(security, r"Judge by the import")
+
+    def test_go_quality_follows_the_target_section_contract(self) -> None:
+        quality = self.quality()
+        for heading in (
+            "## 0. Applicability and Scope", "## 1. Version Resolution", "## 2. Tool Roles",
+            "## 3. Availability and Authority", "## 4. Execution", "## 5. Manual Patterns",
+            "## 6. Severity Mapping",
+        ):
+            with self.subTest(section=heading):
+                self.assertIn(heading, quality)
+
+    def test_go_security_declares_the_two_axis_pairing(self) -> None:
+        header = self.security()[:1000]
+        self.assertIn("Language axis", header)
+        for surface in ALL_SURFACES:
+            with self.subTest(surface=surface):
+                self.assertIn(surface, header)
 
 
 class SecurityMetadataAndGuidanceTest(unittest.TestCase):
