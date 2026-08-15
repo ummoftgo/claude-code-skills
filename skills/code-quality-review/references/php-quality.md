@@ -223,6 +223,76 @@ phpcpd <src>
 
 The gate and the analysis read **the same `PHPSTAN_CONFIG`**.
 
+### The same gate on Windows PowerShell
+
+`SKILL.md` says a Windows-native install must not require WSL or Git Bash, so the Bash block
+above cannot be the only form — without this, a PowerShell review runs PHPStan with no cache
+isolation and no trust gate at all. The logic is identical: discover the config among the same
+six names, stop on an untrusted diff that has one, and otherwise redirect both cache keys into
+a temp directory outside the workspace.
+
+**Reproduction status:** the Bash form was measured end-to-end. This form was checked for
+PowerShell 5.1 syntax only — the Windows host used for development has no PHP or PHPStan
+installed. Treat a first Windows run as worth verifying: confirm the repository is unchanged
+afterwards.
+
+```powershell
+$PhpstanConfig = ''
+if ($env:PHPSTAN_EXPLICIT_CONFIG) {
+    $PhpstanConfig = $env:PHPSTAN_EXPLICIT_CONFIG
+} else {
+    foreach ($candidate in '.phpstan.neon', 'phpstan.neon', '.phpstan.neon.dist',
+                           'phpstan.neon.dist', '.phpstan.dist.neon', 'phpstan.dist.neon') {
+        if (Test-Path -LiteralPath $candidate -PathType Leaf) { $PhpstanConfig = $candidate; break }
+    }
+}
+
+# Trust gate — before PHPStan is started in any form.
+$ExecRisk = @()
+if ($env:UNTRUSTED_DIFF -eq '1') {
+    if ($PhpstanConfig) { $ExecRisk += "config-present:$PhpstanConfig" }
+    if (Test-Path -LiteralPath 'vendor/composer/autoload_files.php') {
+        $ExecRisk += 'composer-autoload-files'
+    }
+}
+
+if ($ExecRisk) {
+    "static analysis: skipped-untrusted-execution — analysis would run project code ($($ExecRisk -join ' '))"
+} else {
+    # Cache isolation. `[System.IO.Path]::GetFullPath` canonicalises `.`/`..` the way
+    # `realpath -m` does; `$env:TEMP` is the PowerShell equivalent of TMPDIR and gets the
+    # same inside-the-repository check.
+    $repoRoot = [System.IO.Path]::GetFullPath((Get-Location).Path)
+    $scratch = Join-Path ([System.IO.Path]::GetTempPath()) ("phpstan-review-" + [guid]::NewGuid())
+    if ([System.IO.Path]::GetFullPath($scratch).StartsWith($repoRoot, [StringComparison]::OrdinalIgnoreCase)) {
+        $scratch = Join-Path 'C:\Windows\Temp' ("phpstan-review-" + [guid]::NewGuid())
+    }
+    New-Item -ItemType Directory -Path $scratch -Force | Out-Null
+    $override = Join-Path $scratch 'phpstan-review.neon'
+    $lines = @()
+    if ($PhpstanConfig) {
+        $full = [System.IO.Path]::GetFullPath((Resolve-Path -LiteralPath $PhpstanConfig).Path)
+        # NEON reads `\` as an escape inside quoted strings; forward slashes avoid the question
+        # entirely and PHP accepts them on Windows.
+        $lines += 'includes:'
+        $lines += '    - ' + $full.Replace('\', '/')
+    }
+    $cache = (Join-Path $scratch 'cache').Replace('\', '/')
+    $lines += 'parameters:'
+    $lines += '    tmpDir: ' + $cache
+    $lines += '    resultCachePath: ' + $cache + '/resultCache.php'
+    if (-not $PhpstanConfig) { $lines += '    level: 5' }
+    Set-Content -LiteralPath $override -Value $lines -Encoding UTF8
+
+    & $PhpCmd (Get-Command phpstan).Source analyse $SrcDir `
+        --configuration="$override" --no-progress --error-format=raw
+}
+```
+
+Outside read-only mode, run PHPStan with the project's own configuration exactly as the Bash
+block does — the override exists to protect the workspace, not to change the analysis.
+
+
 ### Before analysing an untrusted diff
 
 Analysis itself is static parsing — `paths:` and `scanFiles:` do not run the files. These do,

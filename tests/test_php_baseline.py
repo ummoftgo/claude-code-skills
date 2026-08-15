@@ -1185,6 +1185,57 @@ class PhpStanReadOnlyGateTest(unittest.TestCase):
             "level 9 로 잡혀야 할 오류가 없다 — 프로젝트 설정이 무시됐을 수 있다",
         )
 
+    def test_the_windows_form_exists_and_matches_the_posix_contract(self) -> None:
+        """Windows 네이티브 설치를 지원한다고 해놓고 게이트가 POSIX 전용이면 그쪽은 무방비다.
+
+        `SKILL.md` 가 WSL·Git Bash 를 요구하지 말라고 하므로, bash 블록만 있으면 PowerShell
+        리뷰는 캐시 격리도 신뢰 게이트도 없이 PHPStan 을 직접 돌린다.
+        """
+        reference = quality_reference("php-quality")
+        self.assertIn("```powershell", reference, "PowerShell 형태가 없다")
+        block = between(reference, "```powershell", "```", label="PowerShell 게이트")
+        for name in (".phpstan.neon", "phpstan.dist.neon"):
+            with self.subTest(config=name):
+                self.assertIn(name, block, "설정 탐지 목록이 POSIX 와 다르다")
+        self.assertIn("skipped-untrusted-execution", block, "신뢰 게이트가 없다")
+        self.assertIn("tmpDir: ", block, "캐시를 옮기지 않는다")
+        self.assertIn("resultCachePath: ", block, "resultCachePath 를 옮기지 않는다")
+        self.assertRegex(
+            block, r"\$repoRoot = \[System\.IO\.Path\]::GetFullPath",
+            "저장소 루트를 정규화하지 않는다 — `.`/`..` 가 섞이면 비교가 빗나간다",
+        )
+        self.assertRegex(
+            block, r"StartsWith\(\$repoRoot",
+            "임시 경로가 저장소 안인지 확인하지 않는다",
+        )
+        self.assertRegex(
+            " ".join(reference.split()),
+            r"checked for PowerShell 5\.1 syntax only",
+            "재현하지 못한 형태라는 사실이 표시되지 않았다",
+        )
+
+    def test_the_windows_form_parses_as_powershell(self) -> None:
+        """문법 오류면 첫 Windows 실행에서 통째로 죽는다 — 최소한 파싱은 확인한다."""
+        if not Path("/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe").exists():
+            self.skipTest("Windows PowerShell 없음")
+        block = between(
+            quality_reference("php-quality"), "```powershell", "```",
+            label="PowerShell 게이트",
+        )
+        with tempfile.TemporaryDirectory(dir="/mnt/c/Windows/Temp") as tmp:
+            script = Path(tmp, "gate.ps1")
+            script.write_text("$PhpCmd = 'php'; $SrcDir = 'src'\n" + block, encoding="utf-8")
+            win_path = "C:\\Windows\\Temp\\" + Path(tmp).name + "\\gate.ps1"
+            done = subprocess.run(
+                ["/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe",
+                 "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command",
+                 "$e=$null;"
+                 f"[void][System.Management.Automation.Language.Parser]::ParseFile('{win_path}',[ref]$null,[ref]$e);"
+                 "if ($e -and $e.Count -gt 0) { exit 1 } else { exit 0 }"],
+                capture_output=True, text=True, timeout=180,
+            )
+            self.assertEqual(done.returncode, 0, f"PowerShell 문법 오류:\n{done.stdout}")
+
     def test_every_discovered_config_name_is_covered(self) -> None:
         """PHPStan 2.x 는 여섯 이름을 자동 탐지한다. 셋만 보면 설정된 프로젝트를 놓친다."""
         commands = code_blocks(quality_reference("php-quality"))
