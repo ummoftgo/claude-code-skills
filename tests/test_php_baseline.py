@@ -1204,7 +1204,7 @@ class PhpStanReadOnlyGateTest(unittest.TestCase):
         ` #` 는 주석 시작이고 `,` 는 구분자다. 그런 디렉터리 밑의 프로젝트에서는
         include 가 통째로 무시되거나 분석이 실패한다 (실측).
         """
-        for name in ("has #hash", "has,comma"):
+        for name in ("has #hash", "has,comma", "O'Brien"):
             with self.subTest(directory=name):
                 with tempfile.TemporaryDirectory() as base:
                     work = Path(base, name)
@@ -1236,6 +1236,24 @@ class PhpStanReadOnlyGateTest(unittest.TestCase):
                         if f.is_file() and f.name not in {"gate.sh", "phpstan.neon", "A.php"}
                     ]
                     self.assertEqual(leftover, [], f"{name}: 저장소에 파일이 생겼다")
+
+    def test_all_three_paths_go_through_the_same_quoting_helper(self) -> None:
+        """세 값 중 하나만 옛 직접 인용으로 돌아가도 그 경로에서만 조용히 깨진다.
+
+        실행 테스트는 자기가 바꾸는 경로만 덮는다 — `TMPDIR` 행렬은 include 경로의
+        회귀를 못 잡는다. 그래서 셋 다 같은 헬퍼를 거치는지 구조로도 고정한다.
+        """
+        commands = code_blocks(quality_reference("php-quality"))
+        for key in ("includes:", "tmpDir:", "resultCachePath:"):
+            with self.subTest(key=key):
+                line = next(
+                    (l for l in commands.splitlines() if key in l and "printf" in l), None
+                )
+                self.assertIsNotNone(line, f"{key} 를 쓰는 printf 를 찾지 못했다")
+                self.assertIn(
+                    "neon_quote", line,
+                    f"{key} 가 공통 인용 헬퍼를 거치지 않는다: {line.strip()}",
+                )
 
     def test_a_cache_path_with_neon_metacharacters_still_analyses(self) -> None:
         """캐시 경로도 프로젝트 경로와 같은 인용·이스케이프를 거쳐야 한다.
@@ -1467,13 +1485,15 @@ class PhpStanTrustGateTest(PhpStanReadOnlyGateTest):
         )
         self.assertIn("phpstan-extension", declares, "확장 선언을 탐지하지 못한다")
 
-        # `extra.phpstan` 이 있어도 `includes` 가 없으면 확장이 아니다 — 문자열 검사는
-        # 이 둘을 구분하지 못한다.
+        # 음성 표본은 옛 구현을 **실제로 거부해야** 의미가 있다. 옛 grep 은
+        # `"phpstan"` 과 `"includes"` 가 같은 파일에 있으면 걸렸으므로, 둘 다 있되
+        # PHPStan 확장은 아닌 표본을 쓴다 — PHPStan 에 의존하면서 무관한
+        # `extra.other.includes` 를 선언하는 흔한 형태다.
         depends = self.run_untrusted(
             None,
             extra={"vendor/probe/pkg/composer.json":
                    '{"name":"p/p","require-dev":{"phpstan/phpstan":"^2"},'
-                   '"extra":{"phpstan":{"level":5}}}'},
+                   '"extra":{"phpstan":{"level":5},"other":{"includes":["x.neon"]}}}'},
         )
         self.assertNotIn(
             "phpstan-extension", depends,
