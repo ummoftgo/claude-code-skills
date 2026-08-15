@@ -2389,6 +2389,12 @@ class PhpCrossValidationBaseline(unittest.TestCase):
             "BrowserStorage": "localStorage.setItem('k', v)",
             "BackendQuality": "foreach ($rows as $row) { $db->query($sql); }",
             "FrontendQuality": "store.subscribe(fn)",
+            "PythonSecurity": "cur.execute(f\"SELECT * FROM u WHERE id={uid}\")",
+            "GoSecurity": 'exec.Command("sh", "-c", cmd)',
+            "RustSecurity": "let v = map.get(&id).unwrap();",
+            "PythonQuality": "except Exception:",
+            "GoQuality": "f, _ := os.Open(path)",
+            "RustQuality": "std::thread::sleep(d);",
         }
         self.assertEqual(
             set(samples), set(families),
