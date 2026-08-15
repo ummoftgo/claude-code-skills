@@ -1,6 +1,6 @@
 ---
 name: web-security-review
-description: "Perform security review for application backends and frontends — PHP, Python, Go, and Node.js (HTTP services, CLIs, daemons, libraries) plus the browser surface (vanilla JS, jQuery, Svelte, HTMX). Use when: (1) user explicitly requests a security review or audit, (2) a new web feature is complete and needs security sign-off, (3) writing new authentication, file upload, form handling, API endpoint, CLI, or child-process code and want secure-by-default patterns. A language with no reference here is reported as unreviewed rather than checked against another language's rules. Produces severity-classified findings report. Do not use for a pre-merge review of a whole branch or PR (use branch-merge-review, which dispatches this skill as its security reviewer) or for a non-security quality review (use code-quality-review)."
+description: "Perform security review for application backends and frontends — PHP, Python, Go, Rust, and Node.js (HTTP services, CLIs, daemons, libraries) plus the browser surface (vanilla JS, jQuery, Svelte, HTMX). Use when: (1) user explicitly requests a security review or audit, (2) a new web feature is complete and needs security sign-off, (3) writing new authentication, file upload, form handling, API endpoint, CLI, or child-process code and want secure-by-default patterns. A language with no reference here is reported as unreviewed rather than checked against another language's rules. Produces severity-classified findings report. Do not use for a pre-merge review of a whole branch or PR (use branch-merge-review, which dispatches this skill as its security reviewer) or for a non-security quality review (use code-quality-review)."
 ---
 
 # Web Security Review
@@ -25,6 +25,7 @@ needs both surface files.
 |---|---|---|
 | Language | `references/php-backend-security.md` | PHP language rules **and** its HTTP surface (see the exception below) |
 | Language | `references/node-security.md` | Node runtime APIs, deserialization, prototype pollution, dependencies, secrets |
+| Language | `references/rust-security.md` | `unsafe` invariants, reachable panics, resource limits, crate integrity, crypto |
 | Language | `references/go-security.md` | Go runtime, templates, concurrency as a security property, module integrity, crypto |
 | Language | `references/python-security.md` | Python runtime, deserialization, SQL, templates, crypto, dependencies, secrets |
 | Surface | `references/http-server-security.md` | Auth, session, CSRF, authorization, upload, headers, CORS, response exposure |
@@ -68,6 +69,9 @@ PHP and Node loads both. Then add one surface file per surface in scope.
 | Go server-rendered app (html/template) | `go-security.md` | `http-server-security.md` + `browser-security.md` |
 | Go CLI or daemon | `go-security.md` | `native-security.md` |
 | Go library with no surface evidence | `go-security.md` | **all three** — the consumer decides the surface and is not in this diff |
+| Rust HTTP service | `rust-security.md` | `http-server-security.md` |
+| Rust CLI or daemon | `rust-security.md` | `native-security.md` |
+| Rust library with no surface evidence | `rust-security.md` | **all three** — the consumer decides the surface and is not in this diff |
 | Browser assets only, no manifest change | — | `browser-security.md` |
 
 **A build is code that runs.** A bundler or prerender config is not just a description of the output — it executes on a developer machine and in CI, reads the working directory, and

@@ -1,6 +1,6 @@
 ---
 name: code-quality-review
-description: "Review code for quality and performance issues. Trigger when user asks for code quality review, refactoring advice, or code cleanup. Covers: (1) unnecessary or misleading comments, (2) style inconsistencies vs project conventions, (3) duplicated/redundant code, (4) performance inefficiencies — especially evaluation order (cheap checks before expensive ones). Covers PHP, Python, Go, JavaScript/TypeScript on both sides — browser code and Node services, CLIs, and libraries — and CSS/SCSS. Runs CLI tools automatically (PHPStan/phpcs/phpmd/phpcpd for PHP; ruff/mypy/pyright/vulture/radon for Python; go vet/staticcheck/golangci-lint/gofmt for Go; ESLint/Biome/oxlint/tsc/svelte-check/knip for JS/TS; Stylelint for CSS/SCSS). Adapts per detected language and framework; a language with no reference here is reported as unsupported rather than checked against another language's rules. Do not use when the request names security as the subject (use web-security-review) or when the scope is a whole branch/PR before merge (use branch-merge-review)."
+description: "Review code for quality and performance issues. Trigger when user asks for code quality review, refactoring advice, or code cleanup. Covers: (1) unnecessary or misleading comments, (2) style inconsistencies vs project conventions, (3) duplicated/redundant code, (4) performance inefficiencies — especially evaluation order (cheap checks before expensive ones). Covers PHP, Python, Go, Rust, JavaScript/TypeScript on both sides — browser code and Node services, CLIs, and libraries — and CSS/SCSS. Runs CLI tools automatically (PHPStan/phpcs/phpmd/phpcpd for PHP; ruff/mypy/pyright/vulture/radon for Python; go vet/staticcheck/golangci-lint/gofmt for Go; clippy/rustfmt for Rust; ESLint/Biome/oxlint/tsc/svelte-check/knip for JS/TS; Stylelint for CSS/SCSS). Adapts per detected language and framework; a language with no reference here is reported as unsupported rather than checked against another language's rules. Do not use when the request names security as the subject (use web-security-review) or when the scope is a whole branch/PR before merge (use branch-merge-review)."
 ---
 
 # Code Quality Review
@@ -27,6 +27,7 @@ Load before scanning:
 - `references/node-quality.md` — server, CLI, daemon, library: async, streams, lifecycle, resources
 - `references/python-quality.md` — Python tool setup, execution, and manual patterns
 - `references/go-quality.md` — Go tool setup, execution, and manual patterns
+- `references/rust-quality.md` — Rust tool setup, execution, and manual patterns
 - `references/css-quality.md` — CSS/SCSS tool setup, execution, and manual patterns
 
 Load all applicable files for full-stack review.
@@ -50,6 +51,7 @@ scheduled work, not a precondition for using this table.
 | `node-quality.md` | §1–7 server-side patterns |
 | `python-quality.md` | §0–6 — the first reference that matches the target contract below |
 | `go-quality.md` | §0–6 — matches the target contract below |
+| `rust-quality.md` | §0–6 — matches the target contract below |
 | `css-quality.md` | §1 setup · §2 execution · §3–6 manual patterns |
 
 The target: every `references/{language}-quality.md` carries the same seven sections so this

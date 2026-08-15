@@ -105,6 +105,7 @@ Return a structured quality report following the code-quality-review report form
 | Node/TS | - `await` inside a loop: classify each as dependent, rate-limited, or serialisable<br>- Unhandled rejection handlers that only log, and `.pipe()` chains without error handling<br>- Missing `SIGTERM` handling in a long-running service<br>- N+1 across an async boundary, and connection-pool exhaustion from unbounded `Promise.all`<br>- `tsconfig.json` strictness before judging type findings |
 | Python | - Mutable default arguments and class-level containers shared across instances<br>- Bare `except` / `except Exception` that discards the error<br>- N+1 queries and per-row I/O inside loops<br>- Evaluation order: cheap guards before expensive calls, and `and`/`or` short-circuit ordering<br>- `requires-python` floor before recommending any syntax, and the project's mypy strictness before judging type findings |
 | Go | - Ignored errors (`_`) that lead to a nil dereference or silent data loss<br>- `defer` inside a loop over unbounded input<br>- Unbounded goroutines, and a `context.Context` accepted but never honoured<br>- Missing timeouts on outbound HTTP and database calls<br>- The `go` directive before reporting loop-variable capture — 1.22 changed the semantics |
+| Rust | - `unwrap`/`expect`/direct indexing on input-derived data — each is a reachable panic<br>- Blocking I/O or `std::thread::sleep` inside `async`, and a `std::sync::Mutex` guard held across `.await`<br>- Bare `as` casts that truncate silently, and unchecked arithmetic on input<br>- `unsafe` blocks with no safety comment<br>- The MSRV (`rust-version`) and edition before recommending any syntax |
 
 When a language has no row here, do not dispatch this template with another language's focus —
 skip the reviewer and report the paths as unreviewed.
@@ -135,6 +136,8 @@ findings even when only browser code moved. Add one surface file per surface Ste
 | Go, `http-server` | `go-security.md` + `http-server-security.md` |
 | Go, `native` (CLI, daemon) | `go-security.md` + `native-security.md` |
 | Go, server-rendered templates | `go-security.md` + `http-server-security.md` + `browser-security.md` |
+| Rust, `http-server` | `rust-security.md` + `http-server-security.md` |
+| Rust, `native` (CLI, daemon) | `rust-security.md` + `native-security.md` |
 | Browser assets only, no manifest in the diff | `browser-security.md` |
 
 **Never pair `php-backend-security.md` with `http-server-security.md`** — the PHP file already

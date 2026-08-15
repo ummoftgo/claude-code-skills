@@ -43,6 +43,7 @@ QUALITY_REFERENCES = (
     "node-quality",          # 서버·CLI·데몬·라이브러리
     "python-quality",        # 6단계: Python
     "go-quality",            # 6단계: Go
+    "rust-quality",          # 6단계: Rust
     "css-quality",
 )
 
@@ -89,6 +90,10 @@ WRITE_CAUSING = (
     ("go-quality", "staticcheck 설치", r"go install[^\n]*staticcheck", r"go install[^\n]*staticcheck"),
     ("go-quality", "golangci-lint 설치", r"go install[^\n]*golangci-lint", r"go install[^\n]*golangci-lint"),
     ("go-quality", "gofmt 자동수정", r"gofmt -w", r"gofmt -w"),
+    ("rust-quality", "clippy/rustfmt 컴포넌트 설치", r"rustup component add", r"rustup component add"),
+    ("rust-quality", "cargo-audit 설치", r"cargo install cargo-audit", r"cargo install cargo-audit"),
+    ("rust-quality", "rustfmt 자동수정", r"(?m)^cargo fmt\s+#", r"(?m)^cargo fmt\s+#"),
+    ("rust-quality", "clippy 자동수정", r"cargo clippy --fix", r"cargo clippy --fix"),
 )
 
 #: 절 이름 → 선언된 심각도. 개수가 아니라 **의미**를 고정한다. 같은 `MUST` 문법에 서로 다른
@@ -963,7 +968,7 @@ class PhpToolchainBaseline(unittest.TestCase):
         """GREEN (1단계에서 전환됨) — 쓰기를 유발하는 **명령 각각**이 읽기 전용 가드를 동반해야 한다.
 
         Step 2의 게이트는 "도구 설치"만 가리므로 설정 생성·자동수정·보고서 출력은 걸리지
-        않는다. 그래서 쓰기를 유발하는 능력마다 계약 문구를 요구한다(현재 34개 — `WRITE_CAUSING` 이 정본).
+        않는다. 그래서 쓰기를 유발하는 능력마다 계약 문구를 요구한다(현재 38개 — `WRITE_CAUSING` 이 정본).
 
         **파일 상단에 문구 한 줄을 추가하는 것으로는 통과할 수 없다** — 각 명령이 자기
         계약 문구를 갖거나, 범위를 명시한 블록 문구가 그 블록을 덮어야 한다.
@@ -1855,6 +1860,87 @@ class GoReferenceSemanticsTest(unittest.TestCase):
                 self.assertIn(heading, quality)
 
     def test_go_security_declares_the_two_axis_pairing(self) -> None:
+        header = self.security()[:1000]
+        self.assertIn("Language axis", header)
+        for surface in ALL_SURFACES:
+            with self.subTest(surface=surface):
+                self.assertIn(surface, header)
+
+
+class RustReferenceSemanticsTest(unittest.TestCase):
+    """Rust 참조의 실측된 사실을 고정한다 (cargo 1.91.0 / rustc 1.91.0)."""
+
+    def quality(self) -> str:
+        return read("skills/code-quality-review/references/rust-quality.md")
+
+    def security(self) -> str:
+        return read("skills/web-security-review/references/rust-security.md")
+
+    def test_cargo_commands_relocate_the_target_dir_and_lock_the_lockfile(self) -> None:
+        """`cargo clippy` 는 Cargo.lock 과 target/ 을 크레이트 안에 만든다 — 둘 다 막아야 한다."""
+        for line in code_blocks(self.quality()).splitlines():
+            stripped = line.strip()
+            if stripped.startswith("cargo clippy") or stripped.startswith("cargo check"):
+                if "--fix" in stripped or "--version" in stripped:
+                    continue
+                with self.subTest(command=stripped):
+                    self.assertIn("--locked", stripped, "Cargo.lock 이 새로 생긴다")
+        quality = " ".join(self.quality().split())
+        self.assertIn("CARGO_TARGET_DIR", quality, "target/ 을 크레이트 밖으로 보내지 않는다")
+
+    def test_missing_lockfile_is_a_skip_not_a_workaround(self) -> None:
+        """lock 이 없으면 --locked 는 101 로 실패한다. 그게 정답이지 우회할 상황이 아니다."""
+        quality = " ".join(self.quality().split())
+        self.assertRegex(quality, r"exit 101")
+        self.assertRegex(quality, r"skipped-read-only")
+        self.assertRegex(
+            quality, r"--offline`?, which still writes the lockfile|do not substitute\s+`--offline`",
+            "`--offline` 도 lock 을 쓴다는 사실이 없다",
+        )
+
+    def test_clippy_exit_code_trap_is_stated(self) -> None:
+        """`cargo clippy` 는 warning 이 있어도 0 이다 — 종료 코드만 보면 항상 통과다."""
+        quality = " ".join(self.quality().split())
+        self.assertRegex(quality, r"exits `0` with warnings present")
+        self.assertRegex(
+            quality, r"-D warnings.{0,120}overrides the project",
+            "-D warnings 가 프로젝트 정책을 덮는다는 경고가 없다",
+        )
+
+    def test_review_effort_is_pointed_away_from_what_the_compiler_owns(self) -> None:
+        """안전한 Rust 에서 use-after-free 를 지적하면 보고서 신뢰도만 잃는다."""
+        security = " ".join(self.security().split())
+        self.assertRegex(security, r"compiler already rejects")
+        for real in ("unsafe", "panic", "exhaustion", "dependencies"):
+            with self.subTest(surface=real):
+                self.assertIn(real, security)
+
+    def test_overflow_behaviour_differs_by_profile(self) -> None:
+        """debug 는 panic, release 는 wrap — 같은 코드가 프로파일에 따라 크래시와 오답이 된다 (실측)."""
+        security = " ".join(self.security().split())
+        self.assertRegex(security, r"debug build panics on overflow and a release build wraps")
+
+    def test_pathbuf_push_absolute_trap_is_named(self) -> None:
+        security = " ".join(self.security().split())
+        self.assertRegex(security, r"`PathBuf::push` with an \*\*absolute\*\* path replaces")
+
+    def test_debug_derive_leak_is_named(self) -> None:
+        """`#[derive(Debug)]` 한 줄이 토큰을 로그로 내보낸다 — Rust 고유의 시크릿 누출 경로다."""
+        security = " ".join(self.security().split())
+        self.assertRegex(security, r"derive\(Debug\)")
+        self.assertIn("tracing::debug!", security)
+
+    def test_rust_quality_follows_the_target_section_contract(self) -> None:
+        quality = self.quality()
+        for heading in (
+            "## 0. Applicability and Scope", "## 1. Version Resolution", "## 2. Tool Roles",
+            "## 3. Availability and Authority", "## 4. Execution", "## 5. Manual Patterns",
+            "## 6. Severity Mapping",
+        ):
+            with self.subTest(section=heading):
+                self.assertIn(heading, quality)
+
+    def test_rust_security_declares_the_two_axis_pairing(self) -> None:
         header = self.security()[:1000]
         self.assertIn("Language axis", header)
         for surface in ALL_SURFACES:
