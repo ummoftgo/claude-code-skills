@@ -1157,13 +1157,39 @@ class PhpSecurityBaseline(unittest.TestCase):
         파일명이 파일 어딘가에 등장하는지가 아니라 **로드 지시 안에** 있는지를 본다.
         설명이나 비활성 템플릿에 이름만 남고 실제 선택에서 빠지는 회귀를 잡기 위함이다.
         """
-        standalone = between(
-            read("skills/web-security-review/SKILL.md"),
-            "Load these before proceeding:",
-            "## Operating Modes",
-            label="web-security-review 로드 지시",
+        # 4단계에서 참조가 언어×표면 2차원으로 재구성됐다. 탐색 지점은 바뀌어도 요구는 같다 —
+        # **PHP 변경이 이 참조를 로드하는가.** 참조 표와 선택 표 양쪽에 있어야 한다.
+        skill = read("skills/web-security-review/SKILL.md")
+        reference_table = between(
+            skill, "| Axis | File | Covers |", "### Selecting references from the surface",
+            label="참조 표",
         )
-        self.assertIn("`references/php-backend-security.md`", standalone)
+        self.assertIn("`references/php-backend-security.md`", reference_table)
+
+        selection = between(
+            skill, "| Change | Language axis | Surface axis |",
+            "**`php-backend-security.md` already covers",
+            label="참조 선택 표",
+        )
+        php_rows = [line for line in selection.splitlines() if line.startswith("| PHP ")]
+        self.assertTrue(php_rows, "선택 표에 PHP 행이 없다")
+        for row in php_rows:
+            with self.subTest(row=row[:40]):
+                self.assertIn("php-backend-security.md", row,
+                              "PHP 변경이 언어 축 참조를 로드하지 않는다")
+                # **부정 조건**: PHP 파일이 이미 HTTP 표면을 담고 있으므로 함께 로드하면
+                # 같은 findings 를 두 번 낸다. 현재 동작만 확인하면 이 회귀를 놓친다.
+                self.assertNotIn(
+                    "http-server-security.md", row,
+                    "PHP 행이 http-server 표면 참조를 함께 로드한다 — 이중 보고가 된다",
+                )
+        # PHP 파일이 HTTP 표면을 겸한다는 예외가 **글로도** 있어야 한다. 표만 맞고 규칙이
+        # 없으면 다음 사람이 표를 늘릴 때 근거 없이 http-server 를 붙인다.
+        self.assertRegex(
+            " ".join(skill.split()),
+            r"never pair (?:it|`php-backend-security\.md`) with[^.]{0,60}http-server-security",
+            "PHP 를 http-server 표면과 함께 로드하지 말라는 규칙이 없다",
+        )
 
         dispatched = between(
             read("skills/branch-merge-review/references/reviewer-prompts.md"),
@@ -1172,6 +1198,265 @@ class PhpSecurityBaseline(unittest.TestCase):
             label="보안 리뷰어 로드 지시",
         )
         self.assertIn("references/php-backend-security.md", dispatched)
+
+
+class SecurityReferenceSelectionTest(unittest.TestCase):
+    """4단계 — 언어×표면 참조 선택이 실제로 지시대로인지 고정한다.
+
+    이 표는 "어떤 파일을 읽는가"를 정하므로, 한 행이 틀리면 그 조합의 검토가 통째로 빠지거나
+    같은 findings 를 두 번 낸다. 현재 동작만 확인하는 검사로는 둘 다 놓친다.
+    """
+
+    def skill(self) -> str:
+        return read("skills/web-security-review/SKILL.md")
+
+    def selection_rows(self) -> dict[str, str]:
+        table = between(
+            self.skill(),
+            "| Change | Language axis | Surface axis |",
+            "**`php-backend-security.md` already covers",
+            label="참조 선택 표",
+        )
+        rows = {}
+        for line in table.splitlines():
+            if line.startswith("|") and line.count("|") >= 4 and "---" not in line:
+                label = line.split("|")[1].strip()
+                if label and label != "Change":
+                    rows[label] = line
+        return rows
+
+    def test_every_node_row_loads_the_language_axis(self) -> None:
+        """언어 축은 항상 로드된다 — 매니페스트·lockfile 의 공급망 findings 가 거기 있다."""
+        for label, row in self.selection_rows().items():
+            if not label.startswith("Node"):
+                continue
+            with self.subTest(row=label):
+                self.assertIn(
+                    "node-security.md", row,
+                    f"{label} 행이 언어 축을 로드하지 않는다",
+                )
+
+    #: 행 이름이 아니라 **선택된 참조 집합**을 고정한다. 이름만 검사하면 SSR 행이 HTTP 표면을
+    #: 빠뜨려도 통과한다 — 실제로 그 오류가 이 방식으로 숨어 있었다.
+    REQUIRED_SELECTIONS = {
+        "Node runtime SSR": ("node-security.md", "http-server-security.md", "browser-security.md"),
+        "Node service that also serves a UI": (
+            "node-security.md", "http-server-security.md", "browser-security.md",
+        ),
+        "Node static build": ("node-security.md", "browser-security.md"),
+        "Node service + CLI + UI": ("node-security.md",),
+        "Node library with no surface evidence": (
+            "node-security.md", "all three",
+        ),
+    }
+
+    def test_each_combination_selects_the_right_reference_set(self) -> None:
+        rows = self.selection_rows()
+        for label_prefix, required in self.REQUIRED_SELECTIONS.items():
+            match = [row for label, row in rows.items() if label.startswith(label_prefix)]
+            with self.subTest(row=label_prefix):
+                self.assertTrue(match, f"행이 없다: {label_prefix} / 있는 행: {list(rows)}")
+                for reference in required:
+                    self.assertIn(
+                        reference, match[0],
+                        f"{label_prefix} 가 {reference} 를 로드하지 않는다",
+                    )
+
+    def test_ambiguous_surface_dispatch_names_the_security_references(self) -> None:
+        """표면 불명 시 품질 dispatch 만 정하고 보안 참조를 비워 두면 두 스킬이 모순된다."""
+        section = between(
+            read("skills/branch-merge-review/SKILL.md"),
+            "When the surface is ambiguous",
+            "If no files match a category",
+            label="ambiguous dispatch",
+        )
+        for reference in (
+            "http-server-security.md", "browser-security.md", "native-security.md",
+        ):
+            with self.subTest(reference=reference):
+                self.assertIn(reference, section)
+
+    def test_runtime_ssr_is_separated_from_a_static_build(self) -> None:
+        """런타임 SSR 은 HTTP 서버다 — 정적 번들과 한 행으로 묶으면 인증·세션·CSRF 가 빠진다."""
+        rows = self.selection_rows()
+        ssr = [row for label, row in rows.items() if "SSR" in label]
+        self.assertTrue(ssr, f"SSR 행이 없다: {list(rows)}")
+        for row in ssr:
+            with self.subTest(row=row[:40]):
+                self.assertIn(
+                    "http-server-security.md", row,
+                    "런타임 SSR 행이 HTTP 표면 참조를 로드하지 않는다",
+                )
+
+    def test_the_only_row_without_a_language_axis_is_narrow(self) -> None:
+        """언어 축이 없는 행은 하나뿐이어야 하고, 매니페스트가 diff 에 들어오면 사라져야 한다."""
+        rows = self.selection_rows()
+        without = [
+            label for label, row in rows.items()
+            if "security.md" not in row.split("|")[2]
+        ]
+        self.assertEqual(
+            without, ["Browser assets only, no manifest change"],
+            f"언어 축 없는 행이 예상과 다르다: {without}",
+        )
+        self.assertRegex(
+            " ".join(self.skill().split()),
+            r"the moment a `package\.json`, lockfile, or build script is in the diff",
+            "매니페스트가 들어오면 언어 축이 돌아온다는 단서가 없다",
+        )
+
+    def test_no_reference_selection_says_both_files(self) -> None:
+        """"both reference files" 는 2차원 이전의 표현이다 — 남으면 세 개짜리 조합이 둘로 준다."""
+        for path in (
+            "skills/web-security-review/SKILL.md",
+            "skills/branch-merge-review/references/reviewer-prompts.md",
+        ):
+            with self.subTest(path=path):
+                self.assertNotRegex(
+                    read(path), r"both reference files|Load both reference",
+                    "참조 선택이 두 파일로 고정된 표현이 남아 있다",
+                )
+
+    def test_a_library_without_surface_evidence_is_ambiguous(self) -> None:
+        """소비자가 표면을 정하는데 소비자는 이 diff 에 없다 — 기본값을 주면 틀린다."""
+        skill = " ".join(read("skills/branch-merge-review/SKILL.md").split())
+        self.assertRegex(
+            skill,
+            r"library[^.]{0,80}no surface evidence|Do not default it to `native`",
+            "표면 증거가 없는 라이브러리를 native 로 기본 분류하고 있다",
+        )
+
+    def test_php_can_carry_the_browser_surface(self) -> None:
+        """서버 렌더링 PHP 는 브라우저 표면을 갖는다 — JS/TS 만 표면 판정이라고 쓰면 빠진다."""
+        skill = " ".join(read("skills/branch-merge-review/SKILL.md").split())
+        self.assertRegex(
+            skill,
+            r"Surfaces are still assigned to every language|PHP app that emits HTML",
+            "PHP 의 브라우저 표면 판정 경로가 없다",
+        )
+
+
+class NodeSecuritySemanticsTest(unittest.TestCase):
+    """4단계에서 고친 Node 보안 기술 주장을 고정한다.
+
+    보안 참조의 틀린 설명은 품질 참조보다 위험하다 — 리뷰어가 안전한 코드를 취약하다고
+    보고하거나, 더 나쁘게는 취약한 코드를 안전하다고 넘긴다.
+    """
+
+    def reference(self) -> str:
+        return read("skills/web-security-review/references/node-security.md")
+
+    def test_buffer_deprecation_rationale_is_type_confusion_not_uninitialised_memory(self) -> None:
+        """`Buffer(size)` 는 Node 8부터 zero-fill 이다 — v24 실측으로도 전부 0이었다.
+
+        미초기화 메모리를 반환하는 것은 `Buffer.allocUnsafe` 다. 근거를 틀리게 쓰면 리뷰어가
+        존재하지 않는 정보 유출을 보고한다.
+        """
+        section = self.reference()
+        self.assertRegex(section, r"zero-filled since Node 8|Node 8부터")
+        self.assertIn("Buffer.allocUnsafe", section)
+        self.assertNotRegex(
+            section,
+            r"`Buffer\(size\)`[^.]{0,60}allocates uninitialised memory",
+            "틀린 근거가 되살아났다",
+        )
+
+    def test_batbadbut_states_the_patch_status_and_both_cves(self) -> None:
+        """버전 범위 없이 CVE 를 쓰면 패치된 런타임에서도 findings 가 나간다."""
+        section = self.reference()
+        for token in ("CVE-2024-27980", "CVE-2024-36138"):
+            with self.subTest(cve=token):
+                self.assertIn(token, section)
+        self.assertRegex(
+            section, r"Both are patched|patched",
+            "현재 런타임에서 패치됐다는 사실이 없으면 항상 findings 가 된다",
+        )
+        self.assertRegex(section, r"establish which runtime|runtime version")
+
+    def test_argument_array_is_not_presented_as_sufficient(self) -> None:
+        """배열은 셸 파싱만 막는다 — 대상 프로그램의 옵션 인젝션은 남는다."""
+        section = self.reference()
+        self.assertRegex(
+            section, r"not the end of the check|does not stop the \*target program\*",
+        )
+        self.assertIn("'--'", section)
+
+    def test_path_containment_requires_realpath(self) -> None:
+        """`resolve` + `startsWith` 는 lexical 이라 symlink 탈출을 못 막는다."""
+        section = self.reference()
+        self.assertIn("realpath", section)
+        self.assertRegex(section, r"lexical only|symlink or a Windows junction")
+        # `path` 는 URL 디코딩하지 않으므로 `%2f` 예제는 순회를 만들지 않는다.
+        self.assertRegex(section, r"does \*\*not\*\* URL-decode|not URL-decode")
+
+    def test_batbadbut_gives_the_patch_boundary(self) -> None:
+        """"패치됐다"만 쓰고 버전을 안 주면 판정할 수 없다 — 리뷰어가 매번 findings 를 낸다."""
+        section = self.reference()
+        for version in ("18.20.4", "20.15.1", "22.4.1"):
+            with self.subTest(version=version):
+                self.assertIn(version, section)
+
+    def test_lifecycle_audit_covers_more_than_install_hooks(self) -> None:
+        """`prepare`·`prepublish` 계열도 설치 중 실행된다 — install 3종만 보면 놓친다."""
+        section = self.reference()
+        for hook in ("prepare", "prepublish", "preprepare", "postprepare"):
+            with self.subTest(hook=hook):
+                self.assertIn(hook, section)
+
+    def test_permission_flag_is_the_stable_one(self) -> None:
+        """`--experimental-permission` 은 옛 이름이다 — 22.13/23.5 부터 `--permission`."""
+        section = self.reference()
+        self.assertRegex(section, r"`--permission`")
+        self.assertRegex(section, r"22\.13|23\.5", "안정화 버전이 명시되지 않았다")
+
+    def test_supply_chain_audit_does_not_conclude_from_omit_dev(self) -> None:
+        """`--omit=dev` 는 우선순위용이다 — dev 의존성도 개발자 머신과 CI 에서 실행된다."""
+        section = self.reference()
+        self.assertRegex(section, r"prioritise, not to conclude|우선순위")
+        # scoped·중첩 패키지를 놓치는 glob 이 되살아나면 안 된다.
+        self.assertNotRegex(
+            section, r"node_modules/\*/package\.json' \| head",
+            "scoped·중첩 의존성을 놓치는 감사 명령이 되살아났다",
+        )
+
+
+class SecurityMetadataAndGuidanceTest(unittest.TestCase):
+    """4단계에서 넓힌 라우팅 표면과 표면 참조의 지침 정확성을 고정한다."""
+
+    def test_the_skill_description_reaches_node_and_native_requests(self) -> None:
+        """본문이 Node CLI·데몬까지 다루는데 description 이 PHP 웹만 말하면 도달하지 않는다."""
+        description = between(
+            read("skills/web-security-review/SKILL.md"), "description:", "\n---",
+            label="description",
+        )
+        for token in ("Node", "CLI"):
+            with self.subTest(token=token):
+                self.assertIn(token, description)
+        self.assertRegex(
+            description, r"unreviewed|another language",
+            "미지원 언어를 미검토로 보고한다는 경계가 description 에 없다",
+        )
+
+    def test_the_security_prompt_loads_one_language_file_per_language(self) -> None:
+        """PHP+Node 브랜치를 리뷰어 하나가 처리한다 — 단수로 쓰면 한 언어가 빠진다."""
+        prompts = " ".join(
+            read("skills/branch-merge-review/references/reviewer-prompts.md").split()
+        )
+        self.assertRegex(
+            prompts, r"per changed language",
+            "언어 축을 언어마다 로드한다는 지시가 없다",
+        )
+
+    def test_password_hashing_guidance_does_not_call_bcrypt_memory_hard(self) -> None:
+        """bcrypt 는 memory-hard 가 아니다 — 동급으로 쓰면 GPU 공격 내성을 잘못 가르친다."""
+        reference = read("skills/web-security-review/references/http-server-security.md")
+        self.assertRegex(reference, r"bcrypt is not memory-hard|bcrypt[^.]{0,40}not memory-hard")
+        self.assertNotRegex(
+            reference,
+            r"memory-hard algorithm \(argon2id, scrypt, bcrypt\)",
+            "bcrypt 를 memory-hard 목록에 넣은 표현이 되살아났다",
+        )
+        self.assertRegex(reference, r"argon2id", "권장 알고리즘이 없다")
 
 
 class PhpCrossValidationBaseline(unittest.TestCase):

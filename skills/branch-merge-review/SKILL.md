@@ -190,9 +190,18 @@ without `composer.json` is common, and losing it would drop backend review entir
 | **Style** | `*.css`, `*.scss`, `*.sass` | extension alone |
 | **Config** | `*.json`, `*.yaml`, `*.yml`, `*.env*`, `*.ini` | extension alone |
 
-**Only JS/TS needs a surface decision**, because the same extension serves a browser bundle and
-an HTTP server. Everything else is settled by extension; surface detection selects security
-references (Step 2) but never overrides the quality category.
+**Only JS/TS needs a surface decision for the *quality* category**, because the same extension
+serves a browser bundle and an HTTP server. Every other language's quality category is settled by
+extension.
+
+**Surfaces are still assigned to every language**, because they select security references. A
+PHP app that emits HTML carries the `browser` surface — `*.php` templates with markup, or PHP
+that echoes into a page — and its security review loads `browser-security.md` alongside
+`php-backend-security.md`. A PHP service that only returns JSON does not.
+
+A library with no `bin` entry, no server, and no bundler has **no surface evidence at all**. Do
+not default it to `native`: mark it `ambiguous` and dispatch conservatively (below), because the
+consumer decides the real surface and the consumer is not in this diff.
 
 ### Deciding the JS/TS surface
 
@@ -204,7 +213,7 @@ enclosing `package.json` and read it:
 |---|---|
 | `browser` | bundler config (Vite, webpack, Rollup, esbuild), a frontend framework dependency, `*.svelte`/`*.html` siblings, a `browser` field |
 | `http-server` | a server framework dependency (Express, Fastify, NestJS, Koa, Hono), an HTTP listener, a `main`/`exports` server entry |
-| `native` | a `bin` entry, a CLI framework dependency, a library with neither of the above |
+| `native` | a `bin` entry, a CLI framework dependency, or a process that reads argv/stdin/config from the working directory |
 
 A workspace can carry more than one surface; assign all that apply. Path convention
 (`apps/web`, `server/`, `src/routes`) is **supporting evidence only** — a manifest outranks it.
@@ -220,6 +229,9 @@ would stall the whole review:
 
 - send the file to the **Node** quality reviewer in every ambiguous case;
 - **also** send it to the frontend reviewer when a browser surface remains possible;
+- tell the Security reviewer to load **every surface reference** for those paths
+  (`http-server-security.md`, `browser-security.md`, `native-security.md`) — the same conservative
+  rule the `web-security-review` selection table states for a library with no surface evidence;
 - record `surface classification: ambiguous` for those paths in the final report;
 - ask before dispatching only when even conservative duplication is impossible.
 
@@ -312,12 +324,12 @@ says which language went unreviewed and why. Silence about a missing reviewer re
 result, and the risk grows precisely as the roster grows — with one fixed backend reviewer a
 failure was obvious; with one per language it is not.
 
-> **Currently fail-closed for Node.** `web-security-review` ships PHP and browser references
-> only, so a branch touching server-side JS/TS cannot reach `Ready to merge` until a Node
-> security reference exists. That is the intended behaviour, not an oversight: approving a
-> security review that never loaded a reference for the changed language would be a false clean
-> result. Say so explicitly in the report — "Node security reference not available; server-side
-> JS/TS unreviewed" — so the gap is a decision the reader can act on rather than a silent block.
+> **Node is now covered.** `web-security-review` ships `node-security.md` (language axis) and
+> `http-server-security.md` / `native-security.md` (surface axis), so server-side JS/TS is
+> reviewable and no longer blocked by this gate. The gate still applies to any language without a
+> language-axis reference — Python, Go, and Rust today. For those, report the paths as unreviewed
+> and let the recommendation reflect it, rather than approving a review that never loaded a
+> reference for the changed language.
 
 ---
 

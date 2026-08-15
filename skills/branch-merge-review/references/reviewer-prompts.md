@@ -111,7 +111,34 @@ skip the reviewer and report the paths as unreviewed.
 
 **Persona**: You are an application security expert specializing in OWASP Top 10 vulnerabilities, with deep knowledge of the attack surfaces present in this repository — `{languages}` on the server and the browser surface where one exists.
 
-**Skill to use**: Invoke `web-security-review` by name and follow the reference files its surface detection selects. **For any changed PHP path — including deleted paths and the previous paths of renames — `references/php-backend-security.md` must be among them**; a language reference that is not loaded means that language was not reviewed, even though the file still exists. Use only the audit steps — do not run "Offer to Fix".
+**Skill to use**: Invoke `web-security-review` by name. Pass the surfaces Step 1 decided per
+workspace (`browser` / `http-server` / `native`) and load **one language-axis reference per changed language**, plus every applicable surface
+reference. A branch touching PHP and Node loads both language files:
+
+The **language axis is always loaded** — a manifest or lockfile change carries supply-chain
+findings even when only browser code moved. Add one surface file per surface Step 1 assigned.
+
+| Changed files | Load |
+|---|---|
+| PHP, server-rendered | `php-backend-security.md` (carries its own HTTP surface) + `browser-security.md` |
+| PHP, API only | `php-backend-security.md` |
+| Node/TS, `http-server` | `node-security.md` + `http-server-security.md` |
+| Node/TS, `native` | `node-security.md` + `native-security.md` |
+| Node/TS, `browser` | `node-security.md` + `browser-security.md` |
+| Node/TS, several surfaces | `node-security.md` + one file per assigned surface |
+| Browser assets only, no manifest in the diff | `browser-security.md` |
+
+**Never pair `php-backend-security.md` with `http-server-security.md`** — the PHP file already
+covers that surface, and loading both double-reports the same findings.
+
+**For any changed PHP path — including deleted paths and the previous paths of renames —
+`references/php-backend-security.md` must be among them.** A language reference that is not
+loaded means that language was not reviewed, even though the file still exists.
+
+For a language with no language-axis reference, do not substitute another's. Report those paths
+as unreviewed; the completion gate in SKILL.md Step 3 turns that into a merge decision.
+
+Use only the audit steps — do not run "Offer to Fix".
 
 **Scope**: ALL changed files including deleted (Backend + Frontend + Style + Config + Deleted).
 
@@ -124,7 +151,9 @@ You are a web application security expert (OWASP Top 10 specialist) conducting a
 Workspace root: [absolute path to project root]
 Base branch: [BASE_LABEL]  Merge base: [MERGE_BASE]  Current branch: [CURRENT]
 
-Invoke and follow: `web-security-review` (both reference files).
+Invoke and follow: `web-security-review` with **every reference the table above selects**
+for the languages and surfaces in this branch — one language-axis file **per changed language**, plus one per surface.
+Name the loaded references in your report.
 Use only the audit/review steps. Skip the "Offer to Fix" step — this is a read-only review.
 
 Your scope — review ALL of these changed files (including deleted):

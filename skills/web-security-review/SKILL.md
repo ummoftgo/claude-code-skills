@@ -1,11 +1,13 @@
 ---
 name: web-security-review
-description: "Perform security review for PHP backend + vanilla JS/jQuery/Svelte/HTMX frontend web applications. Use when: (1) user explicitly requests a security review or audit, (2) a new web feature is complete and needs security sign-off, (3) writing new authentication, file upload, form handling, or API endpoint code and want secure-by-default patterns. Produces severity-classified findings report. Do not use for a pre-merge review of a whole branch or PR (use branch-merge-review, which dispatches this skill as its security reviewer) or for a non-security quality review (use code-quality-review)."
+description: "Perform security review for application backends and frontends — PHP and Node.js (HTTP services, CLIs, daemons, libraries) plus the browser surface (vanilla JS, jQuery, Svelte, HTMX). Use when: (1) user explicitly requests a security review or audit, (2) a new web feature is complete and needs security sign-off, (3) writing new authentication, file upload, form handling, API endpoint, CLI, or child-process code and want secure-by-default patterns. A language with no reference here is reported as unreviewed rather than checked against another language's rules. Produces severity-classified findings report. Do not use for a pre-merge review of a whole branch or PR (use branch-merge-review, which dispatches this skill as its security reviewer) or for a non-security quality review (use code-quality-review)."
 ---
 
 # Web Security Review
 
-Security review skill for PHP backend + vanilla JS / jQuery / Svelte / HTMX frontend stack.
+Security review skill for web application backends and frontends. References are split by
+**language** (PHP, Node) and by **surface** (HTTP server, browser, native) — load one of each
+that applies.
 
 ## Platform command selection
 
@@ -15,30 +17,81 @@ Use `rg` for audit searches on both POSIX and Windows whenever available. If it 
 
 ## Reference Files
 
-Load these before proceeding:
-- `references/php-backend-security.md` — PHP backend vulnerability checklist and secure patterns
-- `references/web-frontend-security.md` — Frontend (vanilla JS, jQuery, Svelte, HTMX) security checklist
+References are organised on **two axes**. Load the language axis for the backend in scope, plus
+**every surface** that backend actually exposes — a package that serves HTTP and installs a CLI
+needs both surface files.
 
-Read **both** files when reviewing a full-stack feature. Read only the relevant file when reviewing backend-only or frontend-only code.
+| Axis | File | Covers |
+|---|---|---|
+| Language | `references/php-backend-security.md` | PHP language rules **and** its HTTP surface (see the exception below) |
+| Language | `references/node-security.md` | Node runtime APIs, deserialization, prototype pollution, dependencies, secrets |
+| Surface | `references/http-server-security.md` | Auth, session, CSRF, authorization, upload, headers, CORS, response exposure |
+| Surface | `references/browser-security.md` | DOM sinks, CSP, client storage, framework-specific XSS |
+| Surface | `references/native-security.md` | CLI/daemon: invocation trust, filesystem, temp files, child processes, privilege |
+
+**PHP is a deliberate exception.** `php-backend-security.md` predates this split and carries its
+language rules and HTTP-surface rules together. For a PHP change load that file and **not**
+`http-server-security.md` — loading both double-reports the same findings. Splitting PHP is
+scheduled work, not a precondition: the main stack should not be the first to try an unproven
+structure.
+
+### Selecting references from the surface
+
+`branch-merge-review` Step 1 decides the surface per workspace (`browser` / `http-server` /
+`native`) and passes it in. When this skill runs standalone, infer it the same way — from the
+manifest and the entry points — and say which surfaces you assumed.
+
+**The language axis is always loaded** — even for a change that touches only browser code, the
+package manifest and lockfile belong to the language, and that is where supply-chain findings
+live. Load **one language-axis file per changed language**, not one in total: a branch touching
+PHP and Node loads both. Then add one surface file per surface in scope.
+
+| Change | Language axis | Surface axis |
+|---|---|---|
+| PHP server-rendered app | `php-backend-security.md` | `browser-security.md` (it emits HTML) |
+| PHP API, no HTML | `php-backend-security.md` | — |
+| Node HTTP service | `node-security.md` | `http-server-security.md` |
+| Node CLI or daemon | `node-security.md` | `native-security.md` |
+| Node library with no surface evidence | `node-security.md` | **all three** — the consumer decides the surface and is not in this diff |
+| Node service + CLI | `node-security.md` | `http-server-security.md` + `native-security.md` |
+| Node static build (bundler, prerender) | `node-security.md` | `browser-security.md` |
+| Node runtime SSR | `node-security.md` | `http-server-security.md` + `browser-security.md` |
+| Node service that also serves a UI | `node-security.md` | `http-server-security.md` + `browser-security.md` |
+| Node service + CLI + UI | `node-security.md` | all three |
+| Browser assets only, no manifest change | — | `browser-security.md` |
+
+The last row is the only one without a language axis, and it is narrow on purpose: the moment a
+`package.json`, lockfile, or build script is in the diff, `node-security.md` comes back.
+
+**`php-backend-security.md` already covers the HTTP surface** — never pair it with
+`http-server-security.md`. Every other language pairs its language file with surface files.
+
+**If a changed file's language has no language-axis reference, report that language as
+unreviewed and name the paths.** Do not substitute another language's rules — a PHP checklist
+applied to Go produces confident findings about code it does not understand. Review the
+languages that are covered and let the report show the gap.
 
 ## Operating Modes
 
 ### 1. Secure-by-default generation (passive)
-While writing new PHP or frontend code, follow all MUST requirements from the reference files without being asked. Flag if a requested implementation would violate a critical rule.
+While writing new backend or frontend code, follow all MUST requirements from the loaded reference files without being asked. Flag if a requested implementation would violate a critical rule.
 
 ### 2. Passive review (always on)
 While editing existing code, notice and mention critical or high-severity violations in touched or nearby code.
 
 ### 3. Active audit (explicit request)
 When the user asks for a security review, scan, or audit:
-1. Load both reference files
+1. Determine the language and the surfaces in scope, then load **every reference the selection
+   table above names for them** — one language axis file plus one file per surface. Two files is
+   the common case, not the rule; a Node service that also ships a CLI and a UI loads four.
 2. Systematically check each category against the codebase
-3. Produce a full written report (see Report Format below)
+3. Produce a full written report (see Report Format below), naming which references were loaded
+   and any language reported as unreviewed
 
 ## Workflow for Active Audit
 
 1. **Identify scope**: What files/features are in scope? Ask if unclear.
-2. **Read references**: Load `references/php-backend-security.md` and/or `references/web-frontend-security.md`.
+2. **Read references**: Load the language-axis file for each language in scope plus one file per surface, per the selection table above. Record which files you loaded — the report names them.
 3. **Scan codebase**: Search for patterns listed in the reference files. Use Grep for sinks, dangerous functions, and missing protections.
 4. **Classify findings**: Assign severity (Critical / High / Medium / Low) per the reference file guidance.
 5. **Produce the report**: Follow the Report Format below. Write in the same language the user used when requesting the review. **When running as a subagent** (e.g., dispatched by branch-merge-review), the invoking prompt's `OUTPUT LANGUAGE` directive takes precedence over the prompt's own language — an English dispatch prompt does NOT mean the report should be in English. Keep code identifiers, file paths, and evidence snippets as-is; write all prose in the designated language.
