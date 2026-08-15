@@ -35,9 +35,24 @@ Detect the active shell before using a snippet. On POSIX use `command -v`, `[ -f
 > |---|---|
 > | `cargo clippy`, `cargo check` | **Yes** — `build.rs` and proc macros are compiled *and run*. A `build.rs` writing to an absolute path outside the workspace was reproduced on cargo 1.91.0 |
 > | ESLint | **Yes** — a flat `eslint.config.js` is a JS module that is imported and run |
+> | PHPStan | **Conditionally** — see below |
 > | `ruff`, `mypy` | No — parsed, never executed |
 > | `go vet`, `staticcheck`, `gofmt` | No — Go has no build-time hook |
 > | `tsc`, Biome, Stylelint | No — their configs are declarative |
+>
+> **PHPStan's condition is narrow and worth stating exactly**, because the common case is safe.
+> Measured on PHPStan 2.x with PHP 8.3, one file per case:
+>
+> | Setup | Runs the file? |
+> |---|---|
+> | `paths:` — the files being analysed | No. Analysis is static parsing |
+> | `scanFiles:` | No |
+> | `bootstrapFiles:` in the config | **Yes** |
+> | `composer.json` → `autoload.files` | **Yes**, with nothing declared in `phpstan.neon` — the composer autoloader is loaded, so those files run |
+>
+> So a PHP project with neither `bootstrapFiles` nor `autoload.files` does not execute anything
+> during analysis, which is most projects. Check those two before running PHPStan against a diff
+> you would not run.
 >
 > **When the diff is untrusted** — an external contributor's branch, an unfamiliar dependency, any
 > code you would not run — the executing tools need isolation before they run: a sandbox with the

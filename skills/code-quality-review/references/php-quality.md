@@ -88,6 +88,24 @@ PHPStan auto-discovers **three** config names — `phpstan.neon`, `phpstan.neon.
 `phpstan.dist.neon` look unconfigured, and the `--level=5` fallback then overrides the level the
 project actually set.
 
+**Check for code execution before running against an untrusted diff.** Analysis itself is static
+parsing — `paths:` and `scanFiles:` do not run the files. Two things do, measured on PHPStan 2.x
+with PHP 8.3:
+
+- `bootstrapFiles:` in the effective config — declared, so it is visible in the config chain
+  collected below;
+- `composer.json` → `autoload.files` — **not declared in `phpstan.neon` at all.** PHPStan loads
+  the composer autoloader, so those files run even when the config mentions nothing.
+
+For your own or your team's branch this is the ordinary case and needs no action. For a diff you
+would not run — an outside contributor, an unfamiliar dependency — read both before analysing, or
+record static analysis as `skipped-untrusted-execution` per the rule in `SKILL.md`.
+
+```bash
+rg -n '^\s*bootstrapFiles:' -A5 phpstan.neon phpstan.neon.dist phpstan.dist.neon 2>/dev/null
+php -r '$c=json_decode(@file_get_contents("composer.json"),true);print_r($c["autoload"]["files"]??[]);'
+```
+
 **Check the cache location before running under a read-only request.** PHPStan writes its result
 cache to `sys_get_temp_dir()/phpstan` by default — outside the repository, so the default is
 safe. Two settings can move it inside:

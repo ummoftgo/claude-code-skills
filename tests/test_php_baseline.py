@@ -2155,6 +2155,37 @@ class UntrustedExecutionContractTest(unittest.TestCase):
             self.rule(), r"ordinary case and needs none of this",
         )
 
+    def test_phpstan_execution_paths_are_stated_precisely(self) -> None:
+        """PHPStan 은 조건부다 — 넓게 쓰면 모든 PHP 리뷰에 경고가 붙고, 빼면 두 경로를 놓친다.
+
+        실측(PHPStan 2.x / PHP 8.3): paths·scanFiles 는 실행하지 않고,
+        bootstrapFiles 와 composer 의 autoload.files 는 실행한다. 후자는 phpstan.neon 에
+        아무 선언이 없어도 실행되므로 설정만 봐서는 알 수 없다.
+        """
+        rule = self.rule()
+        self.assertIn("PHPStan", rule)
+        self.assertIn("bootstrapFiles", rule)
+        self.assertIn("autoload.files", rule)
+        self.assertRegex(
+            rule, r"`scanFiles:` \| No|scanFiles.{0,20}No",
+            "실행하지 않는 경로를 구분하지 않으면 모든 PHP 리뷰에 경고가 붙는다",
+        )
+        self.assertRegex(
+            rule, r"most projects|does not execute anything",
+            "일반적인 PHP 프로젝트는 안전하다는 사실이 없다",
+        )
+
+    def test_the_php_reference_repeats_it_where_the_command_is(self) -> None:
+        """주 스택이다 — 명령 옆에 없으면 아무도 SKILL.md 로 돌아가지 않는다."""
+        reference = " ".join(quality_reference("php-quality").split())
+        self.assertIn("bootstrapFiles", reference)
+        self.assertIn("autoload.files", reference)
+        self.assertIn("skipped-untrusted-execution", reference)
+        self.assertRegex(
+            reference, r"own or your team's branch this is the ordinary case",
+            "기존 PHP 리뷰가 그대로라는 점이 명시되지 않았다",
+        )
+
     def test_the_rust_reference_repeats_the_warning_where_the_command_is(self) -> None:
         """명령 옆에 없으면 읽는 사람이 SKILL.md 로 돌아가지 않는다."""
         execution = between(
