@@ -105,11 +105,20 @@ Detect the active shell before using a snippet. On POSIX use `command -v`, `[ -f
 > Reading it as text cannot be made sound: NEON's inline forms, an `includes: [inner.neon]` whose
 > target a line-based collector never reaches, and `\uXXXX` escapes that reconstruct `.php` from
 > text containing no `.php` each defeat it. Proving a config harmless needs a real NEON parser
-> over the whole include graph. So the gate in `references/php-quality.md` §0 stops on any
-> config, and its text scan only records **why**; a project with no PHPStan config has no
+> over the whole include graph, and the only one at hand is inside PHPStan — which starting
+> would already run the code in question. So the gate in `references/php-quality.md` §0 stops on
+> any config, and its text scan only records **why**; a project with no PHPStan config has no
 > config-driven execution path and still gets analysed.
 >
-> On your own or your team's branch none of this fires and PHPStan runs exactly as before.
+> **The read-only cache question is separate and is not judged at all — it is moved.** The gate
+> writes an override config outside the workspace that `includes:` the project's own config and
+> redirects `tmpDir` and `resultCachePath` into a temp directory. Every project setting still
+> applies, and no spelling of an in-repository cache path can put a file in the repository —
+> there is nothing to parse and nothing to get wrong.
+>
+> On your own or your team's branch neither gate fires: without `UNTRUSTED_DIFF` the execution
+> gate is inert, and outside read-only mode PHPStan runs with the project's own config exactly
+> as before.
 >
 > **When the diff is untrusted** — an external contributor's branch, an unfamiliar dependency, any
 > code you would not run — the executing tools need isolation before they run. A workspace mounted

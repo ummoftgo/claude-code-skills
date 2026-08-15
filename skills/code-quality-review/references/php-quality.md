@@ -108,91 +108,38 @@ PHPSTAN_CONFIG=""
 if [ -n "${PHPSTAN_EXPLICIT_CONFIG:-}" ]; then
   PHPSTAN_CONFIG="$PHPSTAN_EXPLICIT_CONFIG"          # set only when the run passes --configuration
 else
-  for candidate in phpstan.neon phpstan.neon.dist phpstan.dist.neon; do
+  # PHPStan 2.x auto-discovers **six** names, in this order — the three dot-prefixed ones are
+  # easy to forget, and missing them makes a configured project look unconfigured.
+  for candidate in .phpstan.neon phpstan.neon .phpstan.neon.dist phpstan.neon.dist \
+                   .phpstan.dist.neon phpstan.dist.neon; do
     [ -f "$candidate" ] && { PHPSTAN_CONFIG="$candidate"; break; }
   done
 fi
 
-# Read-only gate. Decide first, then run — printing a grep result and running anyway is not a
-# gate. `CACHE_RISK` non-empty means the cache would land inside the repository, or we could
-# not tell.
-#
-# **Ask PHPStan, do not parse NEON.** Five rounds of review found five valid spellings that a
-# line-based grep missed — `parameters: {tmpDir: .cache}` on one line, a quoted `"tmpDir":` in
-# JSON, `tmpDir = .cache` with an equals sign, a multi-line `includes: [\n x.neon\n]`, and a
-# trailing `# comment` that a naive value-strip glued onto the path. NEON also has `\uXXXX`
-# escapes. Chasing that grammar with regexes is a losing game; `dump-parameters --json` hands
-# back the **effective** configuration with the include graph already resolved and the paths
-# already absolute. Measured on PHPStan 2.1.42: it writes nothing while doing so.
-CACHE_RISK=""
-
-if [ -n "$PHPSTAN_CONFIG" ]; then
-  PHPSTAN_PARAMS=$($PHP_CMD "$(command -v phpstan)" dump-parameters --json \
-    --configuration="$PHPSTAN_CONFIG" 2>/dev/null) || PHPSTAN_PARAMS=""
-  if [ -z "$PHPSTAN_PARAMS" ]; then
-    # Could not resolve — an unreadable config, a PHPStan too old for `dump-parameters`, or a
-    # config error. Unknown is not safe.
-    CACHE_RISK="cannot resolve parameters (dump-parameters failed)"
-  else
-    # Read both keys — `resultCachePath` is independent of `tmpDir`.
-    # **They are not normalised the same way**: measured on 2.1.42, `tmpDir` comes back
-    # absolute but a relative `resultCachePath` comes back verbatim. A relative cache path
-    # resolves against the run's working directory, which is the repository, so treat any
-    # non-absolute value as inside it rather than guessing a base.
-    while IFS= read -r resolved; do
-      [ -n "$resolved" ] || continue
-      case "$resolved" in
-        /*) resolved=$(realpath -m "$resolved" 2>/dev/null) ||
-              { CACHE_RISK="unresolvable cache path"; continue; } ;;
-        *)  CACHE_RISK="relative cache path resolves inside the repository: $resolved"; continue ;;
-      esac
-      case "$resolved" in "$PWD"|"$PWD"/*) CACHE_RISK="cache path inside repository: $resolved" ;; esac
-    done < <(printf '%s' "$PHPSTAN_PARAMS" | $PHP_CMD -r '
-      $p = json_decode(stream_get_contents(STDIN), true);
-      if (!is_array($p)) { exit(1); }
-      foreach (["tmpDir", "resultCachePath"] as $k) {
-        if (!empty($p[$k]) && is_string($p[$k])) { echo $p[$k], "\n"; }
-      }
-    ') || CACHE_RISK="cannot read parameters JSON"
-  fi
-fi
-
-# No config at all is safe: PHPStan then uses sys_get_temp_dir()/phpstan, outside the repository.
-
-# Trust gate — decided BEFORE the analysis runs, using the chain collected above.
-# Set UNTRUSTED_DIFF=1 for a branch you would not execute (outside contributor, unfamiliar
-# dependency). On a trusted branch this whole block is inert and nothing changes.
+# Trust gate — decided BEFORE PHPStan is invoked in **any** form. Every PHPStan entry point,
+# `analyse` and `dump-parameters` alike, loads the config chain and runs `bootstrapFiles` and
+# `.php` includes. So nothing may call PHPStan above this point.
+# Set UNTRUSTED_DIFF=1 for a branch you would not execute. On a trusted branch the block is
+# inert and nothing below changes.
 EXEC_RISK=""
-# NEON accepts inline sequences (`includes: [danger.php]`), inline maps, and whole-JSON
-# documents — all three verified to load and run the file they name. So this gate must not
-# depend on line structure the way `collect_config` above does: a line-anchored grep passes
-# every one of them. Scan the file as text and accept the false positives; this only runs on a
-# diff you already decided not to trust.
 scan_for_exec() {
   local f="$1"
   if [ ! -r "$f" ]; then EXEC_RISK="$EXEC_RISK unreadable:$f"; return; fi
   grep -qE 'bootstrapFiles' "$f" && EXEC_RISK="$EXEC_RISK config-loads-code:$f"
-  # Pre-0.12.26 spellings. Kept separate so the report says which era the project is in.
   grep -qE '(autoload_files|autoload_directories)' "$f" &&
     EXEC_RISK="$EXEC_RISK legacy-autoload:$f"
-  # `rules`/`services` name classes PHPStan instantiates; `.php` anywhere in a config is either
-  # a dynamic include or a file some parameter will load.
   grep -qE '(^|[^a-zA-Z])(rules|services)[[:space:]]*[:=]' "$f" &&
     EXEC_RISK="$EXEC_RISK config-defines-extension:$f"
   grep -qE '\.php([^a-zA-Z0-9]|$)' "$f" && EXEC_RISK="$EXEC_RISK php-reference:$f"
 }
 
 if [ "${UNTRUSTED_DIFF:-0}" = "1" ]; then
-  # **Any config at all is a stop.** Text scanning cannot be made fail-closed here: NEON's
-  # inline forms, an inline `includes: [inner.neon]` whose target the chain never collects, and
-  # `\uXXXX` escapes that reconstruct `.php` from text containing no `.php` all defeat it. A
-  # config might be harmless, but proving that needs a real NEON parser over the whole include
-  # graph — so on a diff you already decided not to trust, do not analyse it.
-  # The scan below does not decide anything; it only says *why* in the report.
-  if [ -n "$PHPSTAN_CONFIG" ]; then
-    EXEC_RISK="$EXEC_RISK config-present:$PHPSTAN_CONFIG"
-  fi
-  for candidate in phpstan.neon phpstan.neon.dist phpstan.dist.neon "$PHPSTAN_CONFIG"; do
+  # **Any config at all is a stop.** Deciding a config harmless needs a real NEON parser over
+  # the whole include graph, and the only parser at hand is inside PHPStan — which we must not
+  # start yet. The scan below does not decide anything; it only says *why* in the report.
+  [ -n "$PHPSTAN_CONFIG" ] && EXEC_RISK="$EXEC_RISK config-present:$PHPSTAN_CONFIG"
+  for candidate in .phpstan.neon phpstan.neon .phpstan.neon.dist phpstan.neon.dist \
+                   .phpstan.dist.neon phpstan.dist.neon "$PHPSTAN_CONFIG"; do
     [ -f "$candidate" ] || continue
     case "$candidate" in *.php) EXEC_RISK="$EXEC_RISK executable-config:$candidate" ;; esac
     scan_for_exec "$candidate"
@@ -203,18 +150,63 @@ if [ "${UNTRUSTED_DIFF:-0}" = "1" ]; then
      grep -qE "=> .*'" vendor/composer/autoload_files.php; then
     EXEC_RISK="$EXEC_RISK composer-autoload-files"
   fi
-  # Dependency-shipped extensions, auto-activated by phpstan/extension-installer.
   if grep -rlE '"phpstan"' vendor/*/*/composer.json 2>/dev/null |
      xargs -r grep -lE '"includes"' 2>/dev/null | grep -q .; then
     EXEC_RISK="$EXEC_RISK phpstan-extension"
   fi
 fi
 
-# PHPStan — run under the correct PHP binary, using the config resolved above
+# Read-only cache handling. **Do not try to judge where the cache would land — move it.**
+# Judging means reading the config, and reading it soundly means a NEON parser: five rounds of
+# review found five valid spellings a regex missed (`tmpDir = x`, a quoted `"tmpDir":`, a
+# one-line `{tmpDir: x}`, a multi-line `includes: [...]`, a trailing `# comment` glued onto the
+# value). Asking PHPStan instead is worse, not better: `dump-parameters` builds its DI container
+# under the project's own `tmpDir`, so with `tmpDir: .cache` it writes four files into the
+# repository *before* any gate could speak (measured on 2.1.42).
+#
+# An override config sidesteps all of it. It `includes:` the project's config so every project
+# setting still applies, then sets both cache keys to a temp directory outside the workspace.
+# Verified: nothing lands in the repository, the project's own `level` still applies, and even
+# `TMPDIR` pointing inside the repository is neutralised.
+if [ "${READ_ONLY:-0}" = "1" ] && [ -z "$EXEC_RISK" ]; then
+  # Canonicalise the repository root once. A `.`, a `..`, or a symlinked parent
+  # (`/var/run` → `/run`) makes a raw string prefix test wrong in both directions.
+  REPO_ROOT=$(realpath -m "$PWD")
+  PHPSTAN_TMP=$(mktemp -d) || PHPSTAN_TMP=""
+  # `mktemp` honours `TMPDIR`. If that points inside the repository, our own scratch
+  # directory lands there — the very thing this block exists to prevent. Retry outside.
+  if [ -n "$PHPSTAN_TMP" ]; then
+    case "$(realpath -m "$PHPSTAN_TMP")" in
+      "$REPO_ROOT"|"$REPO_ROOT"/*)
+        rm -rf "$PHPSTAN_TMP"
+        PHPSTAN_TMP=$(TMPDIR=/tmp mktemp -d) || PHPSTAN_TMP=""
+        [ -n "$PHPSTAN_TMP" ] && case "$(realpath -m "$PHPSTAN_TMP")" in
+          "$REPO_ROOT"|"$REPO_ROOT"/*) rm -rf "$PHPSTAN_TMP"; PHPSTAN_TMP="" ;;
+        esac
+        ;;
+    esac
+  fi
+  if [ -n "$PHPSTAN_TMP" ]; then
+    PHPSTAN_OVERRIDE="$PHPSTAN_TMP/phpstan-review.neon"
+    {
+      if [ -n "$PHPSTAN_CONFIG" ]; then
+        printf 'includes:\n    - %s\n' "$(realpath "$PHPSTAN_CONFIG")"
+      fi
+      printf 'parameters:\n    tmpDir: %s/cache\n' "$PHPSTAN_TMP"
+      printf '    resultCachePath: %s/cache/resultCache.php\n' "$PHPSTAN_TMP"
+      [ -n "$PHPSTAN_CONFIG" ] || printf '    level: 5\n'
+    } > "$PHPSTAN_OVERRIDE"
+  fi
+fi
+
+# PHPStan — run under the correct PHP binary
 if [ -n "$EXEC_RISK" ]; then
   echo "static analysis: skipped-untrusted-execution — analysis would run project code ($EXEC_RISK)"
-elif [ "${READ_ONLY:-0}" = "1" ] && [ -n "$CACHE_RISK" ]; then
-  echo "static analysis: skipped-read-only — result cache would be written inside the repository ($CACHE_RISK)"
+elif [ "${READ_ONLY:-0}" = "1" ] && [ -z "${PHPSTAN_OVERRIDE:-}" ]; then
+  echo "static analysis: execution-error — no writable temp directory for the cache"
+elif [ "${READ_ONLY:-0}" = "1" ]; then
+  $PHP_CMD $(command -v phpstan) analyse "$SRC_DIR" \
+    --configuration="$PHPSTAN_OVERRIDE" --no-progress --error-format=raw
 elif [ -n "$PHPSTAN_CONFIG" ]; then
   $PHP_CMD $(command -v phpstan) analyse "$SRC_DIR" \
     --configuration="$PHPSTAN_CONFIG" --no-progress --error-format=raw
