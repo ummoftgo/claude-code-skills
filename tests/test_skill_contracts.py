@@ -145,6 +145,66 @@ HTML_COMMENT_PATTERN = re.compile(r"<!--.*?-->", re.DOTALL)
 CODE_FENCE_PATTERN = re.compile(r"(?P<fence>`{3,}|~{3,})(?P<info>.*)$")
 
 
+# An HTML container whose contents a reader does not see, or sees only after acting.
+# Text inside one is present in the file and absent from the page, which is enough to
+# satisfy any check that only asks whether a string is there - measured: wrapping a
+# pinned contract block in `<details>` or `<div hidden>` left every equality assertion
+# green while the rule had vanished from the rendered document.
+#
+# This is a *finite* structural check, unlike verifying that no earlier prose disclaims
+# what follows. There is a fixed list of ways HTML hides an element, and a document that
+# uses none of them cannot hide anything this way.
+HIDING_CONTAINER = re.compile(
+    r"(?i)<\s*(?:template|script|style|details|summary)\b"
+    r"|<[^>]*\b(?:hidden|aria-hidden\s*=\s*[\"']?true)\b"
+    r"|<[^>]*style\s*=\s*[\"'][^\"']*display\s*:\s*none"
+)
+
+
+# A closer for any of the above. `</div>` is included because `<div hidden>` is the one
+# opener that does not carry its own tag name in the pattern.
+HIDING_CLOSER = re.compile(r"(?i)</\s*(?:template|script|style|details|summary|div)\s*>")
+
+# An inline code span. `` `<script>` `` is prose *about* a tag, not a tag - report-output
+# discusses one while explaining CSP hashes - and counting it as a container made a
+# document that hides nothing fail. Only markup outside code spans can hide anything.
+INLINE_CODE = re.compile(r"`[^`\n]*`")
+
+
+def assert_no_hiding_container(test, text: str, label: str) -> None:
+    """No hiding container is *open* anywhere in `text`."""
+    stripped = INLINE_CODE.sub("", text)
+    openers = len(HIDING_CONTAINER.findall(stripped))
+    test.assertEqual(openers, 0, f"{label} opens a hiding container")
+
+
+def assert_not_hidden(test, text: str, needle: str, label: str) -> None:
+    """`needle` is not inside a hiding container.
+
+    Scoped to the ancestry of `needle` rather than to the whole document: a file may
+    legitimately *mention* `<script>` - report-output does, explaining CSP hashes - and
+    rejecting the file for that is a false positive that gets the check deleted. What
+    matters is whether a container is still open where the pinned text sits.
+
+    Inline code spans are removed first, so a tag written as prose is not counted as
+    markup. Then every occurrence of `needle` is required to sit outside any container
+    left open before it.
+    """
+    # Masked, not stripped: offsets have to keep matching the original, because the
+    # needle itself normally *is* inside a code span (`FR-001(feature/label)`). Only the
+    # tags inside spans are neutralised, and every character keeps its position.
+    masked = INLINE_CODE.sub(lambda m: " " * len(m.group(0)), text)
+    index = text.find(needle)
+    test.assertNotEqual(index, -1, f"{label}: {needle!r} not found")
+    while index != -1:
+        prefix = masked[:index]
+        depth = len(HIDING_CONTAINER.findall(prefix)) - len(HIDING_CLOSER.findall(prefix))
+        test.assertLessEqual(
+            depth, 0, f"{label}: {needle!r} sits inside a hiding container"
+        )
+        index = text.find(needle, index + len(needle))
+
+
 def instructional_text(markdown: str) -> str:
     """`markdown` with HTML comments and fenced code blocks removed.
 
@@ -402,9 +462,9 @@ EMITTING_CONTRACT_BLOCKS = {
         "mention, short form afterwards, following the `readable-ids` convention when that "
         "skill is installed. Rendering needs no file, so it applies under the read-only rule "
         "above too; creating the `.uniqid/` registry is a write, and `readable-ids` owns when "
-        "that is permitted. Where that skill is unavailable, keep a label beside the "
-        "identifier anyway — a reader who has to open another document to learn what `A1` is "
-        "has lost the summary."
+        "that is permitted — never when the invoking skill says the report is a review. Where "
+        "that skill is unavailable, keep a label beside the identifier anyway — a reader who "
+        "has to open another document to learn what `A1` is has lost the summary."
     ),
     "skills/safe-checkpoint/references/handoff-template.md": (
         "A handoff is read by someone who does not have this session's context. When it names "
@@ -776,6 +836,17 @@ class SkillContractTest(SkillReadingMixin, unittest.TestCase):
         # touch the working tree, and an assertIn over its phrases survived having the
         # rule rewritten around them.
         self.assertIn("Three permissions, and none of them implies the next", skill)
+        # Delegation must not launder the prohibition: branch-merge-review hands its
+        # report to report-output, and report-output is otherwise allowed to write.
+        self.assertContractBlock(
+            skill,
+            "A review never registers",
+            "**A review never registers, whoever ends up writing its report.** The "
+            "prohibition follows the work, not the caller: `branch-merge-review` "
+            "delegating a report file to `report-output` does not turn a review into "
+            "something that may change the working tree, and permission to write *that* "
+            "file is not permission to write this one.",
+        )
         self.assertContractBlock(
             skill,
             "**Staging** is not part of writing",
@@ -848,6 +919,10 @@ class SkillContractTest(SkillReadingMixin, unittest.TestCase):
                 document = instructional_text(self.read(relative_path))
                 self.assertIn("readable-ids", document)
                 self.assertContractBlock(document, "(feature/label)", expected)
+                # Equality proves the words; it does not prove a reader sees them.
+                # Wrapping the block in `<details>` or `<div hidden>` satisfied every
+                # assertion above while removing the rule from the rendered document.
+                assert_not_hidden(self, document, "(feature/label)", relative_path)
 
     def test_the_report_template_carries_the_readable_form_where_a_person_decides(
         self,
@@ -874,14 +949,27 @@ class SkillContractTest(SkillReadingMixin, unittest.TestCase):
 
         # A container that hides its contents from the reader would let the pinned lines
         # live somewhere no one sees while the visible template reverted. Codex did
-        # exactly that with a multi-line `<template>`, which the previous line scan -
-        # startswith() over every line, hidden or not - accepted.
-        self.assertNotRegex(template, r"(?i)<\s*(?:template|script|style|details)\b")
+        # exactly that with a multi-line `<template>`, and then again with `<div hidden>`.
+        assert_no_hiding_container(self, template, "report template")
 
-        lines = [line.strip() for line in template.splitlines()]
+        # A nested fence turns everything after it into a code sample rather than part
+        # of the template. The outer fence is ```, so a ~~~ or a longer ``` run inside it
+        # is content to fenced_blocks() and a code block to a reader - two different
+        # answers, which is the gap.
+        self.assertNotRegex(template, r"(?m)^\s*(?:~{3,}|`{3,})")
+
+        # Indentation is *not* stripped. CommonMark makes four spaces (or a tab) an
+        # indented code block, so `    ### [CH-1(feature/label)]` renders as a sample of
+        # a heading rather than as one - and line.strip() turned exactly that into a
+        # satisfied assertion. Up to three spaces stays an ordinary line.
+        lines = template.splitlines()
 
         def opening_with(prefix: str) -> list[str]:
-            return [line for line in lines if line.startswith(prefix)]
+            return [
+                line
+                for line in lines
+                if re.match(r"^ {0,3}(?![ \t])", line) and line.lstrip(" ").startswith(prefix)
+            ]
 
         # The blocking-items line *is* the decision request, and each finding heading is
         # the definition site a later recheck refers back to. Both are entry points a
@@ -1651,6 +1739,14 @@ class UniqidRegistryTest(unittest.TestCase):
     CELL_SPLIT = re.compile(r"(?<!\\)\|")
     FILE_NAME = re.compile(r"^\d{4}-\d{2}-\d{2}-[a-z0-9]+(?:-[a-z0-9]+)*\.md$")
     FEATURE = re.compile(r"(?m)^feature: (\S+)$")
+    # Anything that *looks* like a feature declaration to a reader. Wider than FEATURE on
+    # purpose: `feature:\tshadow` and `feature:<NBSP>shadow` were not counted as second
+    # declarations by the strict pattern and so passed silently, while a person reading
+    # the file sees two.
+    FEATURE_LINE = re.compile(r"(?mi)^\s*feature\s*:")
+    # A row a reader would take for a table row. `｜` (U+FF5C) is not a Markdown cell
+    # separator, so such a line was skipped entirely rather than checked.
+    TABLE_LIKE = re.compile(r"^[|\uff5c]")
 
     def registries(self) -> list[tuple[Path, str]]:
         """Every file under `.uniqid/`, at any depth, with its name checked.
@@ -1661,13 +1757,20 @@ class UniqidRegistryTest(unittest.TestCase):
         rules are optional to anyone who moves a file.
         """
         directory = ROOT / ".uniqid"
-        files = sorted(path for path in directory.rglob("*") if path.is_file()) \
-            if directory.is_dir() else []
-        self.assertTrue(files, "no .uniqid/ registry to check")
-        for path in files:
+        entries = sorted(directory.rglob("*")) if directory.is_dir() else []
+        files = []
+        for path in entries:
             relative = path.relative_to(directory).as_posix()
+            # is_file() follows a link, so a symlink passed every check below while its
+            # target - and the target's rules - lived outside the directory entirely; a
+            # broken one vanished from the scan without a word.
+            self.assertFalse(path.is_symlink(), f"registry is a symlink: {relative}")
+            if path.is_dir():
+                self.fail(f"registry not at the top level: {relative}")
             self.assertEqual(relative, path.name, f"registry not at the top level: {relative}")
             self.assertRegex(path.name, self.FILE_NAME)
+            files.append(path)
+        self.assertTrue(files, "no .uniqid/ registry to check")
         return [(path, path.read_text(encoding="utf-8")) for path in files]
 
     def feature_of(self, text: str) -> str:
@@ -1677,8 +1780,12 @@ class UniqidRegistryTest(unittest.TestCase):
         what makes an identifier resolvable, a file with two of them has no answer to
         which one a rendered form refers to.
         """
+        looks_declared = self.FEATURE_LINE.findall(text)
+        self.assertEqual(
+            len(looks_declared), 1, f"expected one feature declaration, saw {len(looks_declared)}"
+        )
         declared = self.FEATURE.findall(text)
-        self.assertEqual(len(declared), 1, f"expected one feature declaration: {declared}")
+        self.assertEqual(len(declared), 1, f"malformed feature declaration: {declared}")
         return declared[0]
 
     def rows(self, text: str) -> list[list[str]]:
@@ -1692,8 +1799,12 @@ class UniqidRegistryTest(unittest.TestCase):
         found = []
         for line in text.splitlines():
             stripped = line.strip()
-            if not stripped.startswith("|"):
+            if not self.TABLE_LIKE.match(stripped):
                 continue
+            self.assertTrue(
+                stripped.startswith("|"),
+                f"table row uses a full-width pipe, which Markdown does not: {stripped}",
+            )
             match = self.ROW.match(stripped)
             self.assertIsNotNone(match, f"malformed table line: {stripped}")
             cells = [cell.strip() for cell in self.CELL_SPLIT.split(match.group("cells"))]

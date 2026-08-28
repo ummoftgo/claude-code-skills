@@ -37,6 +37,8 @@ Three permissions, and none of them implies the next:
 2. **Staging** is not part of writing. Leave the file untracked unless the caller stages this task's output.
 3. **Committing** is not part of staging. Where the caller has no standing permission to commit — an ordinary task has none — say the entry is uncommitted rather than committing it.
 
+**A review never registers, whoever ends up writing its report.** The prohibition follows the work, not the caller: `branch-merge-review` delegating a report file to `report-output` does not turn a review into something that may change the working tree, and permission to write *that* file is not permission to write this one.
+
 Where there is no authority to write at all — a read-only review, a read-only sandbox, `evidence-first-review` in any mode — do not create or modify the registry. Render the readable form inline from the labels assigned in that pass and say the registry entry is pending.
 
 Read [references/registry-format.md](references/registry-format.md) for the file template, the column meanings, and a worked example.

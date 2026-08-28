@@ -492,7 +492,8 @@ Before finalizing, scan the consolidated sections (everything above the Appendix
 **Write a file only on an explicit request** — "리포트로 만들어줘", "보고서로 출력해줘", "리포트 파일로 저장해줘", "output as a report", or an equivalent explicit ask for a saved report. In that case do not choose a path or write the file here — **delegate to the `report-output` skill** and pass the finished consolidated report plus:
 
 - **slug**: the current branch name in kebab-case with the `-branch-review` suffix — e.g. `feature-user-auth-branch-review`. Shorten a long or cryptic branch name to its meaningful part;
-- **recommended format**: Markdown (mention HTML as an option only if the user asks).
+- **recommended format**: Markdown (mention HTML as an option only if the user asks);
+- **no registry**: state that this is a review, so `report-output` must render identifiers readably and create no `.uniqid/` entry. Permission to write the report file is not permission to write anything else.
 
 `report-output` owns path selection, name-collision avoidance, and atomic publishing — this skill never writes under `.tasks/reports/` itself. That single owner matters here because this skill runs parallel reviewers, so several report-shaped outputs can be in flight at once. If `report-output` is not installed, say so and keep the report inline rather than improvising a path.
 
