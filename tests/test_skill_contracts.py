@@ -1,6 +1,7 @@
 import json
 import re
 import tempfile
+import unicodedata
 import unittest
 from pathlib import Path
 
@@ -1716,24 +1717,42 @@ class UniqidRegistryTest(unittest.TestCase):
                 with self.subTest(registry=path.name, identifier=identifier):
                     self.assertIn(status, self.STATUSES)
 
-    def test_labels_and_features_carry_no_whitespace_or_separator(self) -> None:
-        """The slash separates the two halves, so neither half may contain one.
+    def assertRenderable(self, value: str, what: str) -> None:
+        """`value` can be written into a sentence and read back out as one token.
 
-        Whitespace is barred for the same reason: `A1(리뷰 신뢰 경계/x)` cannot be read
-        back out of a sentence as one token.
+        Three properties, each protecting the lookup the rendered form exists for.
+
+        No `/`, because the slash is what separates `feature` from the label. No
+        whitespace, because `A1(리뷰 신뢰 경계/x)` cannot be picked out of prose as one
+        token.
+
+        And no invisible character. A zero-width space, a soft hyphen, a bidi mark - all
+        category `Cf`, none of which `str.split()` treats as whitespace - lets two labels
+        render *identically* to a reader while comparing unequal, which is precisely the
+        collision the uniqueness check below exists to prevent. NFC for the neighbouring
+        reason: `e` plus a combining acute and a precomposed `é` look the same and are
+        different strings, so one canonical spelling is required rather than assumed.
         """
+        self.assertTrue(value, f"empty {what}")
+        self.assertNotIn("/", value, f"{what} carries the separator: {value!r}")
+        self.assertEqual(value.split(), [value], f"{what} carries whitespace: {value!r}")
+        hidden = [c for c in value if unicodedata.category(c) in {"Cf", "Cc"}]
+        self.assertEqual(hidden, [], f"{what} carries invisible characters: {value!r}")
+        self.assertEqual(
+            unicodedata.normalize("NFC", value),
+            value,
+            f"{what} is not NFC-normalised: {value!r}",
+        )
+
+    def test_labels_and_features_can_be_rendered_and_read_back(self) -> None:
         for path, text in self.registries():
             feature = self.feature_of(text)
             with self.subTest(registry=path.name, feature=feature):
-                self.assertNotIn("/", feature)
-                self.assertEqual(feature.split(), [feature])
+                self.assertRenderable(feature, "feature")
             for identifier, label, _description, _status in self.rows(text):
                 with self.subTest(registry=path.name, identifier=identifier):
-                    self.assertNotIn("/", label)
-                    self.assertTrue(label)
-                    # Any whitespace, not just an ASCII space: a tab inside a label
-                    # passed the narrower check and still breaks the rendered form.
-                    self.assertEqual(label.split(), [label])
+                    self.assertRenderable(label, "label")
+                    self.assertRenderable(identifier, "identifier")
 
     def test_no_identifier_or_label_collides_within_a_feature(self) -> None:
         """Across every registry, not within one file.
