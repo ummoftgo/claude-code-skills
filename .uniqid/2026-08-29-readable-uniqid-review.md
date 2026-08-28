@@ -51,3 +51,7 @@ feature: 식별자표식
 | X-32 | details-open-오인 | 펼쳐진 `<details open>` 과 닫힌 것의 `<summary>` 는 보이는데 은닉으로 판정 | done |
 | X-33 | 헤더자리-데이터행 | 구분선 앞의 아무 파이프 줄이나 헤더로 인정해 데이터 행이 사라짐 | done |
 | X-34 | 표밖-비표준행-누락 | 외곽 파이프 생략·전각 파이프 행이 표 밖에서 여전히 누락 | done |
+| X-35 | summary-과잉면제 | `<summary>` 가 바깥의 `<div hidden>`·`<template>` 까지 무효화 | done |
+| X-36 | details-속성-미검사 | `<details open hidden>` 을 가시로 보고, `class="x open y"` 의 값을 속성으로 오인 | done |
+| X-37 | 헤더없는-구분선 | 헤더 없는 구분선이 표 본문을 열고, 구분선 폭이 헤더와 달라도 통과 | done |
+| X-38 | 표밖-이스케이프파이프 | `(?<!\\)` 때문에 표 밖의 `\|` 행이 계속 누락 | done |

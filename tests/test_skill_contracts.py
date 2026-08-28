@@ -157,6 +157,17 @@ HTML_ATTRIBUTE = re.compile(
 )
 
 
+def has_attribute(attrs: str, wanted: str) -> bool:
+    """Whether `attrs` declares `wanted`, as an attribute rather than as a value.
+
+    `<details class="x open y">` is closed; searching the raw attribute string for the
+    word `open` said otherwise.
+    """
+    return any(
+        match.group("name").lower() == wanted for match in HTML_ATTRIBUTE.finditer(attrs)
+    )
+
+
 def hides_by_attribute(attrs: str) -> bool:
     """Whether `attrs` makes its element invisible.
 
@@ -209,8 +220,18 @@ def hiding_ancestors(markup: str) -> list[str]:
     A real tag stack, not a count. Subtracting every closer from every opener was the
     first attempt and it was wrong in both directions: an ordinary `<div>…</div>`
     earlier in the document cancelled a later `<details>`, and a *closed*
-    `<span aria-hidden="true">…</span>` made everything after it look hidden. Both
-    shapes come out of ordinary editing, so neither answer was usable.
+    `<span aria-hidden="true">…</span>` made everything after it look hidden.
+
+    Two element-specific rules, both narrower than they first were:
+
+    * `<details>` hides its contents unless it carries `open` - and `open` is read from
+      the parsed attributes, because searching the raw string for the word matched
+      `class="x open y"`. Its own `hidden` attribute still counts, so
+      `<details open hidden>` hides.
+    * A `<summary>` is the click target and renders even when its `<details>` is
+      collapsed. It therefore cancels *that one* `<details>` and nothing else: an
+      earlier blanket "a summary means visible" let `<div hidden><details><summary>`
+      report nothing hidden, which is the opposite of true.
     """
     stack: list[tuple[str, bool]] = []
     for match in HTML_TAG.finditer(markup):
@@ -224,20 +245,22 @@ def hiding_ancestors(markup: str) -> list[str]:
         if match.group("self") or name in VOID_TAGS:
             continue
         attrs = match.group("attrs")
+        hides = hides_by_attribute(attrs)
         if name == "details":
-            # `<details open>` renders expanded, so its contents are visible. Treating
-            # every `<details>` as hiding rejected an ordinary collapsible section.
-            hides = not re.search(r"(?i)(?:^|\s)open(?:\s|=|$)", attrs)
-        elif name == "summary":
-            hides = False                     # handled by the stack check below
-        else:
-            hides = name in HIDING_TAGS or hides_by_attribute(attrs)
+            hides = hides or not has_attribute(attrs, "open")
+        elif name in HIDING_TAGS:
+            hides = True
         stack.append((name, hides))
-    # A `<summary>` renders even when its `<details>` is collapsed - it is the thing you
-    # click - so text inside one is visible regardless of the ancestor.
-    if any(name == "summary" for name, _ in stack):
-        return []
-    return [name for name, hides in stack if hides]
+
+    exempt = set()
+    for index, (name, _) in enumerate(stack):
+        if name != "summary":
+            continue
+        for below in range(index - 1, -1, -1):        # the details this summary opens
+            if stack[below][0] == "details":
+                exempt.add(below)
+                break
+    return [name for index, (name, hides) in enumerate(stack) if hides and index not in exempt]
 
 
 def assert_not_hidden(test, text: str, needle: str, label: str) -> None:
@@ -1764,6 +1787,11 @@ class InstructionSenseHelperTest(SkillReadingMixin, unittest.TestCase):
             '<div aria-hidden="true">': ["div"],
             '<div title="a > b" hidden>': ["div"],  # quoted `>` does not end the tag
             "<details><summary>t</summary>": ["details"],
+            "<details open hidden>": ["details"],   # `open` does not undo `hidden`
+            '<details class="x open y">': ["details"],   # a value is not an attribute
+            # A summary cancels *its own* details and nothing above it.
+            "<div hidden><details><summary>": ["div"],
+            "<template><details><summary>": ["template"],
         }
         shows = (
             "<details open>",                       # renders expanded
@@ -1784,6 +1812,36 @@ class InstructionSenseHelperTest(SkillReadingMixin, unittest.TestCase):
         for markup in shows:
             with self.subTest(markup=markup):
                 self.assertEqual(hiding_ancestors(markup), [])
+
+    def test_a_table_opens_only_on_a_header_and_a_matching_separator(self) -> None:
+        """Each half was a fail-open alone; both are required together.
+
+        A separator with nothing above it opened a body out of nowhere, and any pipe
+        line above a separator was taken for a header - so a data row parked in the
+        header position vanished from every check below.
+        """
+        registry = UniqidRegistryTest("test_every_row_uses_the_closed_status_vocabulary")
+        header = UniqidRegistryTest.HEADER
+        good = f"{header}\n|----|----|----|----|\n| A-1 | 표식 | 설명 | open |\n"
+        self.assertEqual(registry.rows(good), [["A-1", "표식", "설명", "open"]])
+
+        for name, bad in {
+            "separator with no header": "\n|----|----|----|----|\n| A-1 | 표식 | 설명 | open |\n",
+            "data row in the header position": (
+                "| A-1 | 표식 | 설명 | open |\n|----|----|----|----|\n"
+                "| A-2 | 다른표식 | 설명 | open |\n"
+            ),
+            "separator narrower than the header": (
+                f"{header}\n|----|----|\n| A-1 | 표식 | 설명 | open |\n"
+            ),
+            "header with no separator": f"{header}\n\n프롤로그 문단.\n",
+            "escaped pipe outside the body": (
+                f"{good}\n표 밖에서 A-9 \\| 표식 \\| 설명 \\| open\n"
+            ),
+        }.items():
+            with self.subTest(name=name):
+                with self.assertRaises(AssertionError):
+                    registry.rows(bad)
 
     def test_the_table_separator_is_not_a_thematic_break(self) -> None:
         separator = UniqidRegistryTest.SEPARATOR
@@ -1913,12 +1971,23 @@ class UniqidRegistryTest(unittest.TestCase):
         return declared[0]
 
     def rows(self, text: str) -> list[list[str]]:
-        """Data rows, with every malformed table line rejected rather than skipped.
+        """Data rows, with every table-shaped line either checked or rejected.
 
-        Silently skipping what does not parse is how a checker stops checking: a row
-        with a fifth column, or one missing its closing pipe, simply vanished from the
-        scan and took its status and label with it. Anything that opens with a pipe is
-        part of the table and has to be a header, a separator, or a four-cell row.
+        Structural, not pipe-counting. Deciding "is this a row?" from how many unescaped
+        pipes a line holds meant a legitimate `\\|` inside a description dropped the
+        count below the threshold and the row vanished - taking its status, its label,
+        and any collision it carried. Between the separator and the next blank line,
+        every line *is* a row, whatever it looks like.
+
+        A table opens only on a header immediately followed by a separator of the same
+        width. Each half was a fail-open on its own: a separator with no header above it
+        opened a body out of nowhere, and any pipe line above one was accepted as a
+        header, so a data row parked there disappeared from every check.
+
+        Outside a body, no line may carry a pipe at all once inline code is masked -
+        escaped or not, ASCII or full-width. `\\|` was excused there, which is how a
+        row-shaped line went on slipping past after the plain and full-width spellings
+        were closed.
         """
         found = []
         in_body = False
@@ -1927,43 +1996,37 @@ class UniqidRegistryTest(unittest.TestCase):
             if not stripped:
                 in_body = False                          # a blank line ends the table
                 continue
+
             if not in_body:
+                previous = lines[position - 1].strip() if position else ""
                 if self.SEPARATOR.match(stripped):
-                    in_body = True                       # the row after `|---|` opens it
-                    continue
-                # The header row sits *before* the separator, so it is the one
-                # row-shaped line legitimately outside a body - and it has to be *the*
-                # header. Accepting any pipe line there let a data row sit in the header
-                # position and disappear from every check, which is the same fail-open
-                # by another route.
-                followed_by_separator = (
-                    position + 1 < len(lines) and self.SEPARATOR.match(lines[position + 1])
-                )
-                if followed_by_separator:
                     self.assertEqual(
-                        stripped, self.HEADER, f"table header must be {self.HEADER}"
+                        previous, self.HEADER, f"a separator needs the header above it"
+                    )
+                    self.assertEqual(
+                        stripped.strip("|").count("|") + 1,
+                        self.HEADER.strip("|").count("|") + 1,
+                        f"separator width does not match the header: {stripped}",
+                    )
+                    in_body = True
+                    continue
+                if stripped == self.HEADER:
+                    self.assertTrue(
+                        position + 1 < len(lines)
+                        and self.SEPARATOR.match(lines[position + 1]),
+                        "the header needs a separator under it",
                     )
                     continue
-                # Nothing else pipe-shaped may sit outside a body: it would be invisible
-                # to every check below. Inline code is masked first so a description of
-                # a pipe in prose is not mistaken for a row.
                 self.assertNotRegex(
                     INLINE_CODE.sub("", stripped),
-                    r"(?<!\\)[|\uff5c]",
+                    r"[|\uff5c]",
                     f"table row outside a table body: {stripped}",
                 )
                 continue
 
-            # Structural, not pipe-counting. Deciding "is this a row?" by how many
-            # unescaped pipes a line holds meant a legitimate `\|` inside a description
-            # dropped the count below the threshold and the row vanished - taking its
-            # status, its label, and any collision it carried with it. Between the
-            # separator and the next blank line, every line *is* a row, whatever it
-            # looks like, and a row that is not canonical fails rather than disappears.
             self.assertTrue(
                 stripped.startswith("|") and stripped.endswith("|"),
-                "a table row must open and close with an ASCII pipe: "
-                f"{stripped}",
+                f"a table row must open and close with an ASCII pipe: {stripped}",
             )
             match = self.ROW.match(stripped)
             self.assertIsNotNone(match, f"malformed table line: {stripped}")
