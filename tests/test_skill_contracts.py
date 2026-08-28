@@ -369,13 +369,14 @@ EMITTING_CONTRACT_BLOCKS = {
     ),
     "skills/branch-merge-review/SKILL.md": (
         "**Finding identifiers**: the report is read by a person and its blocking-items line "
-        "asks them to decide, so `CH-1` alone is not enough. Invoke `readable-ids` if it is "
-        "installed to register the finding identifiers and render them as "
-        "`CH-1(feature/label)` on first mention. The read-only rule above is the one "
-        "exception, since it forbids writing any file: there, render the labels inline and "
-        "create no registry. Without that skill, still write a short label beside each "
-        "identifier — a later recheck refers to these findings by number across a different "
-        "document, which is exactly where a bare number stops meaning anything."
+        "asks them to decide, so `CH-1` alone is not enough. Render each identifier as "
+        "`CH-1(feature/label)` on first mention, following the `readable-ids` convention when "
+        "that skill is installed. **Do not write its registry**: the delivery rule above "
+        "forbids a review from changing the working tree, and that holds for every review "
+        "rather than only an explicitly read-only one — rendering a label needs no file. "
+        "Without that skill, still write a short label beside each identifier, because a "
+        "later recheck refers to these findings by number across a different document, which "
+        "is exactly where a bare number stops meaning anything."
     ),
     "skills/branch-merge-review/references/consolidated-report-template.md": (
         "`(feature/label)` below is the readable form of a finding identifier, owned by the "
@@ -770,20 +771,39 @@ class SkillContractTest(SkillReadingMixin, unittest.TestCase):
         # Writing, staging, and committing are three permissions, stated once here so
         # the callers stop each inventing their own answer - Codex found report-output,
         # safe-checkpoint, and this skill giving three different ones.
+        # Pinned as a block rather than probed: this rule decides whether a review may
+        # touch the working tree, and an assertIn over its phrases survived having the
+        # rule rewritten around them.
         self.assertIn("Three permissions, and none of them implies the next", skill)
-        self.assertIn("**Staging** is not part of writing", skill)
-        self.assertIn("**Committing** is not part of staging", skill)
+        self.assertContractBlock(
+            skill,
+            "**Staging** is not part of writing",
+            "1. **Writing the registry** follows the caller's authority to write files "
+            "for this task. A caller already creating a plan or a report may create the "
+            "registry beside it. Where the caller grants authority *per artifact* rather "
+            "than per task — `safe-checkpoint` does, deliberately, so a checkpoint "
+            "cannot absorb unrelated work — the registry is a separate artifact and "
+            "needs its own permission. 2. **Staging** is not part of writing. Leave the "
+            "file untracked unless the caller stages this task's output. 3. "
+            "**Committing** is not part of staging. Where the caller has no standing "
+            "permission to commit — an ordinary task has none — say the entry is "
+            "uncommitted rather than committing it.",
+        )
 
         # evidence-first-review may never write, in any mode.
         evidence = self.read("skills/evidence-first-review/SKILL.md")
         self.assertIn("Do not write its registry here", evidence)
 
-        # branch-merge-review may write only outside its read-only rule. Newlines are
-        # collapsed first: the sentence is hard-wrapped, so pinning it verbatim would
-        # break on a rewrap that changed nothing about the rule.
+        # branch-merge-review never writes the registry. Its delivery rule already
+        # forbids a review from changing the working tree - for *every* review, not only
+        # an explicitly read-only one - and an earlier version of this wiring carved out
+        # only the read-only case, which left an ordinary PHP branch review free to add
+        # `.uniqid/` files and commit candidates. Newlines are collapsed first: the
+        # sentence is hard-wrapped, so a rewrap that changed nothing would fail.
         branch = " ".join(self.read("skills/branch-merge-review/SKILL.md").split())
         self.assertIn(
-            "The read-only rule above is the one exception, since it forbids writing any file",
+            "**Do not write its registry**: the delivery rule above forbids a review "
+            "from changing the working tree, and that holds for every review",
             branch,
         )
 
@@ -849,18 +869,30 @@ class SkillContractTest(SkillReadingMixin, unittest.TestCase):
             self.read("skills/branch-merge-review/references/consolidated-report-template.md")
         )
         self.assertEqual(len(blocks), 1)
-        lines = [line.strip() for line in blocks[0].splitlines()]
+        template = blocks[0]
 
-        def opens_with(prefix: str) -> bool:
-            return any(line.startswith(prefix) for line in lines)
+        # A container that hides its contents from the reader would let the pinned lines
+        # live somewhere no one sees while the visible template reverted. Codex did
+        # exactly that with a multi-line `<template>`, which the previous line scan -
+        # startswith() over every line, hidden or not - accepted.
+        self.assertNotRegex(template, r"(?i)<\s*(?:template|script|style|details)\b")
+
+        lines = [line.strip() for line in template.splitlines()]
+
+        def opening_with(prefix: str) -> list[str]:
+            return [line for line in lines if line.startswith(prefix)]
 
         # The blocking-items line *is* the decision request, and each finding heading is
         # the definition site a later recheck refers back to. Both are entry points a
-        # reader reaches without reading forward, so both carry the full form.
-        self.assertTrue(opens_with("**Blocking items**: [CH-1(feature/label)"))
-        self.assertTrue(opens_with("### [CH-1(feature/label)]"))
-        self.assertFalse(opens_with("**Blocking items**: [CH-1,"))
-        self.assertFalse(opens_with("### [CH-1] "))
+        # reader reaches without reading forward, so both carry the full form. Exactly
+        # one of each: a second copy is either a decoy or a template with two answers.
+        self.assertEqual(len(opening_with("**Blocking items**: [CH-1(feature/label)")), 1)
+        self.assertEqual(len(opening_with("### [CH-1(feature/label)]")), 1)
+
+        # The bare spellings must not come back, in any whitespace. `\s` rather than a
+        # literal space: a tab after `[CH-1]` used to slip through.
+        for bare in (r"\*\*Blocking items\*\*:\s*\[CH-1[,\]\s]", r"###\s*\[CH-1\]"):
+            self.assertNotRegex(template, bare)
 
     def test_new_skills_have_only_the_approved_files(self) -> None:
         expected = {
@@ -1612,12 +1644,41 @@ class UniqidRegistryTest(unittest.TestCase):
 
     STATUSES = {"open", "in-progress", "done", "withdrawn"}
     ROW = re.compile(r"^\|(?P<cells>.*)\|\s*$")
+    # An unescaped pipe. `\|` is Markdown's literal pipe inside a table cell, so a naive
+    # split() saw a legitimate description as an extra column - and, before the row
+    # shape was enforced, silently dropped that row and any collision it carried.
+    CELL_SPLIT = re.compile(r"(?<!\\)\|")
+    FILE_NAME = re.compile(r"^\d{4}-\d{2}-\d{2}-[a-z0-9]+(?:-[a-z0-9]+)*\.md$")
+    FEATURE = re.compile(r"(?m)^feature: (\S+)$")
 
     def registries(self) -> list[tuple[Path, str]]:
+        """Every file under `.uniqid/`, at any depth, with its name checked.
+
+        `glob("*.md")` searched only the top level and only that extension, so a
+        registry in a subdirectory - or one saved as `.markdown` - was invisible to
+        every check below. Discovery has to be wider than the rules it feeds, or the
+        rules are optional to anyone who moves a file.
+        """
         directory = ROOT / ".uniqid"
-        files = sorted(directory.glob("*.md")) if directory.is_dir() else []
+        files = sorted(path for path in directory.rglob("*") if path.is_file()) \
+            if directory.is_dir() else []
         self.assertTrue(files, "no .uniqid/ registry to check")
+        for path in files:
+            relative = path.relative_to(directory).as_posix()
+            self.assertEqual(relative, path.name, f"registry not at the top level: {relative}")
+            self.assertRegex(path.name, self.FILE_NAME)
         return [(path, path.read_text(encoding="utf-8")) for path in files]
+
+    def feature_of(self, text: str) -> str:
+        """The file's one `feature` declaration.
+
+        Exactly one: a second declaration used to be ignored, and since `feature` is
+        what makes an identifier resolvable, a file with two of them has no answer to
+        which one a rendered form refers to.
+        """
+        declared = self.FEATURE.findall(text)
+        self.assertEqual(len(declared), 1, f"expected one feature declaration: {declared}")
+        return declared[0]
 
     def rows(self, text: str) -> list[list[str]]:
         """Data rows, with every malformed table line rejected rather than skipped.
@@ -1634,7 +1695,7 @@ class UniqidRegistryTest(unittest.TestCase):
                 continue
             match = self.ROW.match(stripped)
             self.assertIsNotNone(match, f"malformed table line: {stripped}")
-            cells = [cell.strip() for cell in match.group("cells").split("|")]
+            cells = [cell.strip() for cell in self.CELL_SPLIT.split(match.group("cells"))]
             self.assertEqual(len(cells), 4, f"expected four columns: {stripped}")
             if cells[0] == "ID" or set(cells[0]) <= set("-: "):
                 continue                                  # header and separator rows
@@ -1662,15 +1723,17 @@ class UniqidRegistryTest(unittest.TestCase):
         back out of a sentence as one token.
         """
         for path, text in self.registries():
-            feature = re.search(r"(?m)^feature: (\S+)$", text).group(1)
+            feature = self.feature_of(text)
             with self.subTest(registry=path.name, feature=feature):
                 self.assertNotIn("/", feature)
+                self.assertEqual(feature.split(), [feature])
             for identifier, label, _description, _status in self.rows(text):
                 with self.subTest(registry=path.name, identifier=identifier):
                     self.assertNotIn("/", label)
-                    self.assertEqual(label, label.strip())
-                    self.assertNotIn(" ", label)
                     self.assertTrue(label)
+                    # Any whitespace, not just an ASCII space: a tab inside a label
+                    # passed the narrower check and still breaks the rendered form.
+                    self.assertEqual(label.split(), [label])
 
     def test_no_identifier_or_label_collides_within_a_feature(self) -> None:
         """Across every registry, not within one file.
@@ -1682,7 +1745,7 @@ class UniqidRegistryTest(unittest.TestCase):
         by_identifier: dict[tuple[str, str], str] = {}
         by_label: dict[tuple[str, str], str] = {}
         for path, text in self.registries():
-            feature = re.search(r"(?m)^feature: (\S+)$", text).group(1)
+            feature = self.feature_of(text)
             for identifier, label, _description, _status in self.rows(text):
                 for index, seen in ((identifier, by_identifier), (label, by_label)):
                     key = (feature, index)

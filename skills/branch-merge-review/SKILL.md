@@ -499,9 +499,10 @@ Before finalizing, scan the consolidated sections (everything above the Appendix
 Follow the structure in `references/consolidated-report-template.md`.
 
 **Finding identifiers**: the report is read by a person and its blocking-items line asks them to
-decide, so `CH-1` alone is not enough. Invoke `readable-ids` if it is installed to register the
-finding identifiers and render them as `CH-1(feature/label)` on first mention. The read-only rule
-above is the one exception, since it forbids writing any file: there, render the labels inline and
-create no registry. Without that skill,
-still write a short label beside each identifier — a later recheck refers to these findings by
-number across a different document, which is exactly where a bare number stops meaning anything.
+decide, so `CH-1` alone is not enough. Render each identifier as `CH-1(feature/label)` on first
+mention, following the `readable-ids` convention when that skill is installed. **Do not write its
+registry**: the delivery rule above forbids a review from changing the working tree, and that
+holds for every review rather than only an explicitly read-only one — rendering a label needs no
+file. Without that skill, still write a short label beside each identifier, because a later recheck
+refers to these findings by number across a different document, which is exactly where a bare
+number stops meaning anything.

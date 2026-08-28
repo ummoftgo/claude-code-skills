@@ -24,7 +24,7 @@ feature: <짧은 도메인 명사>
 | `한 줄 설명` | One line, enough for a reader to recognise the item. Not a specification. |
 | `상태` | One of `open` · `in-progress` · `done` · `withdrawn`. |
 
-`feature` sits in the header rather than in a column because a file normally covers one workstream. When a single file genuinely spans two features, add a `feature` column and drop the header line — but prefer splitting the file, since the file name is what a reader scans first.
+`feature` sits in the header, exactly once per file, and never in a column. A file covers one workstream; when a set genuinely spans two features, split it into two files rather than widening the table. The file name is what a reader scans first, and one shape is what a checker can enforce — a second, column-shaped spelling would have to be parsed everywhere the first one is.
 
 `문서` points at the plan, report, or issue that defines these items. It is what a reader follows when the one-line description is not enough. Write `-` when the identifiers were minted in conversation and have no document yet.
 
