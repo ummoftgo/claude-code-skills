@@ -11,23 +11,25 @@ Short identifiers are for the agent; people need the meaning next to them. Keep 
 
 ## 1. Decide whether the identifier needs a label
 
-Register an identifier when **any** of these holds:
+Give an identifier a label when **any** of these holds:
 
 - another document will refer to it;
 - it outlives one session or one report;
 - a person is asked to decide something by that identifier.
 
-Do not register numbering that is created and consumed in one place: steps in a checklist the reader is already looking at, rows in a table that is never referenced again, a scratch enumeration inside a single message. Adding a registry entry for those is ceremony, and a registry full of dead entries stops being worth reading.
+Do not label numbering that is created and consumed in one place: steps in a checklist the reader is already looking at, rows in a table that is never referenced again, a scratch enumeration inside a single message. Adding a registry entry for those is ceremony, and a registry full of dead entries stops being worth reading. Whether the label also earns a registry row is §2's question, not this one.
 
-When in doubt, look at where the identifier will next appear. If the answer is "in a sentence somewhere else", register it.
+When in doubt, look at where the identifier will next appear. If the answer is "in a sentence somewhere else", it needs a label.
 
 ## 2. Register it when you mint it
 
 Write the entry at the moment the identifier is assigned, not at the end of the work. An identifier that exists for an hour without a label has already been written into a message a person had to decode.
 
 - One file per identifier set: `.uniqid/{yyyy-mm-dd}-{slug}.md` at the project root.
-- Commit the registry. A label that disappears with the session cannot resolve the identifier in last month's plan.
+- Commit the registry. A label that disappears with the session cannot resolve the identifier in last month's plan. **Committing is a further authority, not a consequence of writing**: where the caller has no standing permission to commit — `safe-checkpoint` grants it per action, and an ordinary task grants none — leave the file staged or untracked and say it is uncommitted.
 - Follow an existing project convention for this directory when the repository already has one.
+
+**Registering is a workspace write; rendering is not.** Where the calling context has no authority to write — a read-only review, a read-only sandbox, `evidence-first-review` at any time, a checkpoint that was not authorized to write files — do not create or modify the registry. Render the readable form inline from the labels assigned in that pass and say the registry entry is pending. The two halves of this skill separate on purpose: a label costs nothing to put in a sentence, and the sentence is what the person actually reads.
 
 Read [references/registry-format.md](references/registry-format.md) for the file template, the column meanings, and a worked example.
 
@@ -42,7 +44,11 @@ Write `A1(feature/label)` — for example `C1(리뷰신뢰경계/신뢰상태-�
 
 Use the **full form on the first mention within one document or one message, and the short form after that**. Repeating the full form on every line buries the sentence it belongs to.
 
+**Structural positions each count as a first mention.** A heading, an index or summary line — a report's blocking-items row, a table of contents — and a table cell are entry points a reader arrives at without having read what precedes them, so each carries the full form even when the prose already introduced the identifier. "After the first mention" governs running prose, and only within the passage a reader reaches by reading forward.
+
 Keep the short form as-is in: code, commit subjects, test names, the registry's own `ID` column, and internal working notes that no one is being asked to read.
+
+**Where one document carries two identifiers that share a short form** — `A1` from two features, a review's `M-1` beside a plan's `M-1` — the short form no longer resolves to one thing, and dropping to it after the first mention silently merges them. Keep the full form for both throughout that document.
 
 At the definition site — the heading or line that introduces the identifier — write the full form once. That is what lets a reader connect a reference elsewhere back to the thing itself.
 
@@ -56,10 +62,12 @@ At the definition site — the heading or line that introduces the identifier �
 
 `feature` is the short domain noun the identifier set belongs to — usually one per registry file, declared in the file header. It is what disambiguates `A1` in one workstream from `A1` in another.
 
+It is rendered inside every identifier a person reads, so **the label rules above apply to it too**: no whitespace, no `/`, and short enough that the prefix does not outweigh the sentence carrying it. One or two words is normally right.
+
 ## 5. Lifecycle
 
 - **Never renumber and never reuse an identifier**, matching the requirement lifecycle in `plan-and-build`.
-- **A published label is fixed.** If a label turns out to be inaccurate, correct the description column and leave the label alone — references already written elsewhere still carry the old one, and silently changing it breaks exactly the lookup this skill exists to provide.
+- **A published label is fixed, and so is its `feature`.** Both halves are rendered into every reference a person has already read, so correcting either one breaks the lookup this skill exists to provide. If one turns out to be inaccurate, fix the description column and leave the rendered form alone.
 - A dropped item keeps its row with status `withdrawn` rather than disappearing, and is excluded from remaining-work counts.
 - Status vocabulary is closed: `open` · `in-progress` · `done` · `withdrawn`.
 

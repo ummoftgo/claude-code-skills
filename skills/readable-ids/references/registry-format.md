@@ -30,7 +30,7 @@ feature: <짧은 도메인 명사>
 
 ## Worked example
 
-`.uniqid/2026-08-16-multilang-review.md`
+`.uniqid/2026-08-29-multilang-review-merge-block.md`
 
 ```markdown
 # 다국어 리뷰 지원 — 병합 차단 항목
@@ -55,7 +55,9 @@ and afterwards, in the same document:
 
 ## Choosing the file name
 
-`{yyyy-mm-dd}` is the day the identifier set was opened, not the day it was last touched. `{slug}` matches the plan or report it serves, so the two sort next to each other and a reader who found one can guess the other.
+`{yyyy-mm-dd}` is the day the identifier set was opened, not the day it was last touched — which is often *not* the date on the document it serves, since findings about a plan are minted long after the plan is.
+
+`{slug}` names what the set is about. Reuse the serving document's slug where that reads naturally, so a reader who found one can guess the other; where the set covers only part of that document — one review's findings against a longer plan — name the part instead. Matching the document exactly is a convenience, not a rule, and it loses to saying what is in the file.
 
 ## Two identifier sets, one topic
 

@@ -184,6 +184,78 @@ def instructional_text(markdown: str) -> str:
     return "\n".join(kept)
 
 
+# Constructions that invert an imperative. A contract test that pins a substring proves
+# the words are present, not that they still say what the contract needs: `Do not Write
+# ...` contains `Write ...`, so an assertion on the bare phrase survives having its
+# meaning reversed. Measured - injecting exactly that reversal into skills/readable-ids
+# left every assertion about the rendering rule green.
+#
+# The set is deliberately narrow. Bare `not` and bare `no` are excluded because they
+# occur constantly in legitimate prose around these very sentences ("`CH-1` alone is not
+# enough", "carries no meaning for the reader", "someone who does not have this
+# session's context"), and a checker that fires on those would be turned off rather than
+# fixed. What is listed is what an inverting edit actually reaches for.
+INVERTING_NEGATION = re.compile(
+    r"\b(?:do(?:es)?\s+not|don't|never|must\s+not|shall\s+not|no\s+longer|instead\s+of)\b",
+    re.IGNORECASE,
+)
+
+# Where one sentence ends and the next begins, for the purpose above. Single newlines
+# are not boundaries: every SKILL.md in this repository hard-wraps prose, so cutting on
+# `\n` would split most sentences in half and hide a negation in the discarded piece.
+SENTENCE_BOUNDARY = re.compile(r"(?:\n\s*\n|(?<=[.!?;])[ \n])")
+
+
+def sentence_containing(text: str, needle: str) -> str:
+    """The sentence `needle` sits in, whitespace normalised.
+
+    Scoped to one sentence rather than one paragraph on purpose. A paragraph here
+    routinely carries a positive instruction and its exception side by side - "render
+    the labels inline and create no registry", "Do not write its registry here" - and a
+    paragraph-wide negation check would reject the document for saying both, which is
+    exactly what these documents are supposed to say.
+    """
+    index = text.index(needle)
+    starts = [match.end() for match in SENTENCE_BOUNDARY.finditer(text) if match.end() <= index]
+    start = starts[-1] if starts else 0
+    end_match = SENTENCE_BOUNDARY.search(text, index + len(needle))
+    end = end_match.start() if end_match else len(text)
+    return " ".join(text[start:end].split())
+
+
+def fenced_blocks(markdown: str) -> list[str]:
+    """The contents of `markdown`'s fenced code blocks.
+
+    The complement of instructional_text(), and needed for the same reason. A report
+    template's structure *is* its fenced block, so a contract about the shape a report
+    takes has to be asserted against that block - not against the whole file, where the
+    same string sitting in an HTML comment or in prose about the template would satisfy
+    it while the template itself no longer carried it.
+    """
+    blocks: list[str] = []
+    current: list[str] | None = None
+    fence: str | None = None
+    for line in HTML_COMMENT_PATTERN.sub("", markdown).splitlines():
+        match = CODE_FENCE_PATTERN.match(line.lstrip())
+        if fence is None:
+            if match:
+                fence = match.group("fence")
+                current = []
+        elif (
+            match
+            and match.group("fence")[0] == fence[0]
+            and len(match.group("fence")) >= len(fence)
+            and not match.group("info").strip()
+        ):
+            blocks.append("\n".join(current or []))
+            fence, current = None, None
+        elif current is not None:
+            current.append(line)
+    if current is not None:                      # unterminated fence: keep what we saw
+        blocks.append("\n".join(current))
+    return blocks
+
+
 def reference_links(markdown: str) -> list[str]:
     """The reference paths `markdown` actually instructs the model to open, sorted.
 
@@ -237,6 +309,48 @@ class SkillReadingMixin:
 
     def read(self, relative_path: str) -> str:
         return (ROOT / relative_path).read_text(encoding="utf-8")
+
+    def readable_ids_body(self) -> str:
+        """skills/readable-ids/SKILL.md: frontmatter stripped, comments and fences too.
+
+        Three narrowings, each because a wider read let a broken document pass.
+
+        The frontmatter goes because the description restates the convention -
+        `.uniqid/`, `A1(feature/label)` - to route the model here in the first place.
+        Asserting against the whole file therefore passed while the *rules* were deleted
+        from the body: measured, a mutation removing the rendering sentence left every
+        assertion green because the description still carried the same literal.
+
+        read_skill() is wrong here for the neighbouring reason. It appends the reference
+        documents, and references/registry-format.md legitimately repeats the path and
+        the status vocabulary; a rule deleted from the body would go on being satisfied
+        by the elaboration a model only reaches after following a pointer.
+
+        instructional_text() goes on top so a rule cannot be satisfied from inside an
+        HTML comment or a fenced example - text the model either never sees or reads as
+        an illustration rather than an instruction.
+        """
+        body = self.read("skills/readable-ids/SKILL.md")
+        self.assertTrue(body.startswith("---\n"))
+        return instructional_text(body.split("\n---\n", 1)[1])
+
+    def assertPositiveInstruction(self, text: str, needle: str) -> None:
+        """`needle` is present *and* its sentence has not been inverted.
+
+        assertIn alone proves the words are there, not that they still instruct. Codex
+        demonstrated the gap by injecting `Do not Write ...` and `Never invoke
+        readable-ids and never render (feature/label).` into these documents: every
+        substring assertion stayed green while the contract said the opposite.
+        """
+        self.assertIn(needle, text)
+        sentence = sentence_containing(text, needle)
+        negation = INVERTING_NEGATION.search(sentence)
+        self.assertIsNone(
+            negation,
+            f"instruction inverted by {negation.group(0)!r}: {sentence}"
+            if negation
+            else "",
+        )
 
     def read_skill(self, name: str) -> str:
         """SKILL.md joined with the reference documents SKILL.md explicitly points at.
@@ -417,40 +531,23 @@ class SkillContractTest(SkillReadingMixin, unittest.TestCase):
         self.assertIn("runtime manifests", skill)
         self.assertIn("upstream synchronization", skill)
 
-    def readable_ids_body(self) -> str:
-        """skills/readable-ids/SKILL.md with its YAML frontmatter removed.
-
-        The frontmatter is stripped because the description restates the convention -
-        `.uniqid/`, `A1(feature/label)` - to route the model here in the first place.
-        Asserting against the whole file therefore passed while the *rules* below were
-        deleted, which is the one failure these contracts exist to catch: measured, a
-        mutation that removed the rendering sentence from the body left every assertion
-        green because the description still carried the same literal.
-
-        read_skill() is wrong here for the neighbouring reason. It appends the reference
-        documents, and references/registry-format.md legitimately repeats the path and
-        the status vocabulary; a rule deleted from the body would go on being satisfied
-        by the elaboration a model only reaches after following a pointer. What has to be
-        in the body is what the model must see *before* deciding to open anything.
-        """
-        body = self.read("skills/readable-ids/SKILL.md")
-        self.assertTrue(body.startswith("---\n"))
-        return body.split("\n---\n", 1)[1]
-
     def test_readable_ids_defines_the_registry_and_rendering_contract(self) -> None:
         skill = self.readable_ids_body()
 
         # Registry shape and the closed status vocabulary (SC-001).
-        self.assertIn(".uniqid/{yyyy-mm-dd}-{slug}.md", skill)
+        self.assertPositiveInstruction(skill, ".uniqid/{yyyy-mm-dd}-{slug}.md")
         for status in ("open", "in-progress", "done", "withdrawn"):
             self.assertIn(f"`{status}`", skill)
 
-        # The rendering rule, and the constraint that keeps it readable (SC-002). The
-        # parenthesised form is the whole point of the skill, so it is pinned as the
-        # instruction that emits it rather than as a bare literal - the literal alone
-        # also appears in prose about the form.
-        self.assertIn("Write `A1(feature/label)`", skill)
+        # The rendering rule, and the constraint that keeps it readable (SC-002).
+        self.assertPositiveInstruction(skill, "Write `A1(feature/label)`")
         self.assertIn("full form on the first mention", skill)
+
+        # A heading or an index line is reached without reading what precedes it, so the
+        # short form cannot start there. Without this the report template - which spells
+        # the full form in both the blocking-items line and every finding heading -
+        # contradicts the rule it is supposed to follow.
+        self.assertIn("Structural positions each count as a first mention", skill)
 
         # The threshold that stops the registry filling with dead rows, and the label
         # rules (SC-003). The slash ban matters because the slash is the separator.
@@ -462,9 +559,61 @@ class SkillContractTest(SkillReadingMixin, unittest.TestCase):
             self.assertIn(threshold, skill)
         self.assertIn("no `/`", skill)
 
-        # Lifecycle, sharing plan-and-build's vocabulary (SC-004).
+        # Lifecycle, sharing plan-and-build's vocabulary (SC-004). `feature` is pinned
+        # alongside the label because both are rendered into references already read.
         self.assertIn("Never renumber and never reuse an identifier", skill)
-        self.assertIn("A published label is fixed", skill)
+        self.assertIn("A published label is fixed, and so is its `feature`", skill)
+
+        # `feature` is rendered inside every identifier a person reads, so it needs the
+        # label's format rules. Without this a `feature` carrying a space or a slash
+        # produces a rendered form the separator can no longer be read out of.
+        self.assertIn("the label rules above apply to it too", skill)
+
+        # Dropping to the short form is only safe while it resolves to one thing.
+        self.assertIn("two identifiers that share a short form", skill)
+
+    def test_registering_is_separated_from_rendering_for_read_only_callers(self) -> None:
+        """Registering writes a file; rendering does not. Conflating them breaks callers.
+
+        Three of the six emitting documents run under a contract that forbids writing:
+        evidence-first-review is read-only in every mode, branch-merge-review has a
+        read-only priority rule, and safe-checkpoint refuses to infer write authority
+        across its table. A first version of this wiring told all three to *register*
+        identifiers, which each of them is forbidden to do - so the instruction was
+        either ignored or obeyed in violation of the skill's own contract.
+        """
+        skill = self.readable_ids_body()
+        self.assertIn("Registering is a workspace write; rendering is not", skill)
+        # Writing the file and committing it are separate permissions; safe-checkpoint
+        # grants authority per action and an ordinary task grants none.
+        self.assertIn("Committing is a further authority", skill)
+
+        # evidence-first-review may never write, in any mode.
+        evidence = self.read("skills/evidence-first-review/SKILL.md")
+        self.assertIn("Do not write its registry here", evidence)
+
+        # branch-merge-review may write only outside its read-only rule. Newlines are
+        # collapsed first: the sentence is hard-wrapped, so pinning it verbatim would
+        # break on a rewrap that changed nothing about the rule.
+        branch = " ".join(self.read("skills/branch-merge-review/SKILL.md").split())
+        self.assertIn(
+            "except under the read-only rule above, which forbids writing any file",
+            branch,
+        )
+
+        # report-output already refuses report files under the same constraint; the
+        # rendering half has to survive it, or identifiers go bare exactly when the
+        # report is the only output the user gets.
+        self.assertIn(
+            "Rendering needs no file, so it applies under the read-only rule above too",
+            self.read("skills/report-output/SKILL.md"),
+        )
+
+        # safe-checkpoint's whole contract is that authority does not cross rows.
+        self.assertIn(
+            "is a separate write",
+            self.read("skills/safe-checkpoint/references/handoff-template.md"),
+        )
 
     def test_identifier_emitting_skills_point_at_readable_ids(self) -> None:
         """Every place that mints an identifier a person later reads must route here.
@@ -481,9 +630,9 @@ class SkillContractTest(SkillReadingMixin, unittest.TestCase):
         "label" instead and proved nothing - "feature/label" contains it, so the check
         could not fail while the example was present.
 
-        For the consolidated report template this check is a floor, not the contract:
-        its real positions are pinned by
-        test_the_report_template_carries_the_readable_form_where_a_person_decides.
+        assertPositiveInstruction, not assertIn, because a reversal is the mutation that
+        actually happens here: `Never invoke readable-ids and never render
+        (feature/label).` satisfies both substrings while instructing the opposite.
         """
         for relative_path in (
             "skills/plan-and-build/SKILL.md",
@@ -494,19 +643,29 @@ class SkillContractTest(SkillReadingMixin, unittest.TestCase):
             "skills/safe-checkpoint/references/handoff-template.md",
         ):
             with self.subTest(relative_path=relative_path):
-                document = self.read(relative_path)
+                document = instructional_text(self.read(relative_path))
                 self.assertIn("readable-ids", document)
-                self.assertIn("(feature/label)", document)
+                self.assertPositiveInstruction(document, "(feature/label)")
 
     def test_the_report_template_carries_the_readable_form_where_a_person_decides(
         self,
     ) -> None:
-        template = self.read(
-            "skills/branch-merge-review/references/consolidated-report-template.md"
+        """Asserted against the template's fenced block, not the file.
+
+        The block *is* the template - the shape a report actually takes. Against the
+        whole file the same strings sitting in an HTML comment, or in the prose that
+        explains the convention, would satisfy every assertion while the template itself
+        had gone back to bare identifiers. Codex demonstrated exactly that.
+        """
+        blocks = fenced_blocks(
+            self.read("skills/branch-merge-review/references/consolidated-report-template.md")
         )
+        self.assertEqual(len(blocks), 1)
+        template = blocks[0]
+
         # The blocking-items line *is* the decision request, and each finding heading is
-        # the definition site a later recheck refers back to. Both are pinned; the bare
-        # spellings they replaced must not come back.
+        # the definition site a later recheck refers back to. Both are entry points a
+        # reader reaches without reading forward, so both carry the full form.
         self.assertIn("**Blocking items**: [CH-1(feature/label)", template)
         self.assertIn("### [CH-1(feature/label)]", template)
         self.assertNotIn("**Blocking items**: [CH-1,", template)
@@ -1078,6 +1237,102 @@ class SkillReferenceLinkTest(SkillReadingMixin, unittest.TestCase):
             self.read_skill_dir(skill_dir)
         self.assertIn("does not exist", str(caught.exception))
 
+
+class InstructionSenseHelperTest(SkillReadingMixin, unittest.TestCase):
+    """Tests for the checkers that decide whether a pinned instruction still instructs.
+
+    These exist because the contracts above were, for one round, satisfied by documents
+    saying the opposite of what they pin. A checker written to catch that is worth
+    exactly as much as its own coverage, so its boundaries are tested here rather than
+    assumed.
+    """
+
+    def test_a_hard_wrapped_sentence_is_not_split_at_the_line_break(self) -> None:
+        # Every SKILL.md in this repository wraps prose. Treating `\n` as a boundary
+        # would put the negation and the instruction in different "sentences" and let an
+        # inverted document pass.
+        text = "Do not\n  write `A1(feature/label)` here."
+        self.assertEqual(
+            sentence_containing(text, "write `A1(feature/label)`"),
+            "Do not write `A1(feature/label)` here.",
+        )
+
+    def test_a_blank_line_ends_the_sentence(self) -> None:
+        text = "Never do this.\n\nWrite `A1(feature/label)` instead-of-nothing."
+        self.assertEqual(
+            sentence_containing(text, "Write `A1(feature/label)`"),
+            "Write `A1(feature/label)` instead-of-nothing.",
+        )
+
+    def test_a_preceding_sentence_negation_is_not_borrowed(self) -> None:
+        # The neighbouring sentence is allowed to be negative - these documents pair an
+        # instruction with its exception on purpose.
+        text = "Do not create the registry. Write `A1(feature/label)` inline."
+        self.assertEqual(
+            sentence_containing(text, "Write `A1(feature/label)`"),
+            "Write `A1(feature/label)` inline.",
+        )
+
+    def test_the_negation_pattern_matches_what_an_inverting_edit_writes(self) -> None:
+        for phrase in (
+            "Do not write it",
+            "does not write it",
+            "Never write it",
+            "must not write it",
+            "shall not write it",
+            "no longer write it",
+            "render it instead of writing it",
+            "don't write it",
+        ):
+            with self.subTest(phrase=phrase):
+                self.assertIsNotNone(INVERTING_NEGATION.search(phrase))
+
+    def test_the_negation_pattern_ignores_ordinary_prose(self) -> None:
+        """Bare `not` and `no` are excluded, and that exclusion is the point.
+
+        All four of these sit in the very sentences the contracts pin. A checker that
+        fired on them would be switched off rather than fixed, so the narrow set is a
+        deliberate trade: it catches the inversions an editor actually writes and stays
+        quiet on the prose these documents are made of.
+        """
+        for phrase in (
+            "`CH-1` alone is not enough",
+            "carries no meaning for the reader",
+            "someone who does not yet know",       # `does not` *is* caught - see below
+            "render the labels inline and create no registry",
+        ):
+            with self.subTest(phrase=phrase):
+                matched = INVERTING_NEGATION.search(phrase)
+                expected = "does not" in phrase
+                self.assertEqual(matched is not None, expected)
+
+    def test_fenced_blocks_returns_the_block_and_not_its_surroundings(self) -> None:
+        markdown = (
+            "prose before\n"
+            "<!-- ### [CH-1(feature/label)] hidden in a comment -->\n"
+            "```\n"
+            "### [CH-1(feature/label)] Finding Title\n"
+            "```\n"
+            "prose after\n"
+        )
+        blocks = fenced_blocks(markdown)
+        self.assertEqual(blocks, ["### [CH-1(feature/label)] Finding Title"])
+
+    def test_a_fence_line_carrying_text_does_not_close_the_block(self) -> None:
+        markdown = "```\nkept\n```not-a-close\nalso kept\n```\n"
+        self.assertEqual(fenced_blocks(markdown), ["kept\n```not-a-close\nalso kept"])
+
+    def test_assert_positive_instruction_rejects_an_inverted_sentence(self) -> None:
+        with self.assertRaises(AssertionError) as caught:
+            self.assertPositiveInstruction(
+                "Do not write `A1(feature/label)` anywhere.", "write `A1(feature/label)`"
+            )
+        self.assertIn("inverted", str(caught.exception))
+
+    def test_assert_positive_instruction_accepts_the_real_document(self) -> None:
+        self.assertPositiveInstruction(
+            self.readable_ids_body(), "Write `A1(feature/label)`"
+        )
 
 if __name__ == "__main__":
     unittest.main()

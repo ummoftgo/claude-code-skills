@@ -33,7 +33,7 @@ Choose the mode from the user's requested outcome and state it in the report.
 
 Do not silently drop a prior finding. Preserve its identity, cite the current evidence, and explain why its status changed or stayed the same.
 
-A recheck refers to findings that were numbered in a different document, so the identifier alone carries no meaning for the reader. Invoke `readable-ids` if it is installed to render each prior finding as `H-2(feature/label)` on first mention and to register any new finding this pass adds; otherwise carry a short label beside every identifier in the ledger.
+A recheck refers to findings that were numbered in a different document, so the identifier alone carries no meaning for the reader. Render each prior finding as `H-2(feature/label)` on first mention, following the `readable-ids` convention when that skill is installed; otherwise carry a short label beside every identifier in the ledger. **Do not write its registry here** — this skill is read-only in every mode, and rendering a label needs no file. Read an existing `.uniqid/` entry to reuse the label a prior pass already published; where none exists, say the label is unregistered rather than creating one.
 
 ### `plan-conformance` profile
 

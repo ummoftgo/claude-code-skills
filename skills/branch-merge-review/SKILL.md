@@ -500,6 +500,8 @@ Follow the structure in `references/consolidated-report-template.md`.
 
 **Finding identifiers**: the report is read by a person and its blocking-items line asks them to
 decide, so `CH-1` alone is not enough. Invoke `readable-ids` if it is installed to register the
-finding identifiers and render them as `CH-1(feature/label)` on first mention. Without that skill,
+finding identifiers and render them as `CH-1(feature/label)` on first mention — except under the
+read-only rule above, which forbids writing any file: there, render the labels inline and create no
+registry. Without that skill,
 still write a short label beside each identifier — a later recheck refers to these findings by
 number across a different document, which is exactly where a bare number stops meaning anything.
