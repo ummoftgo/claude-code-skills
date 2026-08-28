@@ -175,6 +175,9 @@ HTML_ELEMENTS = {
     "strong", "style", "sub", "summary", "sup", "table", "tbody", "td", "template",
     "textarea", "tfoot", "th", "thead", "time", "title", "tr", "u", "ul", "var",
     "video", "audio", "svg", "math", "iframe", "frame", "frameset", "marquee",
+    # Void elements hide nothing, but "no HTML" means none of it.
+    "area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta",
+    "param", "source", "track", "wbr",
 }
 HTML_TAG = re.compile(r"</?(?P<name>[a-zA-Z][\w-]*)(?P<attrs>\s[^>]*)?/?>")
 
@@ -182,6 +185,36 @@ HTML_TAG = re.compile(r"</?(?P<name>[a-zA-Z][\w-]*)(?P<attrs>\s[^>]*)?/?>")
 # discusses one while explaining CSP hashes - and counting it as markup made a document
 # that contains no HTML fail.
 INLINE_CODE = re.compile(r"`[^`\n]*`")
+
+
+def unterminated_comments(text: str) -> int:
+    """`<!--` openers with no `-->` after them.
+
+    An unterminated comment swallows the rest of the document - CommonMark and GFM both
+    keep the HTML block open to the end of file - so every rule below it leaves the
+    rendered page while staying in the file. instructional_text() deliberately leaves
+    such a comment alone rather than eating the file, and raw_html_elements() does not
+    see `<!--` as a tag, so without this neither check noticed.
+
+    The scenario is not disguise: commenting a paragraph out while rewording it and
+    forgetting the `-->` is an ordinary slip.
+    """
+    return len(re.findall(r"<!--", text)) - len(re.findall(r"-->", text))
+
+
+def assert_html_free(test, text: str, label: str) -> None:
+    """`text` carries no HTML markup and no unterminated comment.
+
+    instructional_text() first for the element scan: a fenced block renders as code and
+    hides nothing, and the templates inside these documents legitimately carry multi-word
+    metavariables (`<observable completed outcome>`) that are tag-shaped by accident.
+    The comment count runs against the raw text, because an unterminated `<!--` is what
+    would make a fence stop being a fence.
+    """
+    dangling = unterminated_comments(text)
+    test.assertEqual(dangling, 0, f"{label} has {dangling} unterminated HTML comment(s)")
+    elements = raw_html_elements(instructional_text(text))
+    test.assertEqual(elements, [], f"{label} contains raw HTML: {sorted(set(elements))}")
 
 
 def raw_html_elements(text: str) -> list[str]:
@@ -236,8 +269,7 @@ def assert_not_hidden(test, text: str, needle: str, label: str) -> None:
     # instructional_text() first: a fenced block renders as code and hides nothing, and
     # the templates inside these documents legitimately carry multi-word metavariables
     # (`<observable completed outcome>`) that are tag-shaped only by accident.
-    elements = raw_html_elements(instructional_text(text))
-    test.assertEqual(elements, [], f"{label} contains raw HTML: {sorted(set(elements))}")
+    assert_html_free(test, text, label)
 
     index = text.find(needle)
     test.assertNotEqual(index, -1, f"{label}: {needle!r} not found")
@@ -835,8 +867,7 @@ class SkillContractTest(SkillReadingMixin, unittest.TestCase):
         # The document that states the convention is subject to it: wrapping one of the
         # pinned rules below in `<div hidden>` passed every assertion here while the rule
         # left the rendered page.
-        elements = raw_html_elements(skill)
-        self.assertEqual(elements, [], f"raw HTML in readable-ids: {sorted(set(elements))}")
+        assert_html_free(self, self.read("skills/readable-ids/SKILL.md"), "readable-ids")
 
         # Registry shape and the closed status vocabulary (SC-001). Pinned as a whole
         # sentence: the location of the registry is the contract, and an equality check
@@ -1758,6 +1789,10 @@ class InstructionSenseHelperTest(SkillReadingMixin, unittest.TestCase):
         for markup in (
             "<div>", "</div>", "<details>", "<details open>", "<template>",
             "<script>", "<span hidden>", '<div title="a > b" hidden>', "<summary>",
+            "<video hidden>",          # absent from the name list; caught structurally
+            "<my-widget>",             # a custom element, likewise
+            "<br>", "<img src=x>",     # void: hides nothing, but is still HTML
+            "<Div>",                   # case does not matter
         ):
             with self.subTest(markup=markup):
                 self.assertNotEqual(raw_html_elements(markup), [])
@@ -1772,6 +1807,25 @@ class InstructionSenseHelperTest(SkillReadingMixin, unittest.TestCase):
         ):
             with self.subTest(prose=prose):
                 self.assertEqual(raw_html_elements(prose), [])
+
+    def test_an_unterminated_comment_is_caught(self) -> None:
+        """The slip that hides everything after it while changing nothing visible.
+
+        Both halves of the HTML check missed it: instructional_text() leaves an
+        unterminated `<!--` alone by design, and `<!--` is not a tag, so a document whose
+        remaining rules had all left the rendered page still reported no HTML.
+        """
+        self.assertEqual(unterminated_comments("<!-- a --> <!-- b -->"), 0)
+        self.assertEqual(unterminated_comments("<!-- TODO: wording\n\n- the rule"), 1)
+        with self.assertRaises(AssertionError):
+            assert_html_free(self, "<!-- TODO\n\n- the rule", "sample")
+
+    def test_the_cell_splitter_follows_backslash_parity(self) -> None:
+        """An escaped backslash does not escape the pipe that follows it."""
+        self.assertEqual(_split_unescaped("a|b", "|"), ["a", "b"])
+        self.assertEqual(_split_unescaped("a\\|b", "|"), ["a\\|b"])          # one: escaped
+        self.assertEqual(_split_unescaped("a\\\\|b", "|"), ["a\\\\", "b"])   # two: a separator
+        self.assertEqual(_split_unescaped("a\\\\\\|b", "|"), ["a\\\\\\|b"])  # three: escaped
 
     def test_the_pinned_documents_contain_no_html_at_all(self) -> None:
         """The invariant the ancestry model was standing in for, stated directly.
@@ -1788,8 +1842,7 @@ class InstructionSenseHelperTest(SkillReadingMixin, unittest.TestCase):
         ]
         for relative_path in documents:
             with self.subTest(relative_path=relative_path):
-                elements = raw_html_elements(instructional_text(self.read(relative_path)))
-                self.assertEqual(elements, [], f"raw HTML: {sorted(set(elements))}")
+                assert_html_free(self, self.read(relative_path), relative_path)
 
     def test_a_table_opens_only_on_a_header_and_a_matching_separator(self) -> None:
         """Each half was a fail-open alone; both are required together.
