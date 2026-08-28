@@ -40,4 +40,6 @@ Updated: YYYY-MM-DD HH:MM <timezone>
 - <failure evidence, limitation, or `None known`>
 ```
 
+A handoff is read by someone who does not have this session's context. When it names work by a short identifier, write the readable form — `A1(feature/label)` — on first mention and the short form afterwards; `readable-ids` owns that convention and its registry when the skill is installed.
+
 Record artifact hashes only when they are needed to distinguish generated outputs or reproduce a result. Never copy secrets into the handoff.

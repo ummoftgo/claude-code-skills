@@ -33,6 +33,8 @@ Choose the mode from the user's requested outcome and state it in the report.
 
 Do not silently drop a prior finding. Preserve its identity, cite the current evidence, and explain why its status changed or stayed the same.
 
+A recheck refers to findings that were numbered in a different document, so the identifier alone carries no meaning for the reader. Invoke `readable-ids` if it is installed to render each prior finding as `H-2(feature/label)` on first mention and to register any new finding this pass adds; otherwise carry a short label beside every identifier in the ledger.
+
 ### `plan-conformance` profile
 
 A profile is not a fourth mode. It fixes **what the ledger is made of**, leaving the mode above

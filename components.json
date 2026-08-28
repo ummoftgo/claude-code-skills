@@ -74,6 +74,12 @@
       "support": {"claude": {"posix": true, "windows": true}, "codex": {"posix": false, "windows": false}}
     },
     {
+      "kind": "skill",
+      "name": "readable-ids",
+      "source": "skills/readable-ids",
+      "support": {"claude": {"posix": true, "windows": true}, "codex": {"posix": true, "windows": true}}
+    },
+    {
       "kind": "agent",
       "name": "php-backend-developer",
       "source": {"claude": "agents/php-backend-developer/claude.md", "codex": "agents/php-backend-developer/codex.toml"},

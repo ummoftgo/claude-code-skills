@@ -82,6 +82,7 @@ Windows 프로젝트 범위는 스킬과 에이전트만 설치합니다. Window
 | `web-browser-preview` | ✓ | ✓ | Windows/WSL Chrome CDP 미리보기 |
 | `report-output` | ✓ | ✓ | 리포트 출력 시 md/HTML 포맷 선택과 자체 완결형 HTML 리포트 생성 |
 | `codex-delegate` | ✓ | — | Claude에서 Codex로 위임 |
+| `readable-ids` | ✓ | ✓ | 짧은 식별자에 사람이 읽을 수 있는 표식 부여, `.uniqid/` 레지스트리 |
 
 ### 트리거 예시
 
@@ -94,6 +95,7 @@ Windows 프로젝트 범위는 스킬과 에이전트만 설치합니다. Window
 | “원인이 불명확한 오류를 분석하고 고쳐줘” | `systematic-debugging` |
 | “머지 전에 브랜치 리뷰해줘” | `branch-merge-review` |
 | “분석 결과를 리포트로 출력해줘” | `report-output` |
+| “이 발견들에 사람이 알아볼 표식을 붙여줘” | `readable-ids` |
 
 ### 리뷰 스킬 라우팅
 

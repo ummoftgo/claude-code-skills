@@ -497,3 +497,9 @@ Before finalizing, scan the consolidated sections (everything above the Appendix
 `report-output` owns path selection, name-collision avoidance, and atomic publishing — this skill never writes under `.tasks/reports/` itself. That single owner matters here because this skill runs parallel reviewers, so several report-shaped outputs can be in flight at once. If `report-output` is not installed, say so and keep the report inline rather than improvising a path.
 
 Follow the structure in `references/consolidated-report-template.md`.
+
+**Finding identifiers**: the report is read by a person and its blocking-items line asks them to
+decide, so `CH-1` alone is not enough. Invoke `readable-ids` if it is installed to register the
+finding identifiers and render them as `CH-1(feature/label)` on first mention. Without that skill,
+still write a short label beside each identifier — a later recheck refers to these findings by
+number across a different document, which is exactly where a bare number stops meaning anything.

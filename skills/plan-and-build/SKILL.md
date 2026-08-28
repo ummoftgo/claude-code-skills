@@ -119,6 +119,11 @@ SC-001 (verifies FR-001) — 검증: <observable, checkable method>
 - **Lifecycle:** never renumber and never reuse an identifier. A withdrawn requirement keeps its
   line with a `withdrawn` status instead of disappearing, and is excluded from missing-work
   counts — it is not an unbuilt requirement, so an audit must not report it as one.
+- **Readable form:** an identifier that reaches the user — in a plan summary, a status report, or
+  a question asking them to decide — needs a label a person can read. Invoke `readable-ids` if it
+  is installed to register the identifier and render it as `FR-001(feature/label)`. Without that
+  skill, keep a label beside every identifier in the plan itself; a bare `FR-001` in a sentence
+  costs the reader a document lookup that the writer could have spent one phrase avoiding.
 - Identifiers make gaps visible and give an audit an anchor to compare against `file:line`
   evidence. They do not make coverage mechanical — **do not claim "100% coverage"**; a `covers:`
   label is a starting point for judgement, not proof.

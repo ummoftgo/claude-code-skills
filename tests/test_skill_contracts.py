@@ -417,6 +417,101 @@ class SkillContractTest(SkillReadingMixin, unittest.TestCase):
         self.assertIn("runtime manifests", skill)
         self.assertIn("upstream synchronization", skill)
 
+    def readable_ids_body(self) -> str:
+        """skills/readable-ids/SKILL.md with its YAML frontmatter removed.
+
+        The frontmatter is stripped because the description restates the convention -
+        `.uniqid/`, `A1(feature/label)` - to route the model here in the first place.
+        Asserting against the whole file therefore passed while the *rules* below were
+        deleted, which is the one failure these contracts exist to catch: measured, a
+        mutation that removed the rendering sentence from the body left every assertion
+        green because the description still carried the same literal.
+
+        read_skill() is wrong here for the neighbouring reason. It appends the reference
+        documents, and references/registry-format.md legitimately repeats the path and
+        the status vocabulary; a rule deleted from the body would go on being satisfied
+        by the elaboration a model only reaches after following a pointer. What has to be
+        in the body is what the model must see *before* deciding to open anything.
+        """
+        body = self.read("skills/readable-ids/SKILL.md")
+        self.assertTrue(body.startswith("---\n"))
+        return body.split("\n---\n", 1)[1]
+
+    def test_readable_ids_defines_the_registry_and_rendering_contract(self) -> None:
+        skill = self.readable_ids_body()
+
+        # Registry shape and the closed status vocabulary (SC-001).
+        self.assertIn(".uniqid/{yyyy-mm-dd}-{slug}.md", skill)
+        for status in ("open", "in-progress", "done", "withdrawn"):
+            self.assertIn(f"`{status}`", skill)
+
+        # The rendering rule, and the constraint that keeps it readable (SC-002). The
+        # parenthesised form is the whole point of the skill, so it is pinned as the
+        # instruction that emits it rather than as a bare literal - the literal alone
+        # also appears in prose about the form.
+        self.assertIn("Write `A1(feature/label)`", skill)
+        self.assertIn("full form on the first mention", skill)
+
+        # The threshold that stops the registry filling with dead rows, and the label
+        # rules (SC-003). The slash ban matters because the slash is the separator.
+        for threshold in (
+            "another document will refer to it",
+            "outlives one session or one report",
+            "asked to decide something by that identifier",
+        ):
+            self.assertIn(threshold, skill)
+        self.assertIn("no `/`", skill)
+
+        # Lifecycle, sharing plan-and-build's vocabulary (SC-004).
+        self.assertIn("Never renumber and never reuse an identifier", skill)
+        self.assertIn("A published label is fixed", skill)
+
+    def test_identifier_emitting_skills_point_at_readable_ids(self) -> None:
+        """Every place that mints an identifier a person later reads must route here.
+
+        Checked against the emitting document rather than the skill bundle: the
+        consolidated report template and the handoff template are what a model has open
+        while it writes the identifier down, so the pointer has to be in those files and
+        not merely somewhere in their parent skill.
+
+        Both halves are required. Naming the skill routes a machine that has it
+        installed; carrying the rendered form `(feature/label)` is what keeps the
+        identifier readable on a machine that does not, which is the majority case for a
+        skill this repository has just added. An earlier version asserted the word
+        "label" instead and proved nothing - "feature/label" contains it, so the check
+        could not fail while the example was present.
+
+        For the consolidated report template this check is a floor, not the contract:
+        its real positions are pinned by
+        test_the_report_template_carries_the_readable_form_where_a_person_decides.
+        """
+        for relative_path in (
+            "skills/plan-and-build/SKILL.md",
+            "skills/branch-merge-review/SKILL.md",
+            "skills/branch-merge-review/references/consolidated-report-template.md",
+            "skills/evidence-first-review/SKILL.md",
+            "skills/report-output/SKILL.md",
+            "skills/safe-checkpoint/references/handoff-template.md",
+        ):
+            with self.subTest(relative_path=relative_path):
+                document = self.read(relative_path)
+                self.assertIn("readable-ids", document)
+                self.assertIn("(feature/label)", document)
+
+    def test_the_report_template_carries_the_readable_form_where_a_person_decides(
+        self,
+    ) -> None:
+        template = self.read(
+            "skills/branch-merge-review/references/consolidated-report-template.md"
+        )
+        # The blocking-items line *is* the decision request, and each finding heading is
+        # the definition site a later recheck refers back to. Both are pinned; the bare
+        # spellings they replaced must not come back.
+        self.assertIn("**Blocking items**: [CH-1(feature/label)", template)
+        self.assertIn("### [CH-1(feature/label)]", template)
+        self.assertNotIn("**Blocking items**: [CH-1,", template)
+        self.assertNotIn("### [CH-1] ", template)
+
     def test_new_skills_have_only_the_approved_files(self) -> None:
         expected = {
             "evidence-first-review": {
@@ -428,6 +523,11 @@ class SkillContractTest(SkillReadingMixin, unittest.TestCase):
                 "SKILL.md",
                 "agents/openai.yaml",
                 "references/handoff-template.md",
+            },
+            "readable-ids": {
+                "SKILL.md",
+                "agents/openai.yaml",
+                "references/registry-format.md",
             },
         }
         for skill_name, expected_files in expected.items():
@@ -443,7 +543,7 @@ class SkillContractTest(SkillReadingMixin, unittest.TestCase):
                 self.assertEqual(actual_files, expected_files)
 
     def test_new_skills_have_direct_default_prompts(self) -> None:
-        for skill_name in ("evidence-first-review", "safe-checkpoint"):
+        for skill_name in ("evidence-first-review", "safe-checkpoint", "readable-ids"):
             with self.subTest(skill_name=skill_name):
                 metadata = self.read(f"skills/{skill_name}/agents/openai.yaml")
                 self.assertIn(f"${skill_name}", metadata)
@@ -453,7 +553,7 @@ class SkillContractTest(SkillReadingMixin, unittest.TestCase):
         install = self.read("install.sh")
         uninstall = self.read("uninstall.sh")
 
-        for skill_name in ("evidence-first-review", "safe-checkpoint"):
+        for skill_name in ("evidence-first-review", "safe-checkpoint", "readable-ids"):
             with self.subTest(skill_name=skill_name):
                 matches = [
                     component

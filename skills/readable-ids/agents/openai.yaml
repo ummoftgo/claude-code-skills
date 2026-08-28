@@ -1,0 +1,4 @@
+interface:
+  display_name: "Readable Identifiers"
+  short_description: "Give short work identifiers a human-readable label"
+  default_prompt: "Use $readable-ids to register these identifiers and report them in readable form."
