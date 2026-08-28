@@ -174,8 +174,9 @@ HTML_ELEMENTS = {
     "s", "samp", "script", "search", "section", "select", "slot", "small", "span",
     "strong", "style", "sub", "summary", "sup", "table", "tbody", "td", "template",
     "textarea", "tfoot", "th", "thead", "time", "title", "tr", "u", "ul", "var",
+    "video", "audio", "svg", "math", "iframe", "frame", "frameset", "marquee",
 }
-HTML_TAG = re.compile(r"</?(?P<name>[a-zA-Z][\w-]*)(?:\s[^>]*)?/?>")
+HTML_TAG = re.compile(r"</?(?P<name>[a-zA-Z][\w-]*)(?P<attrs>\s[^>]*)?/?>")
 
 # An inline code span. `` `<script>` `` is prose *about* a tag, not a tag - report-output
 # discusses one while explaining CSP hashes - and counting it as markup made a document
@@ -184,13 +185,36 @@ INLINE_CODE = re.compile(r"`[^`\n]*`")
 
 
 def raw_html_elements(text: str) -> list[str]:
-    """HTML element names appearing as markup in `text`, outside inline code."""
+    """Tag-shaped markup in `text`, outside inline code.
+
+    Structural first, name list second. An allowlist of element names alone was itself a
+    fail-open: `<video hidden>` and any custom element (`<my-widget>`) were absent from
+    it and sailed through the "no HTML" invariant, which is not a question of HTML
+    semantics but of the ban not being applied.
+
+    So a token counts as markup when it is *shaped* like a tag - a closing tag, a
+    self-closing tag, one carrying attributes, or a hyphenated custom-element name -
+    whatever its name. The name list then catches the remaining case, a bare well-known
+    element like `<div>`.
+
+    What stays legal is the one shape this repository actually writes: a bare
+    angle-bracketed metavariable in prose, `<path>` or `<SHA>`, with no attributes, no
+    slash, and no hyphen.
+    """
     masked = INLINE_CODE.sub(lambda m: " " * len(m.group(0)), text)
-    return [
-        match.group("name").lower()
-        for match in HTML_TAG.finditer(masked)
-        if match.group("name").lower() in HTML_ELEMENTS
-    ]
+    found = []
+    for match in HTML_TAG.finditer(masked):
+        name = match.group("name").lower()
+        tag = match.group(0)
+        structural = (
+            tag.startswith("</")
+            or tag.endswith("/>")
+            or bool((match.group("attrs") or "").strip())
+            or "-" in name
+        )
+        if structural or name in HTML_ELEMENTS:
+            found.append(name)
+    return found
 
 
 def assert_not_hidden(test, text: str, needle: str, label: str) -> None:
@@ -209,7 +233,10 @@ def assert_not_hidden(test, text: str, needle: str, label: str) -> None:
     a reader sees a code sample. Whitespace normalisation in block_containing() erases
     exactly that difference, which is why the raw line is looked at here.
     """
-    elements = raw_html_elements(text)
+    # instructional_text() first: a fenced block renders as code and hides nothing, and
+    # the templates inside these documents legitimately carry multi-word metavariables
+    # (`<observable completed outcome>`) that are tag-shaped only by accident.
+    elements = raw_html_elements(instructional_text(text))
     test.assertEqual(elements, [], f"{label} contains raw HTML: {sorted(set(elements))}")
 
     index = text.find(needle)
@@ -378,6 +405,24 @@ def fenced_blocks(markdown: str) -> list[str]:
     if current is not None:                      # unterminated fence: keep what we saw
         blocks.append("\n".join(current))
     return blocks
+
+
+def _split_unescaped(text: str, separator: str) -> list[str]:
+    """Split `text` on `separator`, honouring backslash parity.
+
+    A separator is escaped only when preceded by an *odd* run of backslashes: in
+    `a\\\\|b` the `\\\\` escapes itself and the pipe is a real cell boundary.
+    """
+    parts, current, backslashes = [], [], 0
+    for character in text:
+        if character == separator and backslashes % 2 == 0:
+            parts.append("".join(current))
+            current = []
+        else:
+            current.append(character)
+        backslashes = backslashes + 1 if character == "\\" else 0
+    parts.append("".join(current))
+    return parts
 
 
 def reference_links(markdown: str) -> list[str]:
@@ -786,6 +831,12 @@ class SkillContractTest(SkillReadingMixin, unittest.TestCase):
 
     def test_readable_ids_defines_the_registry_and_rendering_contract(self) -> None:
         skill = self.readable_ids_body()
+
+        # The document that states the convention is subject to it: wrapping one of the
+        # pinned rules below in `<div hidden>` passed every assertion here while the rule
+        # left the rendered page.
+        elements = raw_html_elements(skill)
+        self.assertEqual(elements, [], f"raw HTML in readable-ids: {sorted(set(elements))}")
 
         # Registry shape and the closed status vocabulary (SC-001). Pinned as a whole
         # sentence: the location of the registry is the contract, and an equality check
@@ -1728,9 +1779,16 @@ class InstructionSenseHelperTest(SkillReadingMixin, unittest.TestCase):
         Cheap to check, exact, and stronger than "no hiding ancestor" for these files -
         an element that is not there cannot hide anything, whatever HTML says about it.
         """
-        for relative_path in EMITTING_CONTRACT_BLOCKS:
+        documents = list(EMITTING_CONTRACT_BLOCKS) + [
+            # The skill that owns the convention was missing from this sweep: its own
+            # pinned rules had no HTML check at all, and wrapping one in `<div hidden>`
+            # passed. The invariant has to cover the document it is stated in.
+            "skills/readable-ids/SKILL.md",
+            "skills/readable-ids/references/registry-format.md",
+        ]
+        for relative_path in documents:
             with self.subTest(relative_path=relative_path):
-                elements = raw_html_elements(self.read(relative_path))
+                elements = raw_html_elements(instructional_text(self.read(relative_path)))
                 self.assertEqual(elements, [], f"raw HTML: {sorted(set(elements))}")
 
     def test_a_table_opens_only_on_a_header_and_a_matching_separator(self) -> None:
@@ -1837,7 +1895,11 @@ class UniqidRegistryTest(unittest.TestCase):
     # An unescaped pipe. `\|` is Markdown's literal pipe inside a table cell, so a naive
     # split() saw a legitimate description as an extra column - and, before the row
     # shape was enforced, silently dropped that row and any collision it carried.
-    CELL_SPLIT = re.compile(r"(?<!\\)\|")
+    # Split on unescaped pipes. `(?<!\\)\|` was wrong for `a\\\\|b`: the `\\\\` is an
+    # escaped *backslash*, so the pipe that follows is a real separator - Markdown
+    # renders it as one - while the lookbehind saw a backslash and skipped it. Two
+    # labels differing only there were stored as distinct keys and rendered identically.
+    CELL_SPLIT = staticmethod(lambda cells: _split_unescaped(cells, "|"))
     FILE_NAME = re.compile(r"^\d{4}-\d{2}-\d{2}-[a-z0-9]+(?:-[a-z0-9]+)*\.md$")
     FEATURE = re.compile(r"(?m)^feature: (\S+)$")
     # Anything that *looks* like a feature declaration to a reader. Wider than FEATURE on
@@ -1950,7 +2012,7 @@ class UniqidRegistryTest(unittest.TestCase):
             )
             match = self.ROW.match(stripped)
             self.assertIsNotNone(match, f"malformed table line: {stripped}")
-            cells = [cell.strip() for cell in self.CELL_SPLIT.split(match.group("cells"))]
+            cells = [cell.strip() for cell in _split_unescaped(match.group("cells"), "|")]
             self.assertEqual(len(cells), 4, f"expected four columns: {stripped}")
             self.assertTrue(cells[0], f"row with no identifier: {stripped}")
             found.append(cells)
