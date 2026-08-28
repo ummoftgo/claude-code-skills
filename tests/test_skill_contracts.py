@@ -145,148 +145,76 @@ HTML_COMMENT_PATTERN = re.compile(r"<!--.*?-->", re.DOTALL)
 CODE_FENCE_PATTERN = re.compile(r"(?P<fence>`{3,}|~{3,})(?P<info>.*)$")
 
 
-# HTML elements whose contents a reader does not see, or sees only after acting.
+# HTML elements that can wrap content, and therefore hide it. A closed list, because
+# what it guards is a closed question: may these documents contain raw HTML at all?
 #
-# This is a *finite* structural check, unlike verifying that no earlier prose disclaims
-# what follows: there is a fixed list of ways HTML hides an element, and a document using
-# none of them cannot hide anything this way.
-HIDING_TAGS = {"template", "script", "style", "details"}
-# One HTML attribute: a name, and optionally a quoted or bare value.
-HTML_ATTRIBUTE = re.compile(
-    r"""(?P<name>[\w:-]+)(?:\s*=\s*(?P<value>"[^"]*"|'[^']*'|[^\s>]+))?"""
-)
-
-
-def has_attribute(attrs: str, wanted: str) -> bool:
-    """Whether `attrs` declares `wanted`, as an attribute rather than as a value.
-
-    `<details class="x open y">` is closed; searching the raw attribute string for the
-    word `open` said otherwise.
-    """
-    return any(
-        match.group("name").lower() == wanted for match in HTML_ATTRIBUTE.finditer(attrs)
-    )
-
-
-def hides_by_attribute(attrs: str) -> bool:
-    """Whether `attrs` makes its element invisible.
-
-    Attributes are parsed rather than searched. A substring test for `hidden` reported
-    `aria-hidden="false"`, `data-hidden="false"`, and `class="not-hidden"` as hiding -
-    all three are ordinary markup, all three rejected a visible contract, and a checker
-    that fires on those gets deleted rather than fixed.
-
-    **Inline CSS is deliberately not interpreted.** A `style` heuristic was tried and
-    every version of it was wrong in both directions at once: `/* display:none */` in a
-    comment and `display:none;display:block` were called hidden, `display:none-block`
-    was an invalid value read as valid, and `visibility:hidden` - a real way to hide -
-    was missed. Getting those right means implementing a CSS parser inside a contract
-    test, which is more machinery than the thing it protects. What is checked instead is
-    the small closed set HTML defines exactly: the `hidden` attribute, `aria-hidden`,
-    and the element names in HIDING_TAGS. Inline CSS in a skill document is out of scope
-    and is stated as such rather than half-handled.
-    """
-    for match in HTML_ATTRIBUTE.finditer(attrs):
-        name = match.group("name").lower()
-        value = (match.group("value") or "").strip("\"'").strip().lower()
-        if name == "hidden":
-            # A boolean attribute: its *presence* hides the element. `hidden="false"`
-            # is still hidden - HTML has no way to say "hidden, but not really".
-            return True
-        if name == "aria-hidden" and value == "true":
-            return True
-    return False
-# The attribute run is quote-aware: `<div title="a > b" hidden>` used to be cut at the
-# `>` inside the title, so the `hidden` that followed was never seen.
-HTML_TAG = re.compile(
-    r"""<(?P<close>/?)(?P<name>[a-zA-Z][\w-]*)"""
-    r"""(?P<attrs>(?:"[^"]*"|'[^']*'|[^>"'])*?)(?P<self>/?)>"""
-)
-# Elements that never have contents, so they never open a container.
-VOID_TAGS = {
-    "area", "base", "br", "col", "embed", "hr", "img", "input",
-    "link", "meta", "param", "source", "track", "wbr",
+# The answer is no, and that is why this list replaced ninety lines of machinery. An
+# earlier version tracked HTML ancestry - a tag stack, `hidden`/`aria-hidden` parsing,
+# `<details open>`, `<summary>` exemptions, quoted `>` inside attributes - and every
+# round of review found another way through it: `<div hidden><details><summary>`,
+# `<details open hidden>`, `<details class="x open y">`, `style="/* display:none */"`.
+# All of it existed to catch a rule wrapped in a hiding element.
+#
+# Measured, none of the seven pinned documents contains a single HTML tag. So the
+# invariant worth checking is not "no *hiding* ancestor", which needs a model of HTML
+# semantics to decide and was wrong in both directions at every size - it is "no HTML",
+# which here is stronger, exact, and has nothing to walk around. A prose placeholder
+# like `<path>` is not an element name and stays legal.
+#
+# Adding an element to this set is a one-word edit. Wanting one of them inside a pinned
+# document is the signal to reconsider the rule, not to widen the parser.
+HTML_ELEMENTS = {
+    "a", "abbr", "address", "article", "aside", "b", "blockquote", "body", "button",
+    "canvas", "caption", "cite", "code", "colgroup", "data", "datalist", "dd",
+    "details", "dfn", "dialog", "div", "dl", "dt", "em", "fieldset", "figcaption",
+    "figure", "footer", "form", "h1", "h2", "h3", "h4", "h5", "h6", "head", "header",
+    "hgroup", "html", "i", "iframe", "ins", "kbd", "label", "legend", "li", "main",
+    "map", "mark", "menu", "meter", "nav", "noscript", "object", "ol", "optgroup",
+    "option", "output", "p", "picture", "pre", "progress", "q", "rp", "rt", "ruby",
+    "s", "samp", "script", "search", "section", "select", "slot", "small", "span",
+    "strong", "style", "sub", "summary", "sup", "table", "tbody", "td", "template",
+    "textarea", "tfoot", "th", "thead", "time", "title", "tr", "u", "ul", "var",
 }
+HTML_TAG = re.compile(r"</?(?P<name>[a-zA-Z][\w-]*)(?:\s[^>]*)?/?>")
 
 # An inline code span. `` `<script>` `` is prose *about* a tag, not a tag - report-output
-# discusses one while explaining CSP hashes - and counting it as a container made a
-# document that hides nothing fail. Only markup outside code spans can hide anything.
+# discusses one while explaining CSP hashes - and counting it as markup made a document
+# that contains no HTML fail.
 INLINE_CODE = re.compile(r"`[^`\n]*`")
 
 
-def hiding_ancestors(markup: str) -> list[str]:
-    """The hiding elements still open at the end of `markup`.
-
-    A real tag stack, not a count. Subtracting every closer from every opener was the
-    first attempt and it was wrong in both directions: an ordinary `<div>…</div>`
-    earlier in the document cancelled a later `<details>`, and a *closed*
-    `<span aria-hidden="true">…</span>` made everything after it look hidden.
-
-    Two element-specific rules, both narrower than they first were:
-
-    * `<details>` hides its contents unless it carries `open` - and `open` is read from
-      the parsed attributes, because searching the raw string for the word matched
-      `class="x open y"`. Its own `hidden` attribute still counts, so
-      `<details open hidden>` hides.
-    * A `<summary>` is the click target and renders even when its `<details>` is
-      collapsed. It therefore cancels *that one* `<details>` and nothing else: an
-      earlier blanket "a summary means visible" let `<div hidden><details><summary>`
-      report nothing hidden, which is the opposite of true.
-    """
-    stack: list[tuple[str, bool]] = []
-    for match in HTML_TAG.finditer(markup):
-        name = match.group("name").lower()
-        if match.group("close"):
-            for index in range(len(stack) - 1, -1, -1):
-                if stack[index][0] == name:
-                    del stack[index:]
-                    break
-            continue
-        if match.group("self") or name in VOID_TAGS:
-            continue
-        attrs = match.group("attrs")
-        hides = hides_by_attribute(attrs)
-        if name == "details":
-            hides = hides or not has_attribute(attrs, "open")
-        elif name in HIDING_TAGS:
-            hides = True
-        stack.append((name, hides))
-
-    exempt = set()
-    for index, (name, _) in enumerate(stack):
-        if name != "summary":
-            continue
-        for below in range(index - 1, -1, -1):        # the details this summary opens
-            if stack[below][0] == "details":
-                exempt.add(below)
-                break
-    return [name for index, (name, hides) in enumerate(stack) if hides and index not in exempt]
+def raw_html_elements(text: str) -> list[str]:
+    """HTML element names appearing as markup in `text`, outside inline code."""
+    masked = INLINE_CODE.sub(lambda m: " " * len(m.group(0)), text)
+    return [
+        match.group("name").lower()
+        for match in HTML_TAG.finditer(masked)
+        if match.group("name").lower() in HTML_ELEMENTS
+    ]
 
 
 def assert_not_hidden(test, text: str, needle: str, label: str) -> None:
-    """`needle` is not inside a hiding element, and is not indented into a code block.
+    """`needle` is not hidden from a reader: no HTML in the document, no code indent.
 
-    Scoped to the ancestry of `needle` rather than to the whole document: a file may
-    legitimately *mention* `<script>` - report-output does, explaining CSP hashes - and
-    rejecting the file for that is a false positive that gets the check deleted.
+    Two ways a pinned instruction can be present in the file and absent from the page,
+    and both come out of ordinary editing rather than disguise.
 
-    The indentation half is here for the same reason the template check has one. Four
-    spaces or a tab makes a line an indented code block in CommonMark, so a re-indented
-    instruction still reads as an instruction to a substring check while a reader sees a
-    code sample. Whitespace normalisation in block_containing() erases exactly that
-    difference, which is why the raw line has to be looked at separately.
+    HTML: an element wrapping the rule satisfies every equality assertion while the rule
+    vanishes from the rendered document. Rather than model which elements hide - six
+    rounds of review kept finding another way through that model - these documents
+    simply may not contain HTML, which measurably they do not.
+
+    Indentation: four spaces or a tab makes a line an indented code block in CommonMark,
+    so a re-indented instruction still reads as an instruction to a substring check while
+    a reader sees a code sample. Whitespace normalisation in block_containing() erases
+    exactly that difference, which is why the raw line is looked at here.
     """
-    # Masked, not stripped: offsets have to keep matching the original, because the
-    # needle itself normally *is* inside a code span (`FR-001(feature/label)`). Only the
-    # tags inside spans are neutralised, and every character keeps its position.
-    masked = INLINE_CODE.sub(lambda m: " " * len(m.group(0)), text)
+    elements = raw_html_elements(text)
+    test.assertEqual(elements, [], f"{label} contains raw HTML: {sorted(set(elements))}")
+
     index = text.find(needle)
     test.assertNotEqual(index, -1, f"{label}: {needle!r} not found")
     while index != -1:
-        hidden = hiding_ancestors(masked[:index])
-        test.assertEqual(
-            hidden, [], f"{label}: {needle!r} sits inside {hidden}"
-        )
         line_start = text.rfind("\n", 0, index) + 1
         line = text[line_start : text.find("\n", index)]
         test.assertRegex(
@@ -1042,13 +970,10 @@ class SkillContractTest(SkillReadingMixin, unittest.TestCase):
         # A container that hides its contents from the reader would let the pinned lines
         # live somewhere no one sees while the visible template reverted. Codex did
         # exactly that with a multi-line `<template>`, and then again with `<div hidden>`.
+        elements = raw_html_elements(template)
         self.assertEqual(
-            hiding_ancestors(INLINE_CODE.sub(lambda m: " " * len(m.group(0)), template)),
-            [],
-            "report template leaves a hiding element open",
+            elements, [], f"report template contains raw HTML: {sorted(set(elements))}"
         )
-        for tag in HIDING_TAGS:
-            self.assertNotRegex(template, rf"(?i)<\s*{tag}\b")
 
         # A nested fence turns everything after it into a code sample rather than part
         # of the template. The outer fence is ```, so a ~~~ or a longer ``` run inside it
@@ -1772,46 +1697,41 @@ class InstructionSenseHelperTest(SkillReadingMixin, unittest.TestCase):
         markdown = "```\nkept\n```not-a-close\nalso kept\n```\n"
         self.assertEqual(fenced_blocks(markdown), ["kept\n```not-a-close\nalso kept"])
 
-    def test_hiding_ancestors_matches_what_html_actually_hides(self) -> None:
-        """Both directions, because every earlier version was wrong in both.
+    def test_raw_html_is_detected_and_prose_placeholders_are_not(self) -> None:
+        """Both directions, because the check it replaced was wrong in both.
 
-        Codex found each of these by construction; they are pinned here so a later
-        tightening of the checker cannot quietly reintroduce one.
+        The false-positive half matters as much as the other: a checker that rejects
+        `<path>` in prose, or a mention of `<script>` inside backticks, gets deleted
+        rather than fixed. report-output legitimately discusses a script tag.
         """
-        hides = {
-            "<template>": ["template"],
-            "<script>": ["script"],
-            "<details>": ["details"],
-            '<div hidden>': ["div"],
-            '<div hidden="false">': ["div"],        # boolean attribute: presence hides
-            '<div aria-hidden="true">': ["div"],
-            '<div title="a > b" hidden>': ["div"],  # quoted `>` does not end the tag
-            "<details><summary>t</summary>": ["details"],
-            "<details open hidden>": ["details"],   # `open` does not undo `hidden`
-            '<details class="x open y">': ["details"],   # a value is not an attribute
-            # A summary cancels *its own* details and nothing above it.
-            "<div hidden><details><summary>": ["div"],
-            "<template><details><summary>": ["template"],
-        }
-        shows = (
-            "<details open>",                       # renders expanded
-            "<details><summary>",                   # the summary is the click target
-            '<div aria-hidden="false">',
-            '<div data-hidden="false">',
-            '<div class="not-hidden">',
-            '<div style="display:none">',           # inline CSS is out of scope, stated
-            "<div>visible</div>\n<div>",             # a closed div cancels nothing
-            '<span aria-hidden="true">x</span>',    # closed: no longer an ancestor
-            "<br>\n<img src=x>",                    # void elements open nothing
-            '<span aria-hidden="true"/>',           # self-closing opens nothing
-            "<details><div>a</div></details>",      # popped by name
-        )
-        for markup, expected in hides.items():
+        for markup in (
+            "<div>", "</div>", "<details>", "<details open>", "<template>",
+            "<script>", "<span hidden>", '<div title="a > b" hidden>', "<summary>",
+        ):
             with self.subTest(markup=markup):
-                self.assertEqual(hiding_ancestors(markup), expected)
-        for markup in shows:
-            with self.subTest(markup=markup):
-                self.assertEqual(hiding_ancestors(markup), [])
+                self.assertNotEqual(raw_html_elements(markup), [])
+
+        for prose in (
+            "`<script>` inside a code span",
+            "`.tasks/handoffs/YYYY-MM-DD-{slug}.md`",
+            "the file at <path> is a placeholder",
+            "review the diff for <SHA>",
+            "a < b and c > d",
+            "",
+        ):
+            with self.subTest(prose=prose):
+                self.assertEqual(raw_html_elements(prose), [])
+
+    def test_the_pinned_documents_contain_no_html_at_all(self) -> None:
+        """The invariant the ancestry model was standing in for, stated directly.
+
+        Cheap to check, exact, and stronger than "no hiding ancestor" for these files -
+        an element that is not there cannot hide anything, whatever HTML says about it.
+        """
+        for relative_path in EMITTING_CONTRACT_BLOCKS:
+            with self.subTest(relative_path=relative_path):
+                elements = raw_html_elements(self.read(relative_path))
+                self.assertEqual(elements, [], f"raw HTML: {sorted(set(elements))}")
 
     def test_a_table_opens_only_on_a_header_and_a_matching_separator(self) -> None:
         """Each half was a fail-open alone; both are required together.
