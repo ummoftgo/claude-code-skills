@@ -151,9 +151,30 @@ CODE_FENCE_PATTERN = re.compile(r"(?P<fence>`{3,}|~{3,})(?P<info>.*)$")
 # what follows: there is a fixed list of ways HTML hides an element, and a document using
 # none of them cannot hide anything this way.
 HIDING_TAGS = {"template", "script", "style", "details", "summary"}
-HIDING_ATTRIBUTES = re.compile(
-    r"(?i)\bhidden\b|\baria-hidden\s*=\s*[\"']?true|\bstyle\s*=\s*[\"'][^\"']*display\s*:\s*none"
+# One HTML attribute: a name, and optionally a quoted or bare value.
+HTML_ATTRIBUTE = re.compile(
+    r"""(?P<name>[\w:-]+)(?:\s*=\s*(?P<value>"[^"]*"|'[^']*'|[^\s>]+))?"""
 )
+
+
+def hides_by_attribute(attrs: str) -> bool:
+    """Whether `attrs` makes its element invisible.
+
+    Attributes are parsed rather than searched. A substring test for `hidden` reported
+    `aria-hidden="false"`, `data-hidden="false"`, and `class="not-hidden"` as hiding -
+    all three are ordinary markup, all three rejected a visible contract, and a checker
+    that fires on those gets deleted rather than fixed.
+    """
+    for match in HTML_ATTRIBUTE.finditer(attrs):
+        name = match.group("name").lower()
+        value = (match.group("value") or "").strip("\"'").strip().lower()
+        if name == "hidden" and value != "false":
+            return True                       # boolean attribute; bare or any value
+        if name == "aria-hidden" and value == "true":
+            return True
+        if name == "style" and re.search(r"display\s*:\s*none", value):
+            return True
+    return False
 HTML_TAG = re.compile(r"<(?P<close>/?)(?P<name>[a-zA-Z][\w-]*)(?P<attrs>[^>]*?)(?P<self>/?)>")
 # Elements that never have contents, so they never open a container.
 VOID_TAGS = {
@@ -187,7 +208,7 @@ def hiding_ancestors(markup: str) -> list[str]:
             continue
         if match.group("self") or name in VOID_TAGS:
             continue
-        hides = name in HIDING_TAGS or bool(HIDING_ATTRIBUTES.search(match.group("attrs")))
+        hides = name in HIDING_TAGS or hides_by_attribute(match.group("attrs"))
         stack.append((name, hides))
     return [name for name, hides in stack if hides]
 
@@ -1771,15 +1792,8 @@ class UniqidRegistryTest(unittest.TestCase):
     # declarations by the strict pattern and so passed silently, while a person reading
     # the file sees two.
     FEATURE_LINE = re.compile(r"(?mi)^\s*feature\s*:")
-    # A line a reader would take for a table row. Three shapes, all of which used to be
-    # skipped in silence rather than checked:
-    #   * the canonical `| a | b |`;
-    #   * `｜ a ｜ b ｜`, where U+FF5C is not a Markdown separator at all;
-    #   * `a | b | c | d`, which Markdown accepts with the outer pipes omitted and which
-    #     an ordinary edit produces.
-    # Anything matching is required below to be the canonical shape, so a row can be
-    # wrong about its format but never invisible to the checks.
-    TABLE_LIKE = re.compile(r"^[|\uff5c]|^[^|\n]*(?:(?<!\\)[|\uff5c][^|\n]*){3,}$")
+    # The separator row that opens a Markdown table body.
+    SEPARATOR = re.compile(r"^\|?\s*:?-{2,}:?\s*(?:\|\s*:?-{2,}:?\s*)*\|?$")
 
     def registries(self) -> list[tuple[Path, str]]:
         """Every file under `.uniqid/`, at any depth, with its name checked.
@@ -1830,21 +1844,32 @@ class UniqidRegistryTest(unittest.TestCase):
         part of the table and has to be a header, a separator, or a four-cell row.
         """
         found = []
+        in_body = False
         for line in text.splitlines():
             stripped = line.strip()
-            if not self.TABLE_LIKE.match(stripped):
+            if not stripped:
+                in_body = False                          # a blank line ends the table
                 continue
+            if not in_body:
+                if self.SEPARATOR.match(stripped):
+                    in_body = True                       # the row after `|---|` opens it
+                continue
+
+            # Structural, not pipe-counting. Deciding "is this a row?" by how many
+            # unescaped pipes a line holds meant a legitimate `\|` inside a description
+            # dropped the count below the threshold and the row vanished - taking its
+            # status, its label, and any collision it carried with it. Between the
+            # separator and the next blank line, every line *is* a row, whatever it
+            # looks like, and a row that is not canonical fails rather than disappears.
             self.assertTrue(
                 stripped.startswith("|") and stripped.endswith("|"),
-                "a table row must open and close with an ASCII pipe, or the checks "
-                f"below never see it: {stripped}",
+                "a table row must open and close with an ASCII pipe: "
+                f"{stripped}",
             )
             match = self.ROW.match(stripped)
             self.assertIsNotNone(match, f"malformed table line: {stripped}")
             cells = [cell.strip() for cell in self.CELL_SPLIT.split(match.group("cells"))]
             self.assertEqual(len(cells), 4, f"expected four columns: {stripped}")
-            if cells[0] == "ID" or set(cells[0]) <= set("-: "):
-                continue                                  # header and separator rows
             self.assertTrue(cells[0], f"row with no identifier: {stripped}")
             found.append(cells)
         self.assertTrue(found, "registry has no data rows")
