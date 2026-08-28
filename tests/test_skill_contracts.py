@@ -150,7 +150,7 @@ CODE_FENCE_PATTERN = re.compile(r"(?P<fence>`{3,}|~{3,})(?P<info>.*)$")
 # This is a *finite* structural check, unlike verifying that no earlier prose disclaims
 # what follows: there is a fixed list of ways HTML hides an element, and a document using
 # none of them cannot hide anything this way.
-HIDING_TAGS = {"template", "script", "style", "details", "summary"}
+HIDING_TAGS = {"template", "script", "style", "details"}
 # One HTML attribute: a name, and optionally a quoted or bare value.
 HTML_ATTRIBUTE = re.compile(
     r"""(?P<name>[\w:-]+)(?:\s*=\s*(?P<value>"[^"]*"|'[^']*'|[^\s>]+))?"""
@@ -164,20 +164,25 @@ def hides_by_attribute(attrs: str) -> bool:
     `aria-hidden="false"`, `data-hidden="false"`, and `class="not-hidden"` as hiding -
     all three are ordinary markup, all three rejected a visible contract, and a checker
     that fires on those gets deleted rather than fixed.
+
+    **Inline CSS is deliberately not interpreted.** A `style` heuristic was tried and
+    every version of it was wrong in both directions at once: `/* display:none */` in a
+    comment and `display:none;display:block` were called hidden, `display:none-block`
+    was an invalid value read as valid, and `visibility:hidden` - a real way to hide -
+    was missed. Getting those right means implementing a CSS parser inside a contract
+    test, which is more machinery than the thing it protects. What is checked instead is
+    the small closed set HTML defines exactly: the `hidden` attribute, `aria-hidden`,
+    and the element names in HIDING_TAGS. Inline CSS in a skill document is out of scope
+    and is stated as such rather than half-handled.
     """
     for match in HTML_ATTRIBUTE.finditer(attrs):
         name = match.group("name").lower()
         value = (match.group("value") or "").strip("\"'").strip().lower()
         if name == "hidden":
             # A boolean attribute: its *presence* hides the element. `hidden="false"`
-            # is still hidden - HTML has no way to say "hidden, but not really" - so
-            # excusing that value was wrong in the direction that matters.
+            # is still hidden - HTML has no way to say "hidden, but not really".
             return True
         if name == "aria-hidden" and value == "true":
-            return True
-        # `--display: none` is a custom property that sets nothing; only the real
-        # `display` declaration hides.
-        if name == "style" and re.search(r"(?:^|[;{\s])display\s*:\s*none", value):
             return True
     return False
 # The attribute run is quote-aware: `<div title="a > b" hidden>` used to be cut at the
@@ -218,8 +223,20 @@ def hiding_ancestors(markup: str) -> list[str]:
             continue
         if match.group("self") or name in VOID_TAGS:
             continue
-        hides = name in HIDING_TAGS or hides_by_attribute(match.group("attrs"))
+        attrs = match.group("attrs")
+        if name == "details":
+            # `<details open>` renders expanded, so its contents are visible. Treating
+            # every `<details>` as hiding rejected an ordinary collapsible section.
+            hides = not re.search(r"(?i)(?:^|\s)open(?:\s|=|$)", attrs)
+        elif name == "summary":
+            hides = False                     # handled by the stack check below
+        else:
+            hides = name in HIDING_TAGS or hides_by_attribute(attrs)
         stack.append((name, hides))
+    # A `<summary>` renders even when its `<details>` is collapsed - it is the thing you
+    # click - so text inside one is visible regardless of the ancestor.
+    if any(name == "summary" for name, _ in stack):
+        return []
     return [name for name, hides in stack if hides]
 
 
@@ -1732,6 +1749,53 @@ class InstructionSenseHelperTest(SkillReadingMixin, unittest.TestCase):
         markdown = "```\nkept\n```not-a-close\nalso kept\n```\n"
         self.assertEqual(fenced_blocks(markdown), ["kept\n```not-a-close\nalso kept"])
 
+    def test_hiding_ancestors_matches_what_html_actually_hides(self) -> None:
+        """Both directions, because every earlier version was wrong in both.
+
+        Codex found each of these by construction; they are pinned here so a later
+        tightening of the checker cannot quietly reintroduce one.
+        """
+        hides = {
+            "<template>": ["template"],
+            "<script>": ["script"],
+            "<details>": ["details"],
+            '<div hidden>': ["div"],
+            '<div hidden="false">': ["div"],        # boolean attribute: presence hides
+            '<div aria-hidden="true">': ["div"],
+            '<div title="a > b" hidden>': ["div"],  # quoted `>` does not end the tag
+            "<details><summary>t</summary>": ["details"],
+        }
+        shows = (
+            "<details open>",                       # renders expanded
+            "<details><summary>",                   # the summary is the click target
+            '<div aria-hidden="false">',
+            '<div data-hidden="false">',
+            '<div class="not-hidden">',
+            '<div style="display:none">',           # inline CSS is out of scope, stated
+            "<div>visible</div>\n<div>",             # a closed div cancels nothing
+            '<span aria-hidden="true">x</span>',    # closed: no longer an ancestor
+            "<br>\n<img src=x>",                    # void elements open nothing
+            '<span aria-hidden="true"/>',           # self-closing opens nothing
+            "<details><div>a</div></details>",      # popped by name
+        )
+        for markup, expected in hides.items():
+            with self.subTest(markup=markup):
+                self.assertEqual(hiding_ancestors(markup), expected)
+        for markup in shows:
+            with self.subTest(markup=markup):
+                self.assertEqual(hiding_ancestors(markup), [])
+
+    def test_the_table_separator_is_not_a_thematic_break(self) -> None:
+        separator = UniqidRegistryTest.SEPARATOR
+        for line in ("|---|---|", "| --- | --- |", "---|---", "| :--- | ---: |"):
+            with self.subTest(line=line):
+                self.assertRegex(line, separator)
+        # A bare run of dashes is a horizontal rule and a frontmatter fence. Reading one
+        # as a table separator turned every following paragraph into a malformed row.
+        for line in ("---", "----", "- - -", ": --- :", ""):
+            with self.subTest(line=line):
+                self.assertNotRegex(line, separator)
+
     def test_assert_positive_instruction_rejects_an_inverted_sentence(self) -> None:
         with self.assertRaises(AssertionError) as caught:
             self.assertPositiveInstruction(
@@ -1791,6 +1855,7 @@ class UniqidRegistryTest(unittest.TestCase):
 
     STATUSES = {"open", "in-progress", "done", "withdrawn"}
     ROW = re.compile(r"^\|(?P<cells>.*)\|\s*$")
+    HEADER = "| ID | 읽을 수 있는 표식 | 한 줄 설명 | 상태 |"
     # An unescaped pipe. `\|` is Markdown's literal pipe inside a table cell, so a naive
     # split() saw a legitimate description as an extra column - and, before the row
     # shape was enforced, silently dropped that row and any collision it carried.
@@ -1867,13 +1932,24 @@ class UniqidRegistryTest(unittest.TestCase):
                     in_body = True                       # the row after `|---|` opens it
                     continue
                 # The header row sits *before* the separator, so it is the one
-                # row-shaped line legitimately outside a body.
-                header = self.SEPARATOR.match(lines[position + 1]) if position + 1 < len(lines) else None
-                # Anything else row-shaped would be invisible to every check below -
-                # Codex listed exactly that as the remaining gap. There is nowhere for
-                # one to legitimately sit, so it fails rather than vanishes.
-                self.assertFalse(
-                    stripped.startswith("|") and not header,
+                # row-shaped line legitimately outside a body - and it has to be *the*
+                # header. Accepting any pipe line there let a data row sit in the header
+                # position and disappear from every check, which is the same fail-open
+                # by another route.
+                followed_by_separator = (
+                    position + 1 < len(lines) and self.SEPARATOR.match(lines[position + 1])
+                )
+                if followed_by_separator:
+                    self.assertEqual(
+                        stripped, self.HEADER, f"table header must be {self.HEADER}"
+                    )
+                    continue
+                # Nothing else pipe-shaped may sit outside a body: it would be invisible
+                # to every check below. Inline code is masked first so a description of
+                # a pipe in prose is not mistaken for a row.
+                self.assertNotRegex(
+                    INLINE_CODE.sub("", stripped),
+                    r"(?<!\\)[|\uff5c]",
                     f"table row outside a table body: {stripped}",
                 )
                 continue
