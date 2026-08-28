@@ -145,25 +145,21 @@ HTML_COMMENT_PATTERN = re.compile(r"<!--.*?-->", re.DOTALL)
 CODE_FENCE_PATTERN = re.compile(r"(?P<fence>`{3,}|~{3,})(?P<info>.*)$")
 
 
-# An HTML container whose contents a reader does not see, or sees only after acting.
-# Text inside one is present in the file and absent from the page, which is enough to
-# satisfy any check that only asks whether a string is there - measured: wrapping a
-# pinned contract block in `<details>` or `<div hidden>` left every equality assertion
-# green while the rule had vanished from the rendered document.
+# HTML elements whose contents a reader does not see, or sees only after acting.
 #
 # This is a *finite* structural check, unlike verifying that no earlier prose disclaims
-# what follows. There is a fixed list of ways HTML hides an element, and a document that
-# uses none of them cannot hide anything this way.
-HIDING_CONTAINER = re.compile(
-    r"(?i)<\s*(?:template|script|style|details|summary)\b"
-    r"|<[^>]*\b(?:hidden|aria-hidden\s*=\s*[\"']?true)\b"
-    r"|<[^>]*style\s*=\s*[\"'][^\"']*display\s*:\s*none"
+# what follows: there is a fixed list of ways HTML hides an element, and a document using
+# none of them cannot hide anything this way.
+HIDING_TAGS = {"template", "script", "style", "details", "summary"}
+HIDING_ATTRIBUTES = re.compile(
+    r"(?i)\bhidden\b|\baria-hidden\s*=\s*[\"']?true|\bstyle\s*=\s*[\"'][^\"']*display\s*:\s*none"
 )
-
-
-# A closer for any of the above. `</div>` is included because `<div hidden>` is the one
-# opener that does not carry its own tag name in the pattern.
-HIDING_CLOSER = re.compile(r"(?i)</\s*(?:template|script|style|details|summary|div)\s*>")
+HTML_TAG = re.compile(r"<(?P<close>/?)(?P<name>[a-zA-Z][\w-]*)(?P<attrs>[^>]*?)(?P<self>/?)>")
+# Elements that never have contents, so they never open a container.
+VOID_TAGS = {
+    "area", "base", "br", "col", "embed", "hr", "img", "input",
+    "link", "meta", "param", "source", "track", "wbr",
+}
 
 # An inline code span. `` `<script>` `` is prose *about* a tag, not a tag - report-output
 # discusses one while explaining CSP hashes - and counting it as a container made a
@@ -171,24 +167,43 @@ HIDING_CLOSER = re.compile(r"(?i)</\s*(?:template|script|style|details|summary|d
 INLINE_CODE = re.compile(r"`[^`\n]*`")
 
 
-def assert_no_hiding_container(test, text: str, label: str) -> None:
-    """No hiding container is *open* anywhere in `text`."""
-    stripped = INLINE_CODE.sub("", text)
-    openers = len(HIDING_CONTAINER.findall(stripped))
-    test.assertEqual(openers, 0, f"{label} opens a hiding container")
+def hiding_ancestors(markup: str) -> list[str]:
+    """The hiding elements still open at the end of `markup`.
+
+    A real tag stack, not a count. Subtracting every closer from every opener was the
+    first attempt and it was wrong in both directions: an ordinary `<div>…</div>`
+    earlier in the document cancelled a later `<details>`, and a *closed*
+    `<span aria-hidden="true">…</span>` made everything after it look hidden. Both
+    shapes come out of ordinary editing, so neither answer was usable.
+    """
+    stack: list[tuple[str, bool]] = []
+    for match in HTML_TAG.finditer(markup):
+        name = match.group("name").lower()
+        if match.group("close"):
+            for index in range(len(stack) - 1, -1, -1):
+                if stack[index][0] == name:
+                    del stack[index:]
+                    break
+            continue
+        if match.group("self") or name in VOID_TAGS:
+            continue
+        hides = name in HIDING_TAGS or bool(HIDING_ATTRIBUTES.search(match.group("attrs")))
+        stack.append((name, hides))
+    return [name for name, hides in stack if hides]
 
 
 def assert_not_hidden(test, text: str, needle: str, label: str) -> None:
-    """`needle` is not inside a hiding container.
+    """`needle` is not inside a hiding element, and is not indented into a code block.
 
     Scoped to the ancestry of `needle` rather than to the whole document: a file may
     legitimately *mention* `<script>` - report-output does, explaining CSP hashes - and
-    rejecting the file for that is a false positive that gets the check deleted. What
-    matters is whether a container is still open where the pinned text sits.
+    rejecting the file for that is a false positive that gets the check deleted.
 
-    Inline code spans are removed first, so a tag written as prose is not counted as
-    markup. Then every occurrence of `needle` is required to sit outside any container
-    left open before it.
+    The indentation half is here for the same reason the template check has one. Four
+    spaces or a tab makes a line an indented code block in CommonMark, so a re-indented
+    instruction still reads as an instruction to a substring check while a reader sees a
+    code sample. Whitespace normalisation in block_containing() erases exactly that
+    difference, which is why the raw line has to be looked at separately.
     """
     # Masked, not stripped: offsets have to keep matching the original, because the
     # needle itself normally *is* inside a code span (`FR-001(feature/label)`). Only the
@@ -197,10 +212,16 @@ def assert_not_hidden(test, text: str, needle: str, label: str) -> None:
     index = text.find(needle)
     test.assertNotEqual(index, -1, f"{label}: {needle!r} not found")
     while index != -1:
-        prefix = masked[:index]
-        depth = len(HIDING_CONTAINER.findall(prefix)) - len(HIDING_CLOSER.findall(prefix))
-        test.assertLessEqual(
-            depth, 0, f"{label}: {needle!r} sits inside a hiding container"
+        hidden = hiding_ancestors(masked[:index])
+        test.assertEqual(
+            hidden, [], f"{label}: {needle!r} sits inside {hidden}"
+        )
+        line_start = text.rfind("\n", 0, index) + 1
+        line = text[line_start : text.find("\n", index)]
+        test.assertRegex(
+            line,
+            r"^ {0,3}(?![ \t])",
+            f"{label}: {needle!r} is indented into a code block",
         )
         index = text.find(needle, index + len(needle))
 
@@ -527,11 +548,11 @@ class SkillReadingMixin:
 
         `sentence_initial` is the check that does not depend on vocabulary: an imperative
         starts its sentence, and every reversal above has to put something in front of
-        it to work. Use it wherever the pinned phrase is the instruction itself. Where
-        the phrase is necessarily mid-sentence - the six emitting documents each word
-        their pointer differently and share only the rendered form - the net is what
-        there is, and assertContractSentence is the stronger tool where a single
-        sentence can be pinned outright.
+        it to work. Use it wherever the pinned phrase is the instruction itself.
+
+        Where a whole block can be pinned, assertContractBlock is stronger still and
+        should be preferred - the six emitting documents started on this looser check
+        and did not survive it. What remains here is the case where neither applies.
 
         One documented limit: a negation in the *preceding* sentence is not seen.
         Widening the window would reject the shape these documents are built from - an
@@ -950,7 +971,13 @@ class SkillContractTest(SkillReadingMixin, unittest.TestCase):
         # A container that hides its contents from the reader would let the pinned lines
         # live somewhere no one sees while the visible template reverted. Codex did
         # exactly that with a multi-line `<template>`, and then again with `<div hidden>`.
-        assert_no_hiding_container(self, template, "report template")
+        self.assertEqual(
+            hiding_ancestors(INLINE_CODE.sub(lambda m: " " * len(m.group(0)), template)),
+            [],
+            "report template leaves a hiding element open",
+        )
+        for tag in HIDING_TAGS:
+            self.assertNotRegex(template, rf"(?i)<\s*{tag}\b")
 
         # A nested fence turns everything after it into a code sample rather than part
         # of the template. The outer fence is ```, so a ~~~ or a longer ``` run inside it
@@ -1744,9 +1771,15 @@ class UniqidRegistryTest(unittest.TestCase):
     # declarations by the strict pattern and so passed silently, while a person reading
     # the file sees two.
     FEATURE_LINE = re.compile(r"(?mi)^\s*feature\s*:")
-    # A row a reader would take for a table row. `｜` (U+FF5C) is not a Markdown cell
-    # separator, so such a line was skipped entirely rather than checked.
-    TABLE_LIKE = re.compile(r"^[|\uff5c]")
+    # A line a reader would take for a table row. Three shapes, all of which used to be
+    # skipped in silence rather than checked:
+    #   * the canonical `| a | b |`;
+    #   * `｜ a ｜ b ｜`, where U+FF5C is not a Markdown separator at all;
+    #   * `a | b | c | d`, which Markdown accepts with the outer pipes omitted and which
+    #     an ordinary edit produces.
+    # Anything matching is required below to be the canonical shape, so a row can be
+    # wrong about its format but never invisible to the checks.
+    TABLE_LIKE = re.compile(r"^[|\uff5c]|^[^|\n]*(?:(?<!\\)[|\uff5c][^|\n]*){3,}$")
 
     def registries(self) -> list[tuple[Path, str]]:
         """Every file under `.uniqid/`, at any depth, with its name checked.
@@ -1802,8 +1835,9 @@ class UniqidRegistryTest(unittest.TestCase):
             if not self.TABLE_LIKE.match(stripped):
                 continue
             self.assertTrue(
-                stripped.startswith("|"),
-                f"table row uses a full-width pipe, which Markdown does not: {stripped}",
+                stripped.startswith("|") and stripped.endswith("|"),
+                "a table row must open and close with an ASCII pipe, or the checks "
+                f"below never see it: {stripped}",
             )
             match = self.ROW.match(stripped)
             self.assertIsNotNone(match, f"malformed table line: {stripped}")

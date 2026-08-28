@@ -26,7 +26,7 @@ When in doubt, look at where the identifier will next appear. If the answer is "
 Write the entry at the moment the identifier is assigned, not at the end of the work. An identifier that exists for an hour without a label has already been written into a message a person had to decode.
 
 - One file per identifier set: `.uniqid/{yyyy-mm-dd}-{slug}.md` at the project root.
-- Commit the registry. A label that disappears with the session cannot resolve the identifier in last month's plan.
+- Commit the registry once the permissions below allow it. A label that disappears with the session cannot resolve the identifier in last month's plan.
 - Follow an existing project convention for this directory when the repository already has one.
 
 **Registering is a workspace write; rendering is not.** The two halves of this skill separate on purpose: a label costs nothing to put in a sentence, and the sentence is what the person actually reads. So the permission question applies to the registry alone — rendering survives every restriction below.
