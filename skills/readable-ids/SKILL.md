@@ -26,10 +26,18 @@ When in doubt, look at where the identifier will next appear. If the answer is "
 Write the entry at the moment the identifier is assigned, not at the end of the work. An identifier that exists for an hour without a label has already been written into a message a person had to decode.
 
 - One file per identifier set: `.uniqid/{yyyy-mm-dd}-{slug}.md` at the project root.
-- Commit the registry. A label that disappears with the session cannot resolve the identifier in last month's plan. **Committing is a further authority, not a consequence of writing**: where the caller has no standing permission to commit — `safe-checkpoint` grants it per action, and an ordinary task grants none — leave the file staged or untracked and say it is uncommitted.
+- Commit the registry. A label that disappears with the session cannot resolve the identifier in last month's plan.
 - Follow an existing project convention for this directory when the repository already has one.
 
-**Registering is a workspace write; rendering is not.** Where the calling context has no authority to write — a read-only review, a read-only sandbox, `evidence-first-review` at any time, a checkpoint that was not authorized to write files — do not create or modify the registry. Render the readable form inline from the labels assigned in that pass and say the registry entry is pending. The two halves of this skill separate on purpose: a label costs nothing to put in a sentence, and the sentence is what the person actually reads.
+**Registering is a workspace write; rendering is not.** The two halves of this skill separate on purpose: a label costs nothing to put in a sentence, and the sentence is what the person actually reads. So the permission question applies to the registry alone — rendering survives every restriction below.
+
+Three permissions, and none of them implies the next:
+
+1. **Writing the registry** follows the caller's authority to write files for this task. A caller already creating a plan or a report may create the registry beside it. Where the caller grants authority *per artifact* rather than per task — `safe-checkpoint` does, deliberately, so a checkpoint cannot absorb unrelated work — the registry is a separate artifact and needs its own permission.
+2. **Staging** is not part of writing. Leave the file untracked unless the caller stages this task's output.
+3. **Committing** is not part of staging. Where the caller has no standing permission to commit — an ordinary task has none — say the entry is uncommitted rather than committing it.
+
+Where there is no authority to write at all — a read-only review, a read-only sandbox, `evidence-first-review` in any mode — do not create or modify the registry. Render the readable form inline from the labels assigned in that pass and say the registry entry is pending.
 
 Read [references/registry-format.md](references/registry-format.md) for the file template, the column meanings, and a worked example.
 

@@ -195,8 +195,17 @@ def instructional_text(markdown: str) -> str:
 # enough", "carries no meaning for the reader", "someone who does not have this
 # session's context"), and a checker that fires on those would be turned off rather than
 # fixed. What is listed is what an inverting edit actually reaches for.
+#
+# It is a net, not a proof: a vocabulary list can always be walked around ("it is wrong
+# to Write ...", a strikethrough). That is why the instruction that carries the contract
+# is *also* checked structurally, by sentence position - see assertPositiveInstruction's
+# `sentence_initial`. Every reversal listed above and every one found while probing this
+# set displaces the imperative from the start of its sentence, which no synonym fixes.
 INVERTING_NEGATION = re.compile(
-    r"\b(?:do(?:es)?\s+not|don't|never|must\s+not|shall\s+not|no\s+longer|instead\s+of)\b",
+    r"\b(?:do(?:es)?\s+not|don't|never|must\s+not|shall\s+not|no\s+longer|instead\s+of"
+    r"|avoid|refrain|forbidden|forbids|prohibit(?:ed|s)?|omit|rather\s+than"
+    r"|under\s+no\s+circumstances|wrong\s+to|cannot|can't|may\s+not|should\s+not"
+    r"|shouldn't|mustn't|couldn't|won't|will\s+not)\b",
     re.IGNORECASE,
 )
 
@@ -206,21 +215,55 @@ INVERTING_NEGATION = re.compile(
 SENTENCE_BOUNDARY = re.compile(r"(?:\n\s*\n|(?<=[.!?;])[ \n])")
 
 
-def sentence_containing(text: str, needle: str) -> str:
-    """The sentence `needle` sits in, whitespace normalised.
+def sentences_containing(text: str, needle: str) -> list[str]:
+    """Every sentence `needle` sits in, whitespace normalised, in document order.
 
     Scoped to one sentence rather than one paragraph on purpose. A paragraph here
     routinely carries a positive instruction and its exception side by side - "render
     the labels inline and create no registry", "Do not write its registry here" - and a
     paragraph-wide negation check would reject the document for saying both, which is
     exactly what these documents are supposed to say.
+
+    *Every* occurrence, not the first. Checking only the first was itself a hole: Codex
+    reversed a second occurrence while leaving an explanatory first one intact, and the
+    contract stayed green. A pinned phrase that appears twice has to survive both times,
+    because a reader who follows the second one is no less misled.
     """
-    index = text.index(needle)
-    starts = [match.end() for match in SENTENCE_BOUNDARY.finditer(text) if match.end() <= index]
-    start = starts[-1] if starts else 0
-    end_match = SENTENCE_BOUNDARY.search(text, index + len(needle))
-    end = end_match.start() if end_match else len(text)
-    return " ".join(text[start:end].split())
+    boundaries = [match.end() for match in SENTENCE_BOUNDARY.finditer(text)]
+    found: list[str] = []
+    index = text.find(needle)
+    while index != -1:
+        starts = [end for end in boundaries if end <= index]
+        start = starts[-1] if starts else 0
+        end_match = SENTENCE_BOUNDARY.search(text, index + len(needle))
+        end = end_match.start() if end_match else len(text)
+        found.append(" ".join(text[start:end].split()))
+        index = text.find(needle, index + len(needle))
+    return found
+
+
+# Where one readable unit ends and the next begins: a blank line, or the start of a list
+# item. Coarser than SENTENCE_BOUNDARY on purpose - a rule stated in one paragraph is
+# reversed just as effectively by a sentence *added in front of it* ("Never follow the
+# next instruction. Write ...") as by editing the sentence itself, and a sentence-scoped
+# check cannot see that. Finer than a paragraph on the list side, so pinning one bullet
+# does not pin its neighbours and freeze prose that has nothing to do with the contract.
+BLOCK_BOUNDARY = re.compile(r"(?:\n\s*\n|\n(?=\s*[-*+] ))")
+
+
+def block_containing(text: str, needle: str) -> list[str]:
+    """Every block `needle` sits in, whitespace normalised, in document order."""
+    boundaries = [match.end() for match in BLOCK_BOUNDARY.finditer(text)]
+    found: list[str] = []
+    index = text.find(needle)
+    while index != -1:
+        starts = [end for end in boundaries if end <= index]
+        start = starts[-1] if starts else 0
+        end_match = BLOCK_BOUNDARY.search(text, index + len(needle))
+        end = end_match.start() if end_match else len(text)
+        found.append(" ".join(text[start:end].split()))
+        index = text.find(needle, index + len(needle))
+    return found
 
 
 def fenced_blocks(markdown: str) -> list[str]:
@@ -334,23 +377,73 @@ class SkillReadingMixin:
         self.assertTrue(body.startswith("---\n"))
         return instructional_text(body.split("\n---\n", 1)[1])
 
-    def assertPositiveInstruction(self, text: str, needle: str) -> None:
-        """`needle` is present *and* its sentence has not been inverted.
+    def assertPositiveInstruction(
+        self, text: str, needle: str, sentence_initial: bool = False
+    ) -> None:
+        """`needle` is present and **no** occurrence of it has been inverted.
 
         assertIn alone proves the words are there, not that they still instruct. Codex
         demonstrated the gap by injecting `Do not Write ...` and `Never invoke
-        readable-ids and never render (feature/label).` into these documents: every
-        substring assertion stayed green while the contract said the opposite.
+        readable-ids and never render (feature/label).`: every substring assertion
+        stayed green while the contract said the opposite.
+
+        Two checks, because they fail differently. The negation vocabulary is a net with
+        known holes - probing it turned up "avoid", "refrain from", "it is forbidden
+        to", "under no circumstances", "rather than", "cannot", "may not", and a
+        strikethrough. Widening the list closes those and invites the next synonym, so
+        this is drift detection, not proof against an adversary.
+
+        `sentence_initial` is the check that does not depend on vocabulary: an imperative
+        starts its sentence, and every reversal above has to put something in front of
+        it to work. Use it wherever the pinned phrase is the instruction itself. Where
+        the phrase is necessarily mid-sentence - the six emitting documents each word
+        their pointer differently and share only the rendered form - the net is what
+        there is, and assertContractSentence is the stronger tool where a single
+        sentence can be pinned outright.
+
+        One documented limit: a negation in the *preceding* sentence is not seen.
+        Widening the window would reject the shape these documents are built from - an
+        instruction beside its exception, "Do not create the registry. Render inline." -
+        so the window stays at one sentence and the hole is pinned in
+        test_the_known_limits_of_the_checker_are_the_ones_documented.
         """
         self.assertIn(needle, text)
-        sentence = sentence_containing(text, needle)
-        negation = INVERTING_NEGATION.search(sentence)
-        self.assertIsNone(
-            negation,
-            f"instruction inverted by {negation.group(0)!r}: {sentence}"
-            if negation
-            else "",
-        )
+        for sentence in sentences_containing(text, needle):
+            negation = INVERTING_NEGATION.search(sentence)
+            self.assertIsNone(
+                negation,
+                f"instruction inverted by {negation.group(0)!r}: {sentence}"
+                if negation
+                else "",
+            )
+            if sentence_initial:
+                self.assertTrue(
+                    sentence.startswith(needle),
+                    f"instruction no longer starts its sentence: {sentence}",
+                )
+
+    def assertContractBlock(self, text: str, anchor: str, expected: str) -> None:
+        """The block around `anchor` is exactly `expected`, whitespace normalised.
+
+        The strongest form available, and the answer to chasing negation synonyms: no
+        prefix, suffix, synonym, or reordering survives an equality check, so a reversal
+        cannot be phrased around it. The cost is that any rewrite of the block fails the
+        test - which for the two blocks that *are* the contract is the point, not a
+        defect. Reword them and a human decides whether the contract changed.
+
+        Scoped to the block rather than the sentence because that is what closes the
+        last measured hole. A rule is reversed just as well by a sentence placed in
+        front of it - "Never follow the next instruction. Write ..." - which every
+        sentence-scoped check misses by construction, and which an equality check over
+        the surrounding block catches without any vocabulary at all.
+
+        Used only where one block carries the rule. The six emitting documents word
+        their pointers differently on purpose, so they keep the looser check above.
+        """
+        found = block_containing(text, anchor)
+        self.assertTrue(found, f"anchor not present: {anchor!r}")
+        for block in found:
+            self.assertEqual(block, expected)
 
     def read_skill(self, name: str) -> str:
         """SKILL.md joined with the reference documents SKILL.md explicitly points at.
@@ -534,13 +627,25 @@ class SkillContractTest(SkillReadingMixin, unittest.TestCase):
     def test_readable_ids_defines_the_registry_and_rendering_contract(self) -> None:
         skill = self.readable_ids_body()
 
-        # Registry shape and the closed status vocabulary (SC-001).
-        self.assertPositiveInstruction(skill, ".uniqid/{yyyy-mm-dd}-{slug}.md")
+        # Registry shape and the closed status vocabulary (SC-001). Pinned as a whole
+        # sentence: the location of the registry is the contract, and an equality check
+        # is the only form a reversal cannot be phrased around.
+        self.assertContractBlock(
+            skill,
+            ".uniqid/{yyyy-mm-dd}-{slug}.md",
+            "- One file per identifier set: `.uniqid/{yyyy-mm-dd}-{slug}.md` at the "
+            "project root.",
+        )
         for status in ("open", "in-progress", "done", "withdrawn"):
             self.assertIn(f"`{status}`", skill)
 
         # The rendering rule, and the constraint that keeps it readable (SC-002).
-        self.assertPositiveInstruction(skill, "Write `A1(feature/label)`")
+        self.assertContractBlock(
+            skill,
+            "Write `A1(feature/label)`",
+            "Write `A1(feature/label)` — for example "
+            "`C1(리뷰신뢰경계/신뢰상태-전달-누락)` — in:",
+        )
         self.assertIn("full form on the first mention", skill)
 
         # A heading or an index line is reached without reading what precedes it, so the
@@ -584,9 +689,12 @@ class SkillContractTest(SkillReadingMixin, unittest.TestCase):
         """
         skill = self.readable_ids_body()
         self.assertIn("Registering is a workspace write; rendering is not", skill)
-        # Writing the file and committing it are separate permissions; safe-checkpoint
-        # grants authority per action and an ordinary task grants none.
-        self.assertIn("Committing is a further authority", skill)
+        # Writing, staging, and committing are three permissions, stated once here so
+        # the callers stop each inventing their own answer - Codex found report-output,
+        # safe-checkpoint, and this skill giving three different ones.
+        self.assertIn("Three permissions, and none of them implies the next", skill)
+        self.assertIn("**Staging** is not part of writing", skill)
+        self.assertIn("**Committing** is not part of staging", skill)
 
         # evidence-first-review may never write, in any mode.
         evidence = self.read("skills/evidence-first-review/SKILL.md")
@@ -597,7 +705,7 @@ class SkillContractTest(SkillReadingMixin, unittest.TestCase):
         # break on a rewrap that changed nothing about the rule.
         branch = " ".join(self.read("skills/branch-merge-review/SKILL.md").split())
         self.assertIn(
-            "except under the read-only rule above, which forbids writing any file",
+            "The read-only rule above is the one exception, since it forbids writing any file",
             branch,
         )
 
@@ -650,26 +758,36 @@ class SkillContractTest(SkillReadingMixin, unittest.TestCase):
     def test_the_report_template_carries_the_readable_form_where_a_person_decides(
         self,
     ) -> None:
-        """Asserted against the template's fenced block, not the file.
+        """Asserted line by line against the template's fenced block.
 
-        The block *is* the template - the shape a report actually takes. Against the
-        whole file the same strings sitting in an HTML comment, or in the prose that
-        explains the convention, would satisfy every assertion while the template itself
-        had gone back to bare identifiers. Codex demonstrated exactly that.
+        Two narrowings, each closing a measured bypass.
+
+        The block, not the file: the block *is* the template - the shape a report takes.
+        Against the whole file the same strings sitting in an HTML comment, or in the
+        prose that explains the convention, satisfy every assertion while the template
+        itself has gone back to bare identifiers. Codex demonstrated exactly that.
+
+        Whole lines, not substrings: `assertIn` over the block text is satisfied by the
+        string appearing *anywhere* in it, so Codex hid the expected form inside a
+        `<template>` element and reverted the visible heading, and the check held.
+        A line has to open with the heading for a reader to arrive at it.
         """
         blocks = fenced_blocks(
             self.read("skills/branch-merge-review/references/consolidated-report-template.md")
         )
         self.assertEqual(len(blocks), 1)
-        template = blocks[0]
+        lines = [line.strip() for line in blocks[0].splitlines()]
+
+        def opens_with(prefix: str) -> bool:
+            return any(line.startswith(prefix) for line in lines)
 
         # The blocking-items line *is* the decision request, and each finding heading is
         # the definition site a later recheck refers back to. Both are entry points a
         # reader reaches without reading forward, so both carry the full form.
-        self.assertIn("**Blocking items**: [CH-1(feature/label)", template)
-        self.assertIn("### [CH-1(feature/label)]", template)
-        self.assertNotIn("**Blocking items**: [CH-1,", template)
-        self.assertNotIn("### [CH-1] ", template)
+        self.assertTrue(opens_with("**Blocking items**: [CH-1(feature/label)"))
+        self.assertTrue(opens_with("### [CH-1(feature/label)]"))
+        self.assertFalse(opens_with("**Blocking items**: [CH-1,"))
+        self.assertFalse(opens_with("### [CH-1] "))
 
     def test_new_skills_have_only_the_approved_files(self) -> None:
         expected = {
@@ -1253,15 +1371,17 @@ class InstructionSenseHelperTest(SkillReadingMixin, unittest.TestCase):
         # inverted document pass.
         text = "Do not\n  write `A1(feature/label)` here."
         self.assertEqual(
-            sentence_containing(text, "write `A1(feature/label)`"),
-            "Do not write `A1(feature/label)` here.",
+            sentences_containing(text, "write `A1(feature/label)`"),
+            [
+            "Do not write `A1(feature/label)` here."],
         )
 
     def test_a_blank_line_ends_the_sentence(self) -> None:
         text = "Never do this.\n\nWrite `A1(feature/label)` instead-of-nothing."
         self.assertEqual(
-            sentence_containing(text, "Write `A1(feature/label)`"),
-            "Write `A1(feature/label)` instead-of-nothing.",
+            sentences_containing(text, "Write `A1(feature/label)`"),
+            [
+            "Write `A1(feature/label)` instead-of-nothing."],
         )
 
     def test_a_preceding_sentence_negation_is_not_borrowed(self) -> None:
@@ -1269,9 +1389,37 @@ class InstructionSenseHelperTest(SkillReadingMixin, unittest.TestCase):
         # instruction with its exception on purpose.
         text = "Do not create the registry. Write `A1(feature/label)` inline."
         self.assertEqual(
-            sentence_containing(text, "Write `A1(feature/label)`"),
-            "Write `A1(feature/label)` inline.",
+            sentences_containing(text, "Write `A1(feature/label)`"),
+            [
+            "Write `A1(feature/label)` inline."],
         )
+
+    def test_every_occurrence_is_returned_not_just_the_first(self) -> None:
+        """The hole Codex found: an explanatory first mention shielding a reversed one.
+
+        `text.index()` stopped at the first match, so leaving one clean occurrence in
+        place let a second be inverted with the contract still green.
+        """
+        text = "Write `A1(x/y)` in reports. Do not Write `A1(x/y)` in code."
+        self.assertEqual(
+            sentences_containing(text, "Write `A1(x/y)`"),
+            ["Write `A1(x/y)` in reports.", "Do not Write `A1(x/y)` in code."],
+        )
+        with self.assertRaises(AssertionError):
+            self.assertPositiveInstruction(text, "Write `A1(x/y)`")
+
+    def test_a_contract_block_rejects_any_rewrite_of_itself(self) -> None:
+        expected = "Write `A1(x/y)` in reports."
+        self.assertContractBlock("Write `A1(x/y)` in reports.", "`A1(x/y)`", expected)
+        for rewritten in (
+            "It is forbidden to Write `A1(x/y)` in reports.",   # a synonym the net misses
+            "In reports, Write `A1(x/y)`.",                     # harmless, still flagged
+            "Write `A1(x/y)` in reports and nowhere else.",
+            "Ignore what follows. Write `A1(x/y)` in reports.",  # the sentence-scope hole
+        ):
+            with self.subTest(rewritten=rewritten):
+                with self.assertRaises(AssertionError):
+                    self.assertContractBlock(rewritten, "`A1(x/y)`", expected)
 
     def test_the_negation_pattern_matches_what_an_inverting_edit_writes(self) -> None:
         for phrase in (
@@ -1306,6 +1454,16 @@ class InstructionSenseHelperTest(SkillReadingMixin, unittest.TestCase):
                 expected = "does not" in phrase
                 self.assertEqual(matched is not None, expected)
 
+    def test_a_list_item_is_its_own_block(self) -> None:
+        text = "- first item here\n- second `A1(x/y)` item\n- third item\n"
+        self.assertEqual(block_containing(text, "`A1(x/y)`"), ["- second `A1(x/y)` item"])
+
+    def test_a_paragraph_is_one_block_across_hard_wraps(self) -> None:
+        text = "opening line\n  continues `A1(x/y)` here\n\nnext paragraph\n"
+        self.assertEqual(
+            block_containing(text, "`A1(x/y)`"), ["opening line continues `A1(x/y)` here"]
+        )
+
     def test_fenced_blocks_returns_the_block_and_not_its_surroundings(self) -> None:
         markdown = (
             "prose before\n"
@@ -1329,10 +1487,127 @@ class InstructionSenseHelperTest(SkillReadingMixin, unittest.TestCase):
             )
         self.assertIn("inverted", str(caught.exception))
 
+    def test_the_known_limits_of_the_checker_are_the_ones_documented(self) -> None:
+        """Pins both holes, so a later reader finds them measured rather than assumed.
+
+        A test that records a limit is worth more than a docstring alone: if someone
+        closes one of these, this test fails and forces the docstring to be corrected
+        with it.
+        """
+        # assertPositiveInstruction is sentence-scoped, so a negation one sentence back
+        # is out of its window. This is why the two blocks that *are* the contract use
+        # assertContractBlock instead, which catches exactly this - see below.
+        self.assertPositiveInstruction(
+            "The following is prohibited. Write `A1(feature/label)` here.",
+            "Write `A1(feature/label)`",
+            sentence_initial=True,
+        )
+        with self.assertRaises(AssertionError):
+            self.assertContractBlock(
+                "The following is prohibited. Write `A1(x/y)` here.",
+                "`A1(x/y)`",
+                "Write `A1(x/y)` here.",
+            )
+        # An uninverted reword still fails the structural check.
+        with self.assertRaises(AssertionError) as caught:
+            self.assertPositiveInstruction(
+                "In reports, Write `A1(feature/label)` here.",
+                "Write `A1(feature/label)`",
+                sentence_initial=True,
+            )
+        self.assertIn("no longer starts its sentence", str(caught.exception))
+
     def test_assert_positive_instruction_accepts_the_real_document(self) -> None:
         self.assertPositiveInstruction(
             self.readable_ids_body(), "Write `A1(feature/label)`"
         )
+
+class UniqidRegistryTest(unittest.TestCase):
+    """This repository's own `.uniqid/` files obey the rules skills/readable-ids states.
+
+    Dogfooding, and the answer to a finding raised twice: the rules had no enforcement,
+    so compliance was something a reviewer confirmed by hand and the next edit could
+    silently break. Two violations were in fact introduced by hand while writing these
+    very files - a status outside the closed vocabulary, and a file-naming rule that
+    contradicted its own date rule - which is the argument for checking rather than
+    trusting.
+
+    Scoped to this repository's registries. The skill ships to projects that have their
+    own, and nothing here reaches them; what it protects is the example this repository
+    sets, which is what a reader copies.
+    """
+
+    STATUSES = {"open", "in-progress", "done", "withdrawn"}
+    ROW = re.compile(r"^\|(?P<cells>.*)\|\s*$")
+
+    def registries(self) -> list[tuple[Path, str]]:
+        directory = ROOT / ".uniqid"
+        files = sorted(directory.glob("*.md")) if directory.is_dir() else []
+        self.assertTrue(files, "no .uniqid/ registry to check")
+        return [(path, path.read_text(encoding="utf-8")) for path in files]
+
+    def rows(self, text: str) -> list[list[str]]:
+        found = []
+        for line in text.splitlines():
+            match = self.ROW.match(line.strip())
+            if not match:
+                continue
+            cells = [cell.strip() for cell in match.group("cells").split("|")]
+            if len(cells) != 4 or cells[0] in {"ID", ""} or set(cells[0]) <= set("-: "):
+                continue                                  # header and separator rows
+            found.append(cells)
+        return found
+
+    def test_every_registry_declares_its_feature_and_source_document(self) -> None:
+        for path, text in self.registries():
+            with self.subTest(registry=path.name):
+                self.assertRegex(text, r"(?m)^feature: \S+$")
+                self.assertRegex(text, r"(?m)^문서: \S+$")
+
+    def test_every_row_uses_the_closed_status_vocabulary(self) -> None:
+        for path, text in self.registries():
+            for identifier, _label, _description, status in self.rows(text):
+                with self.subTest(registry=path.name, identifier=identifier):
+                    self.assertIn(status, self.STATUSES)
+
+    def test_labels_and_features_carry_no_whitespace_or_separator(self) -> None:
+        """The slash separates the two halves, so neither half may contain one.
+
+        Whitespace is barred for the same reason: `A1(리뷰 신뢰 경계/x)` cannot be read
+        back out of a sentence as one token.
+        """
+        for path, text in self.registries():
+            feature = re.search(r"(?m)^feature: (\S+)$", text).group(1)
+            with self.subTest(registry=path.name, feature=feature):
+                self.assertNotIn("/", feature)
+            for identifier, label, _description, _status in self.rows(text):
+                with self.subTest(registry=path.name, identifier=identifier):
+                    self.assertNotIn("/", label)
+                    self.assertEqual(label, label.strip())
+                    self.assertNotIn(" ", label)
+                    self.assertTrue(label)
+
+    def test_no_identifier_or_label_collides_within_a_feature(self) -> None:
+        """Across every registry, not within one file.
+
+        The rendered form is `ID(feature/label)`, so `feature` is what makes a short
+        identifier resolvable. Two files sharing a feature and an identifier put two
+        meanings behind one rendered form, and the reader has no way to tell.
+        """
+        by_identifier: dict[tuple[str, str], str] = {}
+        by_label: dict[tuple[str, str], str] = {}
+        for path, text in self.registries():
+            feature = re.search(r"(?m)^feature: (\S+)$", text).group(1)
+            for identifier, label, _description, _status in self.rows(text):
+                for index, seen in ((identifier, by_identifier), (label, by_label)):
+                    key = (feature, index)
+                    self.assertNotIn(
+                        key,
+                        seen,
+                        f"{feature}/{index} is defined in both {seen.get(key)} "
+                        f"and {path.name}",
+                    )
+                    seen[key] = path.name
 
 if __name__ == "__main__":
     unittest.main()
