@@ -168,14 +168,24 @@ def hides_by_attribute(attrs: str) -> bool:
     for match in HTML_ATTRIBUTE.finditer(attrs):
         name = match.group("name").lower()
         value = (match.group("value") or "").strip("\"'").strip().lower()
-        if name == "hidden" and value != "false":
-            return True                       # boolean attribute; bare or any value
+        if name == "hidden":
+            # A boolean attribute: its *presence* hides the element. `hidden="false"`
+            # is still hidden - HTML has no way to say "hidden, but not really" - so
+            # excusing that value was wrong in the direction that matters.
+            return True
         if name == "aria-hidden" and value == "true":
             return True
-        if name == "style" and re.search(r"display\s*:\s*none", value):
+        # `--display: none` is a custom property that sets nothing; only the real
+        # `display` declaration hides.
+        if name == "style" and re.search(r"(?:^|[;{\s])display\s*:\s*none", value):
             return True
     return False
-HTML_TAG = re.compile(r"<(?P<close>/?)(?P<name>[a-zA-Z][\w-]*)(?P<attrs>[^>]*?)(?P<self>/?)>")
+# The attribute run is quote-aware: `<div title="a > b" hidden>` used to be cut at the
+# `>` inside the title, so the `hidden` that followed was never seen.
+HTML_TAG = re.compile(
+    r"""<(?P<close>/?)(?P<name>[a-zA-Z][\w-]*)"""
+    r"""(?P<attrs>(?:"[^"]*"|'[^']*'|[^>"'])*?)(?P<self>/?)>"""
+)
 # Elements that never have contents, so they never open a container.
 VOID_TAGS = {
     "area", "base", "br", "col", "embed", "hr", "img", "input",
@@ -1792,8 +1802,10 @@ class UniqidRegistryTest(unittest.TestCase):
     # declarations by the strict pattern and so passed silently, while a person reading
     # the file sees two.
     FEATURE_LINE = re.compile(r"(?mi)^\s*feature\s*:")
-    # The separator row that opens a Markdown table body.
-    SEPARATOR = re.compile(r"^\|?\s*:?-{2,}:?\s*(?:\|\s*:?-{2,}:?\s*)*\|?$")
+    # The separator row that opens a Markdown table body. At least one pipe is required:
+    # a bare `---` is a thematic break (and a frontmatter fence), and treating one as a
+    # table separator made every following paragraph a malformed row.
+    SEPARATOR = re.compile(r"^\|?(?:\s*:?-{2,}:?\s*\|)+\s*:?-{2,}:?\s*\|?$|^\|(?:\s*:?-{2,}:?\s*\|)+$")
 
     def registries(self) -> list[tuple[Path, str]]:
         """Every file under `.uniqid/`, at any depth, with its name checked.
@@ -1845,14 +1857,25 @@ class UniqidRegistryTest(unittest.TestCase):
         """
         found = []
         in_body = False
-        for line in text.splitlines():
-            stripped = line.strip()
+        lines = [line.strip() for line in text.splitlines()]
+        for position, stripped in enumerate(lines):
             if not stripped:
                 in_body = False                          # a blank line ends the table
                 continue
             if not in_body:
                 if self.SEPARATOR.match(stripped):
                     in_body = True                       # the row after `|---|` opens it
+                    continue
+                # The header row sits *before* the separator, so it is the one
+                # row-shaped line legitimately outside a body.
+                header = self.SEPARATOR.match(lines[position + 1]) if position + 1 < len(lines) else None
+                # Anything else row-shaped would be invisible to every check below -
+                # Codex listed exactly that as the remaining gap. There is nowhere for
+                # one to legitimately sit, so it fails rather than vanishes.
+                self.assertFalse(
+                    stripped.startswith("|") and not header,
+                    f"table row outside a table body: {stripped}",
+                )
                 continue
 
             # Structural, not pipe-counting. Deciding "is this a row?" by how many
