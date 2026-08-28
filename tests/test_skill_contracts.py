@@ -347,6 +347,76 @@ def reference_links(markdown: str) -> list[str]:
     return sorted(found)
 
 
+# The wiring sentence each emitting document carries, pinned verbatim.
+#
+# Pinned rather than probed for negations because the net has measured holes that no
+# vocabulary closes - "It is pointless to invoke ...", "Skip this: invoke ...", "This
+# rule is obsolete." all reverse the sense without a listed word. Each of these blocks
+# is exactly one paragraph or one list item, so equality is available here and equality
+# is what no rephrasing survives.
+#
+# The cost is real: rewording one of these fails this test. That is the intended
+# trade. These sentences are the wiring contract, and changing what they instruct
+# should cost a deliberate test edit rather than passing unnoticed.
+EMITTING_CONTRACT_BLOCKS = {
+    "skills/plan-and-build/SKILL.md": (
+        "- **Readable form:** an identifier that reaches the user — in a plan summary, a "
+        "status report, or a question asking them to decide — needs a label a person can "
+        "read. Invoke `readable-ids` if it is installed to register the identifier and render "
+        "it as `FR-001(feature/label)`. Without that skill, keep a label beside every "
+        "identifier in the plan itself; a bare `FR-001` in a sentence costs the reader a "
+        "document lookup that the writer could have spent one phrase avoiding."
+    ),
+    "skills/branch-merge-review/SKILL.md": (
+        "**Finding identifiers**: the report is read by a person and its blocking-items line "
+        "asks them to decide, so `CH-1` alone is not enough. Invoke `readable-ids` if it is "
+        "installed to register the finding identifiers and render them as "
+        "`CH-1(feature/label)` on first mention. The read-only rule above is the one "
+        "exception, since it forbids writing any file: there, render the labels inline and "
+        "create no registry. Without that skill, still write a short label beside each "
+        "identifier — a later recheck refers to these findings by number across a different "
+        "document, which is exactly where a bare number stops meaning anything."
+    ),
+    "skills/branch-merge-review/references/consolidated-report-template.md": (
+        "`(feature/label)` below is the readable form of a finding identifier, owned by the "
+        "`readable-ids` skill: full form on first mention in the report — the blocking-items "
+        "line and each finding heading — and the bare identifier everywhere after that. When "
+        "`readable-ids` is not installed, keep a short label in the same position anyway; a "
+        "recheck later refers to these findings by number from a different document."
+    ),
+    "skills/evidence-first-review/SKILL.md": (
+        "A recheck refers to findings that were numbered in a different document, so the "
+        "identifier alone carries no meaning for the reader. Render each prior finding as "
+        "`H-2(feature/label)` on first mention, following the `readable-ids` convention when "
+        "that skill is installed; otherwise carry a short label beside every identifier in "
+        "the ledger. **Do not write its registry here** — this skill is read-only in every "
+        "mode, and rendering a label needs no file. Read an existing `.uniqid/` entry to "
+        "reuse the label a prior pass already published; where none exists, say the label is "
+        "unregistered rather than creating one."
+    ),
+    "skills/report-output/SKILL.md": (
+        "- **Identifiers**: A report is human-facing output. When it refers to work by a "
+        "short identifier (`A1`, `FR-001`, `CH-2`), write `A1(feature/label)` on first "
+        "mention, short form afterwards, following the `readable-ids` convention when that "
+        "skill is installed. Rendering needs no file, so it applies under the read-only rule "
+        "above too; creating the `.uniqid/` registry is a write, and `readable-ids` owns when "
+        "that is permitted. Where that skill is unavailable, keep a label beside the "
+        "identifier anyway — a reader who has to open another document to learn what `A1` is "
+        "has lost the summary."
+    ),
+    "skills/safe-checkpoint/references/handoff-template.md": (
+        "A handoff is read by someone who does not have this session's context. When it names "
+        "work by a short identifier, write the readable form — `A1(feature/label)` — on first "
+        "mention and the short form afterwards; `readable-ids` owns that convention and its "
+        "registry when the skill is installed. Rendering the label is part of writing the "
+        "handoff; **creating or updating `.uniqid/` is a separate write** and needs its own "
+        "authority under the table in SKILL.md §2 — authority to write the handoff does not "
+        "extend to it. That is this skill's per-artifact rule, which `readable-ids` defers to "
+        "by name."
+    ),
+}
+
+
 class SkillReadingMixin:
     """Reading helpers shared by the contract tests and the tests covering them."""
 
@@ -406,6 +476,14 @@ class SkillReadingMixin:
         instruction beside its exception, "Do not create the registry. Render inline." -
         so the window stays at one sentence and the hole is pinned in
         test_the_known_limits_of_the_checker_are_the_ones_documented.
+
+        And a limit no scope closes: a sentence in the *preceding block* saying to
+        ignore the next one defeats a block-scoped check the same way, a preceding
+        section defeats a section-scoped one, and so on. The regress has no fixed point,
+        because what would have to be verified is the document's meaning as a whole.
+        The threat model here is drift - a rule quietly rewritten while its test keeps
+        passing - not a document authored to lie about itself. Sabotage is caught by
+        reading the diff, which is what a review is for.
         """
         self.assertIn(needle, text)
         for sentence in sentences_containing(text, needle):
@@ -738,22 +816,17 @@ class SkillContractTest(SkillReadingMixin, unittest.TestCase):
         "label" instead and proved nothing - "feature/label" contains it, so the check
         could not fail while the example was present.
 
-        assertPositiveInstruction, not assertIn, because a reversal is the mutation that
-        actually happens here: `Never invoke readable-ids and never render
-        (feature/label).` satisfies both substrings while instructing the opposite.
+        The block is then pinned verbatim. A negation probe was tried first and did not
+        hold: Codex reversed these pointers with `Never invoke ...`, and probing further
+        turned up "It is pointless to invoke", "Skip this:", and "This rule is obsolete."
+        - none of which any vocabulary list reaches. Equality does, and each of these
+        documents states its pointer in exactly one paragraph or list item.
         """
-        for relative_path in (
-            "skills/plan-and-build/SKILL.md",
-            "skills/branch-merge-review/SKILL.md",
-            "skills/branch-merge-review/references/consolidated-report-template.md",
-            "skills/evidence-first-review/SKILL.md",
-            "skills/report-output/SKILL.md",
-            "skills/safe-checkpoint/references/handoff-template.md",
-        ):
+        for relative_path, expected in EMITTING_CONTRACT_BLOCKS.items():
             with self.subTest(relative_path=relative_path):
                 document = instructional_text(self.read(relative_path))
                 self.assertIn("readable-ids", document)
-                self.assertPositiveInstruction(document, "(feature/label)")
+                self.assertContractBlock(document, "(feature/label)", expected)
 
     def test_the_report_template_carries_the_readable_form_where_a_person_decides(
         self,
@@ -1547,15 +1620,27 @@ class UniqidRegistryTest(unittest.TestCase):
         return [(path, path.read_text(encoding="utf-8")) for path in files]
 
     def rows(self, text: str) -> list[list[str]]:
+        """Data rows, with every malformed table line rejected rather than skipped.
+
+        Silently skipping what does not parse is how a checker stops checking: a row
+        with a fifth column, or one missing its closing pipe, simply vanished from the
+        scan and took its status and label with it. Anything that opens with a pipe is
+        part of the table and has to be a header, a separator, or a four-cell row.
+        """
         found = []
         for line in text.splitlines():
-            match = self.ROW.match(line.strip())
-            if not match:
+            stripped = line.strip()
+            if not stripped.startswith("|"):
                 continue
+            match = self.ROW.match(stripped)
+            self.assertIsNotNone(match, f"malformed table line: {stripped}")
             cells = [cell.strip() for cell in match.group("cells").split("|")]
-            if len(cells) != 4 or cells[0] in {"ID", ""} or set(cells[0]) <= set("-: "):
+            self.assertEqual(len(cells), 4, f"expected four columns: {stripped}")
+            if cells[0] == "ID" or set(cells[0]) <= set("-: "):
                 continue                                  # header and separator rows
+            self.assertTrue(cells[0], f"row with no identifier: {stripped}")
             found.append(cells)
+        self.assertTrue(found, "registry has no data rows")
         return found
 
     def test_every_registry_declares_its_feature_and_source_document(self) -> None:
