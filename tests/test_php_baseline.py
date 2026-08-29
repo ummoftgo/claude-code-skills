@@ -2571,6 +2571,7 @@ class PromptInjectionBoundaryTest(unittest.TestCase):
         "Backend (Python)": "Python",
         "Backend (Go)": "Go",
         "Backend (Rust)": "Rust",
+        "JS/TS": "Node/TS (server surface)",
     }
 
     @staticmethod
@@ -2704,7 +2705,9 @@ class GoToolchainPinTest(unittest.TestCase):
             while index < len(tokens) and cls.ENV_ASSIGNMENT.match(tokens[index]):
                 index += 1
             if index < len(tokens) and tokens[index] in cls.RESOLVES_TOOLCHAIN:
-                found.append(segment.strip())
+                # 실행 앞 환경 변수만 돌려준다. 뒤따르는 인자나 주석에 같은 문자열이
+                # 있어도 실행에는 영향이 없으므로 판정에 넣지 않는다.
+                found.append(tokens[:index])
         return found
 
     def test_every_go_invocation_pins_the_toolchain(self) -> None:
@@ -2714,13 +2717,12 @@ class GoToolchainPinTest(unittest.TestCase):
                 stripped = line.strip()
                 if not stripped or stripped.startswith("#"):
                     continue
-                for invocation in self.invocations(stripped):
+                for assignments in self.invocations(stripped):
                     checked += 1
-                    with self.subTest(reference=reference, invocation=invocation):
-                        self.assertTrue(
-                            invocation.startswith("GOTOOLCHAIN=local ")
-                            or "GOTOOLCHAIN=local" in invocation,
-                            "toolchain 을 고정하지 않은 go 호출",
+                    with self.subTest(reference=reference, line=stripped):
+                        self.assertIn(
+                            "GOTOOLCHAIN=local", assignments,
+                            "실행 앞 환경 변수에 toolchain 고정이 없다",
                         )
         self.assertGreater(checked, 5, "go 호출을 거의 찾지 못했다 — 추출이 깨졌다")
 

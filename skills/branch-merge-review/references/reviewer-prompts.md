@@ -91,7 +91,7 @@ and reference chosen for one language produce confident, wrong findings about th
 | `{language}` | `{reference}` | `{scope}` |
 |---|---|---|
 | PHP | `php-quality.md` | `*.php`, `composer.json`, `composer.lock` |
-| Node/TS (server surface) | `js-toolchain.md` + `node-quality.md` | `*.js`, `*.mjs`, `*.cjs`, `*.jsx`, `*.ts`, `*.mts`, `*.cts`, `*.tsx`, `package.json`, lockfiles, `.npmrc` |
+| Node/TS (server surface) | `js-toolchain.md` + `node-quality.md` | `*.js`, `*.mjs`, `*.cjs`, `*.jsx`, `*.ts`, `*.mts`, `*.cts`, `*.tsx`, `package.json`, `package-lock.json`, `pnpm-lock.yaml`, `yarn.lock`, `bun.lockb`, `.npmrc` |
 | Python | `python-quality.md` | `*.py`, `pyproject.toml`, `setup.py`, `setup.cfg`, `requirements*.txt` |
 | Go | `go-quality.md` | `*.go`, `go.mod`, `go.sum`, `go.work`, `go.work.sum` |
 | Rust | `rust-quality.md` | `*.rs`, `Cargo.toml`, `Cargo.lock`, `rust-toolchain.toml`, `rust-toolchain`, `.cargo/config.toml`, `.cargo/config` |
