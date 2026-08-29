@@ -312,6 +312,12 @@ if ($env:UNTRUSTED_DIFF -eq '1') {
     if ($hit) { $ExecRisk += 'phpstan-extension' }
 }
 
+# State line — same reason as the POSIX block: a caller that set neither value would
+# otherwise get a normal-looking report with both gates inert.
+$readOnlyState = if ($env:READ_ONLY) { $env:READ_ONLY } else { '0' }
+$untrustedState = if ($env:UNTRUSTED_DIFF) { $env:UNTRUSTED_DIFF } else { '0' }
+"static analysis mode: read-only=$readOnlyState untrusted=$untrustedState"
+
 if ($ExecRisk) {
     "static analysis: skipped-untrusted-execution — analysis would run project code ($($ExecRisk -join ' '))"
 } else {

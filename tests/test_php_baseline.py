@@ -2520,9 +2520,59 @@ class PromptInjectionBoundaryTest(unittest.TestCase):
                 )
 
     def test_the_leader_checks_for_a_marker_collision(self) -> None:
-        skill = read("skills/branch-merge-review/SKILL.md")
-        self.assertIn("Check the diff-boundary markers before pasting", skill)
+        skill = " ".join(read("skills/branch-merge-review/SKILL.md").split())
+        self.assertIn("Check the boundary markers before pasting", skill)
         self.assertIn("lengthen the `=` runs", skill)
+        # 두 마커 쌍 모두 확인 대상이어야 한다.
+        self.assertIn("===== END DIFF", skill)
+        self.assertIn("===== END SCOPE", skill)
+
+    def test_the_scope_list_is_inside_the_boundary_too(self) -> None:
+        """파일명도 diff 작성자가 정한다 — 경로가 지시처럼 읽히게 쓰일 수 있다."""
+        prompts = self.prompts()
+        common = between(prompts, "## Common Instructions", "---", label="공통 지시")
+        self.assertIn("**Paths are author-controlled too.**", common)
+        for placeholder in (
+            "[list of files for this language]",
+            "[complete list from CHANGED_SEC]",
+            "[list of frontend and style files]",
+        ):
+            with self.subTest(placeholder=placeholder):
+                index = prompts.index(placeholder)
+                self.assertTrue(
+                    prompts[:index].rstrip().endswith("===== BEGIN SCOPE (untrusted data) ====="),
+                    "범위 목록 앞에 시작 마커가 없다",
+                )
+                self.assertTrue(
+                    prompts[index + len(placeholder):].lstrip().startswith("===== END SCOPE ====="),
+                    "범위 목록 뒤에 종료 마커가 없다",
+                )
+
+    def test_both_shells_are_told_how_to_set_the_gate(self) -> None:
+        """`export` 는 PowerShell 에서 아무것도 설정하지 않는다."""
+        common = between(self.prompts(), "## Common Instructions", "---", label="공통 지시")
+        self.assertIn("$env:READ_ONLY = '1'", common)
+        self.assertIn("$env:UNTRUSTED_DIFF = '[UNTRUSTED_DIFF]'", common)
+        self.assertIn("`export` sets nothing in PowerShell", common)
+
+    def test_the_powershell_analysis_reports_its_mode_too(self) -> None:
+        block = quality_reference("php-quality")
+        self.assertIn(
+            '"static analysis mode: read-only=$readOnlyState untrusted=$untrustedState"', block
+        )
+        self.assertLess(
+            block.index("static analysis mode: read-only=$readOnlyState"),
+            block.index("if ($ExecRisk) {"),
+        )
+
+    def test_the_dispatch_scope_table_matches_the_classification(self) -> None:
+        """상위 분류와 디스패치 범위가 어긋나면 수집만 되고 리뷰어에게 안 간다."""
+        prompts = self.prompts()
+        for name in ("`*.jsx`", "`.npmrc`", "`go.work`", "`rust-toolchain.toml`",
+                     "`.cargo/config.toml`", "`.cargo/config`"):
+            with self.subTest(name=name):
+                self.assertIn(name, prompts)
+        self.assertIn("must match the classification table in `SKILL.md` Step 1", prompts)
 
 
 class ExecutingToolGateTest(unittest.TestCase):
