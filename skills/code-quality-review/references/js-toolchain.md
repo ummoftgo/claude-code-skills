@@ -249,7 +249,7 @@ const data = await res.json();
 
 ### Grep patterns
 ```bash
-rg -n "await fetch\(" --glob "*.{js,mjs,cjs,ts,mts,cts,tsx,svelte}" | sort
+rg -n "await fetch\(" --glob "*.{js,mjs,cjs,ts,mts,cts,tsx,svelte}" . | sort
 ```
 
 Surface-specific duplication — repeated DOM queries, near-identical jQuery handlers — lives in

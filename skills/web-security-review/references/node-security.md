@@ -66,8 +66,8 @@ executable to an absolute path rather than letting `PATH` decide.
 ### Audit grep patterns
 
 ```bash
-rg -n "exec\(|execSync\(|shell:\s*true" --glob "*.{js,mjs,cjs,ts,mts,cts,tsx}"
-rg -n "spawn(Sync)?\(" -A3 --glob "*.{js,mjs,cjs,ts,mts,cts,tsx}"
+rg -n "exec\(|execSync\(|shell:\s*true" --glob "*.{js,mjs,cjs,ts,mts,cts,tsx}" .
+rg -n "spawn(Sync)?\(" -A3 --glob "*.{js,mjs,cjs,ts,mts,cts,tsx}" .
 ```
 
 ## 2. Path Handling
@@ -128,8 +128,8 @@ once at the HTTP boundary and validate after decoding (see `http-server-security
 ### Audit grep patterns
 
 ```bash
-rg -n "\beval\(|new Function\(|vm\.(runIn|createContext)" --glob "*.{js,mjs,cjs,ts,mts,cts}"
-rg -n "node-serialize|funcster|unserialize\(" --glob "*.{js,mjs,cjs,ts,json}"
+rg -n "\beval\(|new Function\(|vm\.(runIn|createContext)" --glob "*.{js,mjs,cjs,ts,mts,cts}" .
+rg -n "node-serialize|funcster|unserialize\(" --glob "*.{js,mjs,cjs,ts,json}" .
 ```
 
 ## 4. Prototype Pollution
@@ -211,8 +211,8 @@ npm audit fix
 - MUST fail closed when a required secret is missing, rather than falling back to a default.
 
 ```bash
-rg -n "process\.env" --glob "*.{js,mjs,cjs,ts}" -A1 | rg -i "log|console|print"
-rg -n "api[_-]?key|secret|token|password" --glob "*.{js,mjs,cjs,ts}" -i | rg -v "process\.env"
+rg -n "process\.env" --glob "*.{js,mjs,cjs,ts}" -A1 . | rg -i "log|console|print"
+rg -n "api[_-]?key|secret|token|password" --glob "*.{js,mjs,cjs,ts}" -i . | rg -v "process\.env"
 ```
 
 ## 7. Deprecated & Bypass APIs

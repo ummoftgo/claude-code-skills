@@ -67,13 +67,46 @@ echo "PHP_CMD=$PHP_CMD ($(${PHP_CMD} -r 'echo PHP_VERSION;' 2>/dev/null))"
 
 ### Derive the source directory
 
-`SRC_DIR` comes from the first PSR-4 **directory value** in `composer.json`. PSR-4 maps namespace
-keys (`"App\\"`) to directory values (`"src/"`), so read `array_values`, not `array_keys`.
+The analysis paths come from the PSR-4 **directory values** in `composer.json`. PSR-4 maps
+namespace keys (`"App\\"`) to directory values, so read `array_values`, not `array_keys`.
+
+Two shapes the naive read gets wrong, both ordinary Composer:
+
+- **A value may be an array.** `{"App\\": ["src", "lib"]}` is valid PSR-4 — one namespace served
+  by several roots. Passing that array to `rtrim` is a `TypeError` and the whole command dies,
+  so the review loses its source directory entirely rather than falling back.
+- **There may be several prefixes.** `{"App\\": "src", "Tests\\": "tests"}` means both are source
+  roots. Taking only the first analyses `src` and silently skips everything under `tests`.
 
 ```bash
-SRC_DIR=$(php -r '$p=json_decode(file_get_contents("composer.json"),true)["autoload"]["psr-4"]??[];echo rtrim(array_values($p)[0]??""," /");') || SRC_DIR="src"
-[ -n "$SRC_DIR" ] || SRC_DIR="src"      # fall back to src/, app/, or the project root
+# Every PSR-4 root, one per line, string and array values alike.
+SRC_DIRS=$($PHP_CMD -r '
+  $map = json_decode(file_get_contents("composer.json"), true)["autoload"]["psr-4"] ?? [];
+  $dirs = [];
+  foreach ($map as $value) {
+      foreach ((array) $value as $dir) {
+          $dir = rtrim((string) $dir, " /");
+          if ($dir !== "") { $dirs[] = $dir; }
+      }
+  }
+  echo implode("\n", array_unique($dirs));
+') || SRC_DIRS=""
+[ -n "$SRC_DIRS" ] || SRC_DIRS="src"    # fall back to src/, app/, or the project root
+
+# Drop roots that do not exist in this checkout — PHPStan fails the whole run on one bad path.
+EXISTING_DIRS=""
+while IFS= read -r dir; do
+  [ -d "$dir" ] && EXISTING_DIRS="$EXISTING_DIRS$dir
+"
+done <<EOF
+$SRC_DIRS
+EOF
+[ -n "$EXISTING_DIRS" ] && SRC_DIRS=$(printf '%s' "$EXISTING_DIRS")
 ```
+
+`SRC_DIRS` is newline-separated, so the analysis commands below expand it with `IFS` set to a
+newline. A source root containing a newline in its name would still break — that is a
+pre-existing limit of passing paths through a shell variable, not something this read introduces.
 
 ### Using PHP_CMD with tools
 
@@ -221,21 +254,27 @@ fi
 # would otherwise produce a normal-looking report with both gates inert. Say which mode ran.
 echo "static analysis mode: read-only=${READ_ONLY:-0} untrusted=${UNTRUSTED_DIFF:-0}"
 
-# PHPStan — run under the correct PHP binary
+# PHPStan — run under the correct PHP binary. `$SRC_DIRS` is deliberately unquoted: it is
+# newline-separated and every root must become its own argument.
+OLD_IFS=$IFS
+IFS='
+'
 if [ -n "$EXEC_RISK" ]; then
   echo "static analysis: skipped-untrusted-execution — analysis would run project code ($EXEC_RISK)"
 elif [ "${READ_ONLY:-0}" = "1" ] && [ -z "${PHPSTAN_OVERRIDE:-}" ]; then
   echo "static analysis: execution-error — no writable temp directory for the cache"
 elif [ "${READ_ONLY:-0}" = "1" ]; then
-  $PHP_CMD $(command -v phpstan) analyse "$SRC_DIR" \
+  $PHP_CMD $(command -v phpstan) analyse $SRC_DIRS \
     --configuration="$PHPSTAN_OVERRIDE" --no-progress --error-format=raw
 elif [ -n "$PHPSTAN_CONFIG" ]; then
-  $PHP_CMD $(command -v phpstan) analyse "$SRC_DIR" \
+  $PHP_CMD $(command -v phpstan) analyse $SRC_DIRS \
     --configuration="$PHPSTAN_CONFIG" --no-progress --error-format=raw
 else
-  $PHP_CMD $(command -v phpstan) analyse "$SRC_DIR" \
+  $PHP_CMD $(command -v phpstan) analyse $SRC_DIRS \
     --level=5 --no-progress --error-format=raw
 fi
+
+IFS=$OLD_IFS
 
 # phpcs / phpmd / phpcpd — version-agnostic; default php is fine
 phpcs --report=full <src>

@@ -75,9 +75,9 @@ Windows 프로젝트 범위는 스킬과 에이전트만 설치합니다. Window
 | `evidence-first-review` | ✓ | ✓ | 컨텍스트와 현재 코드·원본 데이터에 근거한 읽기 전용 검토 |
 | `safe-checkpoint` | ✓ | ✓ | 요청 범위와 쓰기 권한을 확인하는 커밋·인수인계 체크포인트 |
 | `systematic-debugging` | ✓ | ✓ | 재현과 증거 기반 디버깅 |
-| `web-security-review` | ✓ | ✓ | PHP/프론트엔드 보안 검토 |
+| `web-security-review` | ✓ | ✓ | 언어 축(PHP·Node·Python·Go·Rust) × 표면 축(HTTP 서버·브라우저·네이티브) 보안 검토 |
 | `web-parallel-dispatch` | ✓ | ✓ | 승인 기반 병렬 구현 분할 |
-| `code-quality-review` | ✓ | ✓ | 코드 품질·성능 검토 |
+| `code-quality-review` | ✓ | ✓ | 언어별 코드 품질·성능 검토 (PHP·Node/TS·Python·Go·Rust·프론트엔드·CSS) |
 | `branch-merge-review` | ✓ | ✓ | 머지 전 다중 리뷰 |
 | `web-browser-preview` | ✓ | ✓ | Windows/WSL Chrome CDP 미리보기 |
 | `report-output` | ✓ | ✓ | 리포트 출력 시 md/HTML 포맷 선택과 자체 완결형 HTML 리포트 생성 |

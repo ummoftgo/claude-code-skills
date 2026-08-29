@@ -8,11 +8,17 @@
 `READ_ONLY`/`UNTRUSTED_DIFF` 로 켜지는데 상위 dispatch 가 그것을 전달하지 않았다.
 단계별 검토가 각 조각을 봤을 뿐 **조각을 잇는 경로**를 보지 않았다는 뜻이었다.
 
-P0 7건(C1·H1·C2·C3·M3·H3·M1)은 `73d92e8` 에서 닫았다. 식별자와 표식은
-`.uniqid/2026-08-29-multilang-review-merge-block.md` 에 있다.
+**독립 병합 리뷰의 발견은 전부 닫혔다.** P0 7건(C1·H1·C2·C3·M3·H3·M1)은 `73d92e8`
+이후 여러 커밋에서, P1 이하 8건(H2·M2·M4·M5·CR-1·CR-2·L1·CR-3)은 `fix/multilang-review-followups`
+브랜치에서 닫았다. 식별자와 표식은 `.uniqid/2026-08-29-multilang-review-merge-block.md`
+에 있다.
 
-아래는 그와 별개로 후속에 남기는 항목이다. P1 이하(H2·M2·M4·M5·CR-1·CR-2·L1·CR-3)는
-아직 열려 있다.
+CR-1 을 닫으면서 실행 검증이 실제로 결함을 잡았다 — Python·Go·Rust 읽기 전용 명령을
+문서에서 뽑아 임시 프로젝트에서 돌렸더니, 문자열 검사로는 보이지 않던 것들이 드러난다.
+`ruff` 에서 `--no-cache` 를 빼면 `.ruff_cache/` 가 저장소에 생기고, `go build` 에서
+`-o` 를 빼면 바이너리가 남는다. 여섯 가지 변이가 전부 RED 다.
+
+아래는 그와 별개로 후속에 남기는 항목이다.
 
 ## 1. 네이티브 Windows PHPStan 종단간 검증
 

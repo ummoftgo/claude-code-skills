@@ -50,8 +50,8 @@ that program accepts.
 `shell=False`, and it is **not correct on Windows**, whose command-line parsing rules differ.
 
 ```bash
-rg -n "shell\s*=\s*True|os\.system|os\.popen|commands\." --glob "*.py"
-rg -n "subprocess\.(run|Popen|call|check_output)" -A2 --glob "*.py"
+rg -n "shell\s*=\s*True|os\.system|os\.popen|commands\." --glob "*.py" .
+rg -n "subprocess\.(run|Popen|call|check_output)" -A2 --glob "*.py" .
 ```
 
 ## 2. Path Handling
@@ -96,7 +96,7 @@ comparison — the filters were backported to security-fix releases of older bra
 test reports "unsupported" on runtimes that support it.
 
 ```bash
-rg -n "extractall|os\.path\.join\(" --glob "*.py"
+rg -n "extractall|os\.path\.join\(" --glob "*.py" .
 ```
 
 ## 3. Deserialization & Dynamic Evaluation
@@ -129,7 +129,7 @@ exhaustion. Treat it as *not RCE*, not as *harmless*: bound the input length bef
 use `json.loads` where the format allows.
 
 ```bash
-rg -n "pickle\.loads?|yaml\.load\(|\beval\(|\bexec\(|jsonpickle|dill\." --glob "*.py"
+rg -n "pickle\.loads?|yaml\.load\(|\beval\(|\bexec\(|jsonpickle|dill\." --glob "*.py" .
 ```
 
 ## 4. SQL and Query Construction
@@ -160,7 +160,7 @@ Django `.extra()` / `.raw()` / `RawSQL`, and any `filter(**{user_key: value})` b
 data.
 
 ```bash
-rg -n "execute\(f\"|execute\(.*%\s*\(|\.raw\(|\.extra\(|text\(f\"" --glob "*.py"
+rg -n "execute\(f\"|execute\(.*%\s*\(|\.raw\(|\.extra\(|text\(f\"" --glob "*.py" .
 ```
 
 ## 5. Dependency & Supply Chain
@@ -235,8 +235,8 @@ Django-specific and worth grepping for directly: `DEBUG = True` reachable in pro
 `ALLOWED_HOSTS`, and a hardcoded `SECRET_KEY` in `settings.py`.
 
 ```bash
-rg -n "SECRET_KEY|API_KEY|PASSWORD|TOKEN" --glob "*.py" -i | rg -v "os\.environ|getenv"
-rg -n "DEBUG\s*=\s*True|ALLOWED_HOSTS\s*=\s*\[\s*\]" --glob "*.py"
+rg -n "SECRET_KEY|API_KEY|PASSWORD|TOKEN" --glob "*.py" -i . | rg -v "os\.environ|getenv"
+rg -n "DEBUG\s*=\s*True|ALLOWED_HOSTS\s*=\s*\[\s*\]" --glob "*.py" .
 ```
 
 ## 7. Cryptography and Randomness
@@ -261,7 +261,7 @@ token = secrets.token_urlsafe(32)
 ```
 
 ```bash
-rg -n "random\.(choice|randint|random|choices)|md5\(|sha1\(|verify\s*=\s*False" --glob "*.py"
+rg -n "random\.(choice|randint|random|choices)|md5\(|sha1\(|verify\s*=\s*False" --glob "*.py" .
 ```
 
 ## 8. Template and Markup Rendering
@@ -293,8 +293,8 @@ When the rendered output reaches a browser, the browser-side rules in `browser-s
 apply on top of this section.
 
 ```bash
-rg -n "\|safe|mark_safe|Markup\(|Template\(" --glob "*.py" --glob "*.html" --glob "*.jinja*"
-rg -n "Environment\(" -A2 --glob "*.py" | rg -v "autoescape"
+rg -n "\|safe|mark_safe|Markup\(|Template\(" --glob "*.py" --glob "*.html" --glob "*.jinja*" .
+rg -n "Environment\(" -A2 --glob "*.py" . | rg -v "autoescape"
 ```
 
 ---

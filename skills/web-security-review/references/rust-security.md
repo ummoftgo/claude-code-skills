@@ -62,8 +62,8 @@ under `isize::MAX`. A length check alone is not the contract — when reviewing,
 the comment actually establishes rather than accepting a bounds `assert!` as the whole argument.
 
 ```bash
-rg -n 'unsafe\s*\{' -B2 --glob "*.rs"
-rg -n 'from_raw_parts|get_unchecked|transmute|set_len' --glob "*.rs"
+rg -n 'unsafe\s*\{' -B2 --glob "*.rs" .
+rg -n 'from_raw_parts|get_unchecked|transmute|set_len' --glob "*.rs" .
 ```
 
 `#![forbid(unsafe_code)]` in a crate root is a strong positive signal — note it in the report.
@@ -96,8 +96,8 @@ let value: u32 = slice.parse().map_err(|_| Error::BadInput)?;
 ```
 
 ```bash
-rg -n '\.unwrap\(\)|\.expect\(' --glob "*.rs" -g '!tests/**' -g '!benches/**'
-rg -n 'as u\d+|as i\d+' --glob "*.rs"      # silent truncation on narrowing casts
+rg -n '\.unwrap\(\)|\.expect\(' --glob "*.rs" -g '!tests/**' -g '!benches/**' .
+rg -n 'as u\d+|as i\d+' --glob "*.rs" . # silent truncation on narrowing casts
 ```
 
 `checked_*`, `saturating_*`, and `try_into()` are the answers for arithmetic. A bare `as` cast is
@@ -127,7 +127,7 @@ Command::new("convert").arg("--").arg(&user_file).arg("out.png");
 ```
 
 ```bash
-rg -n 'Command::new\("(sh|bash|cmd|powershell)"' --glob "*.rs"
+rg -n 'Command::new\("(sh|bash|cmd|powershell)"' --glob "*.rs" .
 ```
 
 ## 4. Path Handling
@@ -182,7 +182,7 @@ sqlx::query!("SELECT * FROM users WHERE email = $1", email)
 Diesel's `sql_query` and any `.raw` escape hatch are what to search for.
 
 ```bash
-rg -n 'query\(&?format!|sql_query\(|execute\(&?format!' --glob "*.rs"
+rg -n 'query\(&?format!|sql_query\(|execute\(&?format!' --glob "*.rs" .
 ```
 
 ## 6. Deserialization and Resource Limits
@@ -242,7 +242,7 @@ cargo audit
 
 # Build scripts and proc macros in the dependency graph — both run at build time
 rg -n '^\s*build\s*=' Cargo.toml
-rg -n 'proc-macro\s*=\s*true' --glob "*/Cargo.toml"
+rg -n 'proc-macro\s*=\s*true' --glob "*/Cargo.toml" .
 
 # Non-registry sources
 rg -n '(git|path)\s*=' Cargo.toml
@@ -280,8 +280,8 @@ struct Config { api_token: Secret<String> }
 ```
 
 ```bash
-rg -n '(?i)(api[_-]?key|secret|token|password)\s*[:=]\s*"' --glob "*.rs"
-rg -n '#\[derive\([^)]*Debug' -A6 --glob "*.rs" | rg -i 'token|secret|password|key'
+rg -n '(?i)(api[_-]?key|secret|token|password)\s*[:=]\s*"' --glob "*.rs" .
+rg -n '#\[derive\([^)]*Debug' -A6 --glob "*.rs" . | rg -i 'token|secret|password|key'
 ```
 
 ## 9. Cryptography and Randomness
@@ -300,8 +300,8 @@ rg -n '#\[derive\([^)]*Debug' -A6 --glob "*.rs" | rg -i 'token|secret|password|k
 - MUST NOT use MD5 or SHA-1 for anything security-bearing.
 
 ```bash
-rg -n 'SmallRng|seed_from_u64|from_seed\(' --glob "*.rs"
-rg -n 'danger_accept_invalid_certs|danger_accept_invalid_hostnames' --glob "*.rs"
+rg -n 'SmallRng|seed_from_u64|from_seed\(' --glob "*.rs" .
+rg -n 'danger_accept_invalid_certs|danger_accept_invalid_hostnames' --glob "*.rs" .
 ```
 
 Rust's type system does not protect against choosing the wrong primitive. Judge by which
