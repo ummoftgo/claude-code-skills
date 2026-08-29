@@ -215,7 +215,7 @@ $('#publish-btn').on('click', () => $.post('/api/publish', formData(), handleRes
 
 ```bash
 # Repeated selectors — the same string queried in more than one place
-rg -n "querySelector\(" --glob "*.{js,svelte}" | awk -F'"' '{print $2}' | sort | uniq -d
+rg -n "querySelector\(" --glob "*.{js,svelte}" . | awk -F'"' '{print $2}' | sort | uniq -d
 ```
 
 ## 3. Svelte Lifecycle & Store Subscription

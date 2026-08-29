@@ -22,9 +22,11 @@
    `PreconditionsForRedTests`가 그 전제를 따로 지킨다.
 """
 
+import hashlib
 import json
 import os
 import re
+import shlex
 import shutil
 import subprocess
 import tempfile
@@ -705,7 +707,7 @@ class PhpToolchainBaseline(unittest.TestCase):
         "composer 부재 폴백": r'if \[ -f composer\.json \]|composer\.json.*not|fall back',
         "제약 버전 파싱": r'"php"\s*\\?s\*:|PHP_CONSTRAINT',
         "versioned CLI": r"php\{major\}\.\{minor\}|ALT_PHP|php8\.",
-        "SRC_DIR PSR-4": r"SRC_DIR|psr-4",
+        "SRC_DIR PSR-4": r"SRC_DIRS?|psr-4",
     }
 
     def test_the_four_php_tool_roles_run(self) -> None:
@@ -1040,7 +1042,7 @@ class PhpStanReadOnlyGateTest(unittest.TestCase):
             f"echo {self.ANALYSIS_MARKER} #", block,
         )
         block = re.sub(r"^(phpcs|phpmd|phpcpd) .*", "", block, flags=re.MULTILINE)
-        return f"PHP_CMD={self.php_cmd()}\nSRC_DIR=src\n" + block
+        return f"PHP_CMD={self.php_cmd()}\nSRC_DIRS=src\n" + block
 
     @classmethod
     def php_cmd(cls) -> str:
@@ -1120,7 +1122,7 @@ class PhpStanReadOnlyGateTest(unittest.TestCase):
         self.assertIn("skipped-read-only", output, message)
 
     def repo_unchanged(self, config: str | None, extra: dict | None = None,
-                       env: dict | None = None) -> tuple[list, str]:
+                       env: dict | None = None, inject: str | None = None) -> tuple[list, str]:
         """게이트를 실제 PHPStan 과 함께 돌리고, 저장소에 생긴 파일과 출력을 돌려준다."""
         with tempfile.TemporaryDirectory() as base:
             work = Path(base)
@@ -1141,20 +1143,63 @@ class PhpStanReadOnlyGateTest(unittest.TestCase):
             script = self.gate_script().replace(
                 f"echo {self.ANALYSIS_MARKER} #", "$PHP_CMD $(command -v phpstan) analyse"
             )
+            # `inject` 는 이 검사기 자신을 검사하기 위한 것이다 — 게이트가 하지 않는
+            # 부작용을 일부러 일으켜, 그것이 결과에 나타나는지 본다.
+            if inject:
+                script = f"{script}\n{inject}\n"
             (work / "gate.sh").write_text(script, encoding="utf-8")
-            before = {str(f.relative_to(work)) for f in work.rglob("*") if f.is_file()}
+            before = self.fingerprint(work)
             done = subprocess.run(
                 ["bash", "gate.sh"], cwd=str(work), capture_output=True, text=True,
                 env={**os.environ, "READ_ONLY": "1", **(env or {})}, timeout=300,
             )
-            after = {str(f.relative_to(work)) for f in work.rglob("*") if f.is_file()}
+            after = self.fingerprint(work)
             output = done.stdout + done.stderr
             # PHPStan 이 설정 오류로 분석 전에 죽어도 "새 파일 없음"은 성립한다. 그러면
             # 격리를 검증한 게 아니라 실패를 검증한 것이 된다 — 같은 유형의 검증 설계
             # 결함이 이 작업에서 두 번 있었다. 분석이 실제로 끝났는지 함께 본다.
             # 심어 둔 오류가 보고되면 분석이 끝까지 갔다는 뜻이다.
             analysed = "NoSuchClassHere" in output
-            return sorted(after - before), output, analysed
+            # 새로 생긴 파일과 **내용이 바뀐** 파일을 함께 돌려준다. 경로 집합만 보면
+            # 도구가 `phpstan.neon` 을 제자리에서 고쳐 써도 통과한다.
+            created = sorted(set(after) - set(before))
+            modified = sorted(
+                path for path in set(after) & set(before) if after[path] != before[path]
+            )
+            return sorted(created + modified), output, analysed
+
+    @staticmethod
+    def fingerprint(root: Path) -> dict[str, str]:
+        """작업 트리의 `경로 → 내용 해시`."""
+        return {
+            str(path.relative_to(root)): hashlib.sha256(path.read_bytes()).hexdigest()
+            for path in root.rglob("*")
+            if path.is_file()
+        }
+
+    def test_an_in_place_rewrite_is_reported_as_a_change(self) -> None:
+        """경로 집합만 보면 제자리 수정이 보이지 않는다.
+
+        도구가 파일을 새로 만들지 않고 `phpstan.neon` 을 고쳐 써도 워크스페이스는
+        바뀐 것이다. 검사기가 그것을 실제로 보고하는지 게이트 경로로 확인한다 —
+        지문 함수만 따로 검사하면 `repo_unchanged` 가 그것을 쓰지 않아도 통과한다.
+        """
+        config = "parameters:\n    level: 0\n    paths:\n        - src\n"
+        written, _output, analysed = self.repo_unchanged(
+            config, inject="printf '# touched\\n' >> phpstan.neon"
+        )
+        self.assertTrue(analysed, "분석이 끝까지 가지 않았다")
+        self.assertIn(
+            "phpstan.neon", written,
+            "새 파일이 아니라 기존 파일이 바뀐 경우가 보고되지 않는다",
+        )
+
+    def test_an_untouched_workspace_reports_nothing(self) -> None:
+        """거짓 양성 확인 — 아무 부작용이 없으면 목록은 비어 있어야 한다."""
+        config = "parameters:\n    level: 0\n    paths:\n        - src\n"
+        written, _output, analysed = self.repo_unchanged(config)
+        self.assertTrue(analysed)
+        self.assertEqual(written, [], f"부작용이 없는데 보고됐다: {written}")
 
     #: 캐시를 저장소 안으로 보내려는 유효 NEON 표기들. 판정이 아니라 **격리**로 막으므로
     #: 전부 분석이 돌면서 저장소는 그대로여야 한다.
@@ -2813,6 +2858,363 @@ class RenameCollectionExecutionTest(unittest.TestCase):
                 result.stdout, "auth guard 인증.php",
                 "이전 경로가 따옴표 없이 그대로 나와야 한다",
             )
+
+
+class ReadOnlyExecutionBaseline(unittest.TestCase):
+    """읽기 전용 명령을 **문서에서 뽑아 실제로 돌려** 작업 트리가 그대로인지 본다.
+
+    PHP 는 PHPStan 을 진짜 실행해 파일 집합과 내용을 비교하는데, 다른 언어는 명령
+    문자열에 옵션이 있는지만 봤다. 문자열 검사는 "이 옵션이 적혀 있다"를 말할 뿐
+    "이 명령이 아무것도 쓰지 않는다"를 말하지 않는다 — 도구가 캐시를 어디에 쓰는지는
+    실행해 봐야 안다.
+
+    명령을 손으로 옮겨 적지 않고 참조 문서에서 그대로 꺼낸다. 옮겨 적으면 문서가
+    틀린 채로도 테스트가 통과한다.
+    """
+
+    #: 실행해도 되는 첫 토큰. 설치나 네트워크를 타는 명령은 돌리지 않는다.
+    RUNNABLE = {"ruff", "gofmt", "go", "cargo"}
+    #: 읽기 전용에서 건너뛰라고 표시된 블록 뒤의 명령은 대상이 아니다 — 쓰기가 의도다.
+    SKIP_AFTER = "**Read-only:**"
+
+    def read_only_commands(self, reference: str) -> list[str]:
+        """참조 문서에서 읽기 전용으로 돌려도 되는 셸 명령."""
+        text = quality_reference(reference)
+        found = []
+        for start, end, language, closed in fenced_spans_with_language(text):
+            if not closed or language.strip().lower() not in {"bash", "sh", "shell"}:
+                continue
+            # 블록 바로 앞 산문에 읽기 전용 마커가 있으면 그 블록은 쓰는 블록이다.
+            preceding = text[max(0, start - 400):start]
+            if self.SKIP_AFTER in preceding.rsplit("```", 1)[-1]:
+                continue
+            # 블록 안의 준비 줄(대입·`case`)은 명령이 아니지만 뒤 명령이 그것에
+            # 의존한다. 문서를 원문 그대로 돌리려면 함께 실어야 한다.
+            setup = []
+            for line in text[start:end].splitlines()[1:]:
+                stripped = line.strip()
+                if not stripped or stripped.startswith("#"):
+                    continue
+                try:
+                    # `.split()` 은 `CARGO_TARGET_DIR="$(mktemp -d)" cargo …` 를
+                    # 따옴표 안 공백에서 쪼개 명령을 놓친다.
+                    tokens = shlex.split(stripped, posix=True, comments=True)
+                except ValueError:
+                    continue
+                if not tokens:
+                    continue
+                index = 0
+                while index < len(tokens) and re.match(r"^[A-Za-z_]\w*=", tokens[index]):
+                    index += 1
+                if index >= len(tokens):
+                    setup.append(stripped)               # 순수 대입
+                    continue
+                if stripped.startswith(("case ", "esac", "if ", "fi", "for ", "done")):
+                    setup.append(stripped)
+                    continue
+                if tokens[index] in self.RUNNABLE and "path/to" not in stripped:
+                    found.append("\n".join(setup + [stripped]))
+        return found
+
+    def workspace(self, files: dict[str, str]) -> Path:
+        base = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, base, ignore_errors=True)
+        for name, body in files.items():
+            path = base / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(body, encoding="utf-8")
+        return base
+
+    @staticmethod
+    def fingerprint(root: Path) -> dict[str, str]:
+        return {
+            str(path.relative_to(root)): hashlib.sha256(path.read_bytes()).hexdigest()
+            for path in root.rglob("*")
+            if path.is_file()
+        }
+
+    def assertLeavesWorkspaceAlone(self, work: Path, command: str, env=None) -> str:
+        before = self.fingerprint(work)
+        done = subprocess.run(
+            ["bash", "-c", command], cwd=work, capture_output=True, text=True,
+            timeout=300, env={**os.environ, **(env or {})},
+        )
+        after = self.fingerprint(work)
+        created = sorted(set(after) - set(before))
+        modified = sorted(p for p in set(after) & set(before) if after[p] != before[p])
+        self.assertEqual(created, [], f"{command!r} 이 새 파일을 만들었다: {created}")
+        self.assertEqual(modified, [], f"{command!r} 이 기존 파일을 바꿨다: {modified}")
+        return done.stdout + done.stderr
+
+    def run_all(self, reference: str, files: dict[str, str], env=None) -> str:
+        commands = self.read_only_commands(reference)
+        self.assertTrue(commands, f"{reference}: 실행할 읽기 전용 명령을 찾지 못했다")
+        work = self.workspace(files)
+        output = ""
+        for command in commands:
+            with self.subTest(command=command):
+                output += self.assertLeavesWorkspaceAlone(work, command, env=env)
+        return output
+
+    @unittest.skipUnless(shutil.which("ruff"), "ruff 없음")
+    def test_python_read_only_commands_write_nothing(self) -> None:
+        output = self.run_all("python-quality", {
+            "pyproject.toml": '[project]\nname = "s"\nversion = "0"\n',
+            # 일부러 포맷이 어긋난 소스 — 쓰기를 유발하는 명령이 들어오면 파일이
+            # 바뀌어야 이 검사가 그것을 볼 수 있다.
+            "app.py": "import os\ndef f( x = [] ):\n  return   x\n",
+        })
+        # 분석이 실제로 돌았는지 — 심어 둔 미사용 import 가 보고되어야 한다.
+        self.assertIn("app.py", output, f"ruff 가 분석하지 않았다: {output[:300]}")
+
+    @unittest.skipUnless(shutil.which("go") and shutil.which("gofmt"), "go 없음")
+    def test_go_read_only_commands_write_nothing(self) -> None:
+        # `-buildvcs=false`: 임시 디렉터리에는 VCS 가 없어 `go build` 가 스탬핑 단계에서
+        # 멈춘다. 그러면 명령이 실제로 돌지 않아 이 검사가 아무것도 재지 못한다.
+        work_env = {"GOTOOLCHAIN": "local", "GOFLAGS": "-mod=mod -buildvcs=false",
+                    "GOCACHE": tempfile.mkdtemp()}
+        self.addCleanup(shutil.rmtree, work_env["GOCACHE"], ignore_errors=True)
+        output = self.run_all("go-quality", {
+            "go.mod": "module example.com/s\n\ngo 1.21\n",
+            # 들여쓰기가 어긋난 소스 — `gofmt -w` 가 들어오면 바뀐다.
+            "main.go": 'package main\n\nimport "fmt"\n\nfunc  main()  {\n'
+                       '      fmt.Printf("%d\\n", "not an int")\n}\n',
+        }, env=work_env)
+        self.assertIn("Printf", output, f"go vet 이 분석하지 않았다: {output[:400]}")
+
+    @unittest.skipUnless(shutil.which("cargo"), "cargo 없음")
+    def test_rust_read_only_commands_write_nothing(self) -> None:
+        target = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, target, ignore_errors=True)
+        files = {
+            "Cargo.toml": '[package]\nname = "s"\nversion = "0.1.0"\nedition = "2021"\n',
+            "src/main.rs": "fn main() {let x=1;println!(\"{}\", x);}\n",
+        }
+        commands = self.read_only_commands("rust-quality")
+        self.assertTrue(commands, "rust-quality: 실행할 읽기 전용 명령을 찾지 못했다")
+        # `CARGO_TARGET_DIR` 을 환경에 넣지 **않는다**. 넣으면 명령에서 그것을 빼도
+        # 결과가 같아져, 문서가 그 변수를 잃어버려도 이 검사가 통과한다.
+        env = {"CARGO_NET_OFFLINE": "true"}
+
+        # 두 성질을 각각 재려면 잠금 파일 상태가 달라야 한다.
+        #   잠금 없음 → `--locked` 가 `Cargo.lock` 생성을 막는지
+        #   잠금 있음 → `CARGO_TARGET_DIR` 이 `target/` 을 밖으로 빼는지
+        output = ""
+        for lockfile in (False, True):
+            work = self.workspace(files)
+            if lockfile:
+                subprocess.run(["cargo", "generate-lockfile"], cwd=work,
+                               capture_output=True, timeout=300,
+                               env={**os.environ, **env})
+            for command in commands:
+                with self.subTest(command=command, lockfile=lockfile):
+                    output += self.assertLeavesWorkspaceAlone(work, command, env=env)
+        self.assertTrue(output.strip(), "러스트 명령이 아무 출력도 내지 않았다")
+
+
+class RipgrepSearchPathTest(unittest.TestCase):
+    """`rg` 는 경로 인자가 없고 stdin 이 리다이렉트되면 stdin 을 읽는다.
+
+    파이프로 이어받는 두 번째 `rg` 는 그것이 의도지만, 명령의 **첫** `rg` 가 그러면
+    저장소를 검색하지 않고 조용히 아무것도 못 찾는다.
+    """
+
+    SHELL_LANGUAGES = {"bash", "sh", "shell", "console"}
+    #: 값이 뒤따르는 옵션. 그 값은 검색 경로가 아니다.
+    VALUE_OPTIONS = {
+        "-g", "--glob", "-t", "--type", "-T", "--type-not", "-A", "--after-context",
+        "-B", "--before-context", "-C", "--context", "-m", "--max-count", "-e",
+        "--regexp", "--iglob", "--replace", "-r", "--max-depth", "--threads", "-j",
+    }
+    #: 셸 메타문자 토큰. **정확히 일치**해야 한다 — `#\[derive...` 는 주석이 아니라
+    #: 패턴이고, `|` 로 시작하는 패턴도 파이프가 아니다.
+    STOP_TOKENS = {"|", "||", "&&", ";", ">", ">>", "<", "2>", "1>", "&"}
+
+    @classmethod
+    def positional(cls, tokens: list[str]) -> list[str]:
+        index, args = 1, []
+        while index < len(tokens):
+            token = tokens[index]
+            if token in cls.STOP_TOKENS:
+                break                                   # 파이프 뒤는 다른 명령이다
+            if token in cls.VALUE_OPTIONS:
+                index += 2
+                continue
+            if token.startswith("-"):
+                index += 1
+                continue
+            args.append(token)
+            index += 1
+        return args
+
+    def first_rg_calls(self) -> list[tuple[str, str, list[str]]]:
+        found = []
+        for path in sorted((ROOT / "skills").rglob("*.md")):
+            text = path.read_text(encoding="utf-8")
+            for start, end, language, closed in fenced_spans_with_language(text):
+                if not closed or language.strip().lower() not in self.SHELL_LANGUAGES:
+                    continue
+                for line in text[start:end].splitlines()[1:]:
+                    stripped = line.strip()
+                    if not stripped or stripped.startswith("#"):
+                        continue
+                    try:
+                        # `comments=True`: 줄 끝 `# 설명` 은 인자가 아니다. 따옴표 안의
+                        # `#` 은 shlex 가 패턴의 일부로 지킨다.
+                        tokens = shlex.split(stripped, posix=True, comments=True)
+                    except ValueError:
+                        continue                        # 셸 문법이 아니면 명령이 아니다
+                    if tokens and tokens[0] == "rg":
+                        found.append((str(path.relative_to(ROOT)), stripped,
+                                      self.positional(tokens)))
+        return found
+
+    def test_every_leading_rg_names_a_search_path(self) -> None:
+        calls = self.first_rg_calls()
+        self.assertGreater(len(calls), 20, "rg 호출을 거의 찾지 못했다 — 추출이 깨졌다")
+        for reference, line, args in calls:
+            with self.subTest(reference=reference, line=line[:70]):
+                self.assertGreaterEqual(
+                    len(args), 2,
+                    "패턴 뒤에 검색 경로가 없다. stdin 이 리다이렉트되면 저장소 대신 "
+                    "stdin 을 읽는다",
+                )
+
+
+class RoutingDescriptionTest(unittest.TestCase):
+    """description 은 라우팅 신호다. 짧게 유지하되 신호를 잃으면 안 된다."""
+
+    #: description 길이 상한. 다국어 지원으로 자연히 늘었지만, 도구 이름을 하나씩
+    #: 나열하는 식으로 계속 자라면 라우팅에 필요한 문장이 뒤로 밀린다. 본문이 말할 수
+    #: 있는 것은 본문에 둔다.
+    CEILING = 900
+
+    def descriptions(self) -> dict[str, str]:
+        found = {}
+        for path in sorted((ROOT / "skills").glob("*/SKILL.md")):
+            match = re.search(r'^description: "(.*)"$', path.read_text(encoding="utf-8"), re.M)
+            if match:
+                found[path.parent.name] = match.group(1)
+        return found
+
+    def test_no_description_exceeds_the_ceiling(self) -> None:
+        for name, description in self.descriptions().items():
+            with self.subTest(skill=name):
+                self.assertLessEqual(
+                    len(description), self.CEILING,
+                    f"{name} description 이 {len(description)}자다",
+                )
+
+    def test_the_quality_description_keeps_every_routing_signal(self) -> None:
+        """줄이면서 잃으면 안 되는 것 — 무엇을 하는지, 어떤 언어인지, 언제 **다른** 스킬인지."""
+        description = self.descriptions()["code-quality-review"]
+        for language in ("PHP", "Python", "Go", "Rust", "JavaScript/TypeScript", "CSS"):
+            with self.subTest(language=language):
+                self.assertIn(language, description)
+        for routing in ("use web-security-review", "use branch-merge-review"):
+            with self.subTest(routing=routing):
+                self.assertIn(routing, description)
+        # 지원하지 않는 언어를 남의 규칙으로 검사하지 않는다는 계약도 라우팅 정보다.
+        self.assertIn("reported as unsupported", description)
+
+
+class DiscardTargetTest(unittest.TestCase):
+    """`/dev/null` 은 Windows 에 없다 — 그 이름의 파일이 현재 디렉터리에 생긴다."""
+
+    def test_go_build_picks_the_discard_target_per_platform(self) -> None:
+        quality = quality_reference("go-quality")
+        self.assertIn('case "${OS:-}" in Windows_NT) DISCARD=NUL ;; esac', quality)
+        self.assertIn('go build -o "$DISCARD" ./...', quality)
+        self.assertNotIn("go build -o /dev/null", quality)
+
+    def test_the_reason_is_stated(self) -> None:
+        quality = " ".join(quality_reference("go-quality").split())
+        self.assertIn("`NUL` on Windows, `/dev/null` elsewhere", quality)
+        self.assertIn("creates a *file* of that name", quality)
+
+
+class ConfigNameCountTest(unittest.TestCase):
+    """설정 파일명 개수는 한 곳에서만 말해야 한다."""
+
+    def test_the_dispatch_prompt_does_not_restate_the_count(self) -> None:
+        prompts = read("skills/branch-merge-review/references/reviewer-prompts.md")
+        # 개수를 두 곳에서 말하면 한쪽이 낡는다. 실제로 세 개 대 여섯 개로 어긋나 있었다.
+        self.assertNotRegex(prompts, r"auto-discovers (three|six|\d+) config names")
+        self.assertIn("the count of auto-discovered config names lives there", prompts)
+
+    def test_the_authority_states_it_once(self) -> None:
+        quality = quality_reference("php-quality")
+        names = re.findall(r"auto-discovers \*\*(\w+)\*\* (?:config )?names", quality)
+        self.assertTrue(names, "권위 문서가 개수를 말하지 않는다")
+        self.assertEqual(set(names), {"six"}, f"개수가 엇갈린다: {names}")
+        # 그리고 그 개수가 실제 후보 목록과 맞아야 한다.
+        loop = between(quality, "for candidate in", "; do", label="후보 목록")
+        candidates = [token for token in loop.split() if "phpstan" in token]
+        self.assertEqual(
+            len(candidates), 6, f"후보 개수가 six 와 다르다: {candidates}"
+        )
+        self.assertEqual(len(set(candidates)), 6, f"후보에 중복이 있다: {candidates}")
+
+
+class Psr4SourceRootTest(unittest.TestCase):
+    """PSR-4 도출을 실제 PHP 로 돌린다.
+
+    값이 배열이거나 prefix 가 여럿인 것은 평범한 Composer 설정이다. 첫 값만 읽는
+    구현은 전자에서 `TypeError` 로 죽고 후자에서 나머지 루트를 조용히 버린다.
+    """
+
+    @classmethod
+    def snippet(cls) -> str:
+        """문서에서 도출 명령을 원문 그대로 꺼낸다."""
+        reference = quality_reference("php-quality")
+        start = reference.index("SRC_DIRS=$($PHP_CMD -r '")
+        end = reference.index("') || SRC_DIRS=\"\"", start) + len("') || SRC_DIRS=\"\"")
+        return reference[start:end]
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.php = shutil.which("php8.5") or shutil.which("php8.4") or shutil.which("php")
+        if not cls.php:
+            raise unittest.SkipTest("php 없음")
+
+    def roots(self, composer: str) -> list[str]:
+        with tempfile.TemporaryDirectory() as base:
+            work = Path(base)
+            (work / "composer.json").write_text(composer, encoding="utf-8")
+            script = f"PHP_CMD='{self.php} -n'\n{self.snippet()}\nprintf '%s' \"$SRC_DIRS\""
+            done = subprocess.run(["bash", "-c", script], cwd=work,
+                                  capture_output=True, text=True, timeout=60)
+            self.assertEqual(done.returncode, 0, done.stderr)
+            return [line for line in done.stdout.splitlines() if line]
+
+    def test_an_array_value_yields_every_root(self) -> None:
+        """`{"App\\\\": ["src", "lib"]}` — 첫 값만 읽으면 `rtrim` 이 TypeError 로 죽는다."""
+        self.assertEqual(
+            self.roots('{"autoload":{"psr-4":{"App\\\\":["src/","lib"]}}}'),
+            ["src", "lib"],
+        )
+
+    def test_several_prefixes_all_become_roots(self) -> None:
+        self.assertEqual(
+            self.roots('{"autoload":{"psr-4":{"App\\\\":"src","Tests\\\\":"tests/"}}}'),
+            ["src", "tests"],
+        )
+
+    def test_a_single_string_still_works(self) -> None:
+        self.assertEqual(self.roots('{"autoload":{"psr-4":{"App\\\\":"src/"}}}'), ["src"])
+
+    def test_duplicates_collapse(self) -> None:
+        self.assertEqual(
+            self.roots('{"autoload":{"psr-4":{"A\\\\":"src","B\\\\":"src/"}}}'), ["src"]
+        )
+
+    def test_no_autoload_section_yields_nothing_for_the_caller_to_fall_back_from(self) -> None:
+        self.assertEqual(self.roots('{"name":"x/y"}'), [])
+
+    def test_the_reference_states_both_shapes(self) -> None:
+        reference = " ".join(quality_reference("php-quality").split())
+        self.assertIn("A value may be an array", reference)
+        self.assertIn("There may be several prefixes", reference)
 
 
 class TrustStateDeliveryTest(unittest.TestCase):

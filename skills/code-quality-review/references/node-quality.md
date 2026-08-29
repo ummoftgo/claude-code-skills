@@ -256,14 +256,14 @@ Also check:
 
 ```bash
 # await inside a for/while body — classify each as dependent, rate-limited, or serialisable
-rg -n "for\s*\(.*\)\s*\{" --glob "*.{js,mjs,cjs,ts,mts,cts,tsx}" -A5 | rg "await"
+rg -n "for\s*\(.*\)\s*\{" --glob "*.{js,mjs,cjs,ts,mts,cts,tsx}" -A5 . | rg "await"
 
 # .pipe() chains without an error handler on the same statement
-rg -n "\.pipe\(" --glob "*.{js,mjs,cjs,ts,mts,cts,tsx}"
+rg -n "\.pipe\(" --glob "*.{js,mjs,cjs,ts,mts,cts,tsx}" .
 
 # rejection handlers that only log
-rg -n "unhandledRejection" -A3 --glob "*.{js,mjs,cjs,ts,mts,cts,tsx}"
+rg -n "unhandledRejection" -A3 --glob "*.{js,mjs,cjs,ts,mts,cts,tsx}" .
 
 # signal handling — absence is the finding for a long-running service
-rg -n "SIGTERM|SIGINT" --glob "*.{js,mjs,cjs,ts,mts,cts,tsx}"
+rg -n "SIGTERM|SIGINT" --glob "*.{js,mjs,cjs,ts,mts,cts,tsx}" .
 ```

@@ -15,12 +15,12 @@ Claude·Codex가 각자 수행한 뒤 교차 검증한 독립 병합 리뷰의 �
 | M3 | go툴체인-고정-누락 | `GOTOOLCHAIN=local` 미지정으로 툴체인을 diff가 좌우할 수 있음 | done |
 | H3 | 실행선택-파일-분류누락 | `.cargo/config`, `rust-toolchain.toml`, `go.work`, `*.jsx`, lockfile, `.npmrc` 미분류 | done |
 | M1 | rename수집-NUL안전위반 | rename 수집이 `cut -f2`를 써서 NUL-safe 규칙과 모순 | done |
-| H2 | psr4-배열값-타입오류 | PSR-4 값이 배열이면 TypeError, prefix가 여럿이면 첫 번째만 사용 | open |
-| M2 | 설정명-개수-모순 | 리뷰어 프롬프트는 세 개, php-quality는 여섯 개로 설정 파일명을 다르게 셈 | open |
-| M4 | windows-널장치-표기 | `go build -o`의 Windows 대상이 `/dev/null`로 적혀 있음 | open |
-| M5 | 저장소불변-경로만비교 | `repo_unchanged`가 경로 집합만 보고 기존 파일 내용 해시는 비교하지 않음 | open |
-| CR-1 | 다언어-실행테스트-부재 | Python·Go·Rust는 명령 문자열만 검사하고 실제 실행 회귀 방어가 없음 | open |
-| CR-2 | rg-경로인자-누락 | 첫 검색 `rg` 43개가 경로 인자 없이 stdin을 읽을 수 있음 | open |
-| L1 | readme-스킬설명-낡음 | README가 `web-security-review`를 여전히 PHP/프론트엔드로만 설명 | open |
-| CR-3 | description-길이-증가 | `code-quality-review` description 699→1080자, 라우팅 악화는 미측정 | open |
+| H2 | psr4-배열값-타입오류 | PSR-4 값이 배열이면 TypeError, prefix가 여럿이면 첫 번째만 사용 | done |
+| M2 | 설정명-개수-모순 | 리뷰어 프롬프트는 세 개, php-quality는 여섯 개로 설정 파일명을 다르게 셈 | done |
+| M4 | windows-널장치-표기 | `go build -o`의 Windows 대상이 `/dev/null`로 적혀 있음 | done |
+| M5 | 저장소불변-경로만비교 | `repo_unchanged`가 경로 집합만 보고 기존 파일 내용 해시는 비교하지 않음 | done |
+| CR-1 | 다언어-실행테스트-부재 | Python·Go·Rust는 명령 문자열만 검사하고 실제 실행 회귀 방어가 없음 | done |
+| CR-2 | rg-경로인자-누락 | 첫 검색 `rg` 43개가 경로 인자 없이 stdin을 읽을 수 있음 | done |
+| L1 | readme-스킬설명-낡음 | README가 `web-security-review`를 여전히 PHP/프론트엔드로만 설명 | done |
+| CR-3 | description-길이-증가 | `code-quality-review` description 699→1080자, 라우팅 악화는 미측정 | done |
 | H4 | npm감사-코드실행 | `.npmrc`의 `node-options`가 `npm audit` 자체에는 적용되지 않음이 확인되어 철회 | withdrawn |

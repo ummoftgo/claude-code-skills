@@ -103,12 +103,17 @@ GOTOOLCHAIN=local go install github.com/golangci/golangci-lint/cmd/golangci-lint
 pattern matches.** Measured on go1.22.2: with a single `main` package, `go build ./...` leaves an
 executable named after the directory behind; with several packages it discards the results and
 writes nothing. Since a review does not know which case it is in before running, always discard
-the output explicitly (`-o /dev/null` is accepted in both cases, including multi-package
-patterns):
+the output explicitly (`-o <discard>` is accepted in both cases, including multi-package
+patterns). The discard target is platform-specific: `NUL` on Windows, `/dev/null` elsewhere.
 
 ```bash
 # Type-checks and compiles without producing an artefact
-GOTOOLCHAIN=local go build -o /dev/null ./...
+# The discard target differs by platform: `NUL` on Windows, `/dev/null` elsewhere. Writing
+# `/dev/null` on Windows creates a *file* of that name in the current directory — the very
+# workspace write this flag exists to avoid.
+DISCARD=/dev/null
+case "${OS:-}" in Windows_NT) DISCARD=NUL ;; esac
+GOTOOLCHAIN=local go build -o "$DISCARD" ./...
 
 # The linters. Neither writes to the working tree.
 GOTOOLCHAIN=local go vet ./...

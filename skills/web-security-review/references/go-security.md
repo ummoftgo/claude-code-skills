@@ -45,8 +45,8 @@ exec.Command("convert", "--", userFile, "out.png")
 attacker can influence, pin the absolute path instead.
 
 ```bash
-rg -n 'exec\.Command\("(sh|bash|cmd|powershell)"' --glob "*.go"
-rg -n 'exec\.(Command|CommandContext)' -A2 --glob "*.go"
+rg -n 'exec\.Command\("(sh|bash|cmd|powershell)"' --glob "*.go" .
+rg -n 'exec\.(Command|CommandContext)' -A2 --glob "*.go" .
 ```
 
 ## 2. Path Handling
@@ -106,7 +106,7 @@ In an ORM the escape hatches are what to search: GORM `Raw`/`Exec`/`Where` with 
 string, sqlx `Sprintf` into a query, and any `ORDER BY` built from a request value.
 
 ```bash
-rg -n '(Query|Exec|QueryRow)\w*\(\s*(fmt\.Sprintf|".*"\s*\+)' --glob "*.go"
+rg -n '(Query|Exec|QueryRow)\w*\(\s*(fmt\.Sprintf|".*"\s*\+)' --glob "*.go" .
 ```
 
 ## 4. Template Rendering
@@ -145,8 +145,8 @@ import "html/template"
 ```
 
 ```bash
-rg -n '"text/template"' --glob "*.go"
-rg -n 'template\.(HTML|JS|URL|CSS|Srcset)\(' --glob "*.go"
+rg -n '"text/template"' --glob "*.go" .
+rg -n 'template\.(HTML|JS|URL|CSS|Srcset)\(' --glob "*.go" .
 ```
 
 When the output reaches a browser, `browser-security.md` applies on top of this section.
@@ -214,7 +214,7 @@ GOTOOLCHAIN=local govulncheck ./...
 rg -n '^\s*replace ' go.mod
 
 # Integrity settings in CI, Dockerfiles, and Makefiles
-rg -n 'GOSUMDB\s*=\s*off|GONOSUMDB|GOPRIVATE|GOINSECURE|GOFLAGS.*-mod=mod' --glob '!vendor'
+rg -n 'GOSUMDB\s*=\s*off|GONOSUMDB|GOPRIVATE|GOINSECURE|GOFLAGS.*-mod=mod' --glob '!vendor' .
 ```
 
 Read the match before rating it — these settings are not equivalent:
@@ -251,7 +251,7 @@ if !ok { return errors.New("SIGNING_KEY is required") }
 ```
 
 ```bash
-rg -n '(?i)(api[_-]?key|secret|token|password)\s*[:=]\s*"' --glob "*.go"
+rg -n '(?i)(api[_-]?key|secret|token|password)\s*[:=]\s*"' --glob "*.go" .
 ```
 
 ## 8. Cryptography and Randomness
@@ -279,7 +279,7 @@ Go 1.20 removed the need to seed `math/rand`, which makes the misuse *look* mode
 is still not cryptographically secure. Judge by the import, not by whether it is seeded.
 
 ```bash
-rg -n 'math/rand|InsecureSkipVerify|crypto/(md5|sha1)' --glob "*.go"
+rg -n 'math/rand|InsecureSkipVerify|crypto/(md5|sha1)' --glob "*.go" .
 ```
 
 ## 9. Integer and Slice Boundaries
