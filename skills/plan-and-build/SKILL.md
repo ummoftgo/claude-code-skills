@@ -23,7 +23,7 @@ Before editing implementation code, create one concise planning artifact. Follow
 Include:
 
 1. **Goal and non-goals** — state the observable outcome and boundaries.
-2. **Current context** — record the relevant architecture, constraints, and files inspected.
+2. **Current context** — record the relevant architecture, constraints, and files inspected. **Separate what you confirmed from what you are assuming**, and for each assumption name the external dependency behind it and which requirements or steps break if it turns out false. An assumption that still needs an answer does not belong here as settled fact — send it to `## Clarifications` or `## Deferred` below.
 3. **Specification** — define behavior, interfaces or data contracts, error cases, and acceptance criteria.
 4. **Implementation plan** — list ordered steps with likely files and verification for each step.
 5. **TDD decision** — state whether tests will be written first and why.
@@ -31,6 +31,102 @@ Include:
 7. **Design approval decision** — state whether the change requires the checkpoint below and why.
 
 Keep the artifact short enough to guide implementation. Pause for the user when an unresolved choice would materially change behavior, schema, external integration, or scope. Design and parallel execution have the explicit approval requirements below.
+
+### Resolve ambiguity before planning further
+
+Run this scan once, after the goal is clear and before the specification hardens. It exists
+because the single instruction "pause when a choice would materially change scope" gives no
+way to tell *which* unknowns are worth a question.
+
+Score each category **Clear / Partial / Missing**. Keep the map to yourself; show it only when
+you end up asking nothing.
+
+| # | Category | Covers |
+|---|---|---|
+| 1 | Scope and non-goals | What is explicitly out; which user roles differ |
+| 2 | Data and state | Entities, relationships, identity, **lifecycle** (retention, expiry, deletion), state transitions, migration, rollback, old/new coexistence |
+| 3 | Interface contract | Request/response shape, error format, the boundary between callers, version compatibility, deployment order |
+| 4 | Auth, permission, and trust boundary | Who may call it, what input is trusted, **and what the response exposes** |
+| 5 | Failure and edges | Errors, empty and loading states, concurrency, timeout, retry, idempotency, recovery |
+| 6 | Measurable completion | Whether each acceptance criterion can actually be checked; performance limits when relevant |
+| 7 | Unresolved markers | TODOs, placeholders, and vague adjectives used without a number |
+
+Check these only when the trigger fits: user-facing UI → accessibility · an existing localized
+surface → i18n · async work or an external integration → observability (who notices the failure).
+
+**Compliance is not a standing scan category here.** Ordinary data lifecycle — retention,
+expiry, deletion — always belongs to category 2 above. What is excluded is the separate
+compliance layer: *legally or contractually mandated* retention periods, deletion requests,
+consent, data residency, and audit trails. Those have not come up in this repository's work, and
+a check that never fires is dead weight in a scan run on every plan. When a task does carry a
+stated legal or contractual obligation, record it in `Current context` as an external constraint
+and turn it into an acceptance criterion — do not assume the auth and permission category covers
+it, because it does not.
+
+Then:
+
+1. Rank the Partial and Missing categories by **impact × uncertainty** and carry **at most five
+   questions** forward. Set aside anything that would not change implementation or verification,
+   and anything that can safely wait for the plan itself — set aside means recorded under
+   `## Deferred`, not silently dropped.
+2. **Ask dependent questions one at a time; group independent ones two or three together.** Lead
+   each with a recommendation and the reason for it, so the user can accept rather than compose.
+3. Recompute after each round. **Stop as soon as the deciding uncertainty is resolved** — the
+   limit of five is a ceiling, not a quota.
+4. Whatever remains unasked goes under `## Deferred` with what it blocks. Not asking is not the
+   same as being clear, and only the written record keeps those apart.
+5. Record answers under `## Clarifications` as `- Q: … → A: …`, then fold each into the
+   requirement it affects. Where an answer contradicts an earlier line, **replace that line**
+   rather than adding a second one.
+
+Use a structured question tool when the environment has one; otherwise ask in plain text. The
+contract is the shape — a recommendation with each question, at most five, dependent questions
+sequential, early exit, and the leftovers written down — not any particular tool.
+
+This scan runs *inside* the workflow. The scope gate in §1 comes first: a small localized edit
+with an obvious answer leaves the workflow entirely and never reaches this table.
+
+### Identify requirements when the work needs tracing
+
+Most plans do not need this. Prose requirements are enough when one person implements one
+feature in one sitting. Give requirements stable identifiers **only** when at least one holds:
+
+- several requirements must be verified independently and mapped to implementation steps;
+- there are multiple workstreams or parallel work;
+- architecture, API, schema, storage, or an external integration changes;
+- the work is handed across sessions or people, or a plan-versus-code audit is expected later.
+
+When it applies:
+
+```
+FR-001: <functional requirement>
+SC-001 (verifies FR-001) — 검증: <observable, checkable method>
+구현 단계 N: <description> — covers: FR-001 — 검증: <command / test>
+```
+
+- Implementation steps carry **`covers:` only**. §2 item 4 already requires verification per
+  step, so a second `verifies:` label would restate it.
+- Each `SC` declares **how it is checked**. A success criterion whose check cannot be written is
+  not measurable, and that shows up here rather than at the end.
+- **Every active `SC`'s declared check must be assigned to the verification of at least one step
+  that `covers:` its `FR`.** Without this an `SC` can have a method that no step ever runs — say
+  `SC-002` is "100 rows rejected within 3s" while the only step covering its `FR` lists a plain
+  functional test. The form passes; the load check never happens.
+- `SC` must be **observable and checkable**, not technology-free. A performance ceiling, a
+  compatibility version, or a failure mode is a legitimate criterion for internal API,
+  migration, or build work. The one rule that always holds: **no vague adjective without a
+  number** — fast, scalable, secure, intuitive, robust.
+- **Lifecycle:** never renumber and never reuse an identifier. A withdrawn requirement keeps its
+  line with a `withdrawn` status instead of disappearing, and is excluded from missing-work
+  counts — it is not an unbuilt requirement, so an audit must not report it as one.
+- **Readable form:** an identifier that reaches the user — in a plan summary, a status report, or
+  a question asking them to decide — needs a label a person can read. Invoke `readable-ids` if it
+  is installed to register the identifier and render it as `FR-001(feature/label)`. Without that
+  skill, keep a label beside every identifier in the plan itself; a bare `FR-001` in a sentence
+  costs the reader a document lookup that the writer could have spent one phrase avoiding.
+- Identifiers make gaps visible and give an audit an anchor to compare against `file:line`
+  evidence. They do not make coverage mechanical — **do not claim "100% coverage"**; a `covers:`
+  label is a starting point for judgement, not proof.
 
 ### Design approval checkpoint
 
@@ -89,7 +185,26 @@ Give each worker:
 
 After workers finish, inspect every diff, check for overlaps and contract mismatches, integrate centrally, and run the combined verification. Never treat successful isolated work as proof that the integrated result works.
 
-## 5. Finish with evidence
+## 5. Update the plan when implementation diverges
+
+Implementation reveals what planning could not. When any of these turns out materially different
+from what §2 recorded, **update the same planning artifact rather than letting the plan and the
+code drift apart**:
+
+- an assumption or its external dependency;
+- an active `FR`/`SC`, including one that should now be `withdrawn`;
+- an API, schema, storage, or external-integration decision;
+- file ownership between parallel workstreams;
+- the verification strategy for a step.
+
+Re-run the ambiguity scan only for the categories the change touches — a storage change reopens
+§2 and §5 of that table, not all seven. Ask for approval again **only when the change crosses the
+design approval boundary above**; a smaller correction is recorded and carried on with.
+
+A plan that silently stops describing the code is worse than no plan: the next reader, the
+handoff, and any later plan-versus-code audit all take it as current intent.
+
+## 6. Finish with evidence
 
 Run the focused tests, relevant wider tests, and project checks appropriate to the risk. Report:
 
@@ -97,4 +212,5 @@ Run the focused tests, relevant wider tests, and project checks appropriate to t
 - where the specification and plan live;
 - which tests were written first or why TDD was skipped;
 - which workstreams ran in parallel or why execution stayed sequential;
-- verification results and any remaining risk.
+- verification results and any remaining risk;
+- anything left under `## Deferred`, and what it leaves unsettled.

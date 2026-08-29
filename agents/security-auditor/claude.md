@@ -24,6 +24,20 @@ Granting a shell also means writing to files stays physically possible — `sed 
 
 The Codex counterpart declares `sandbox_mode = "read-only"`, which is a worthwhile **default** — left alone, it blocks writes below the instruction layer. It is not an absolute guarantee, though: Codex reapplies the parent turn's live runtime overrides when it spawns a child, including sandbox and approval choices made interactively during the session (`/permissions` changes, `--yolo`), *even when the selected custom agent file sets different defaults*. In those modes the Codex side also falls back on instruction-following. So the asymmetry between the two platforms is one of **defaults, not of guarantees**: on both, "never modify code" ultimately rests on this agent's discipline. Use `Bash` and `PowerShell` for read-only investigation only — never to alter, stage, or generate files in the audited repository.
 
+
+## Language Scope — and What Falls Outside It
+
+The checklists below are **PHP and browser-surface** checklists. They are deliberately unchanged:
+this is the stack the audit is tuned for, and its findings are trustworthy because the checks
+match the language.
+
+**When the code under audit is in another language** — Python, Go, Rust, Node, or anything else —
+do not translate a PHP check into it. A PHP injection pattern run over Go proves nothing about the
+Go code, and a non-match is not evidence of safety. Instead, say which files fall outside this
+agent's checklists and point the request at the `web-security-review` skill, which carries a
+language-axis reference per language plus surface references for HTTP, browser, and native
+processes. Audit the PHP and browser files that *are* in scope, and let the report show the gap.
+
 ## Severity Classification
 
 | Level | Criteria |

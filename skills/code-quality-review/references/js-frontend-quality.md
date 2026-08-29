@@ -1,222 +1,31 @@
-# JavaScript / jQuery / Svelte / HTMX Quality Reference
+# JavaScript Frontend Quality Reference
 
-CLI tools and manual patterns for frontend quality review.
+Browser-surface review: DOM, jQuery, Svelte, and HTMX. Tool invocation and the
+environment-neutral patterns (comments, style, duplication) live in `js-toolchain.md` —
+read that first, then this file for anything that only matters in a browser.
+
+> **The read-only rule in `SKILL.md` overrides every instruction in this file.** Under a
+> read-only request, no command here may install a tool, create a config file, write a
+> report file, or auto-fix code — regardless of what an individual section says. Each
+> write-causing command below carries its own read-only contract line; when one is
+> skipped, record it in the report with its reason.
 
 ## Table of Contents
-1. [CLI Tool Setup](#1-cli-tool-setup)
-2. [Running the Tools](#2-running-the-tools)
-3. [Comment Quality](#3-comment-quality)
-4. [Style Conventions](#4-style-conventions)
-5. [Duplication](#5-duplication)
-6. [Performance & Evaluation Order](#6-performance--evaluation-order)
-   - [Vanilla JS](#61-vanilla-js)
-   - [jQuery](#62-jquery)
-   - [Svelte](#63-svelte)
-   - [HTMX](#64-htmx)
-7. [Svelte Lifecycle & Store Subscription](#7-svelte-lifecycle--store-subscription)
+1. [Performance & Evaluation Order](#1-performance--evaluation-order)
+   - [Vanilla JS](#11-vanilla-js)
+   - [jQuery](#12-jquery)
+   - [Svelte](#13-svelte)
+   - [HTMX](#14-htmx)
+2. [Style & Duplication on the Browser Surface](#2-style--duplication-on-the-browser-surface)
+3. [Svelte Lifecycle & Store Subscription](#3-svelte-lifecycle--store-subscription)
 
 ---
 
-## 1. CLI Tool Setup
-
-Tools are project-local (npm). Install only what is missing.
-
-```bash
-# ESLint — use if eslint.config.js / .eslintrc.* exists in project
-if [ ! -f node_modules/.bin/eslint ]; then
-  npm install --save-dev eslint
-fi
-
-# Biome — use if biome.json exists (replaces ESLint + Prettier)
-if [ ! -f node_modules/.bin/biome ]; then
-  npm install --save-dev --save-exact @biomejs/biome
-  # First time: npx @biomejs/biome init
-fi
-
-# Oxlint — use for large codebases or alongside ESLint for speed
-if [ ! -f node_modules/.bin/oxlint ]; then
-  npm install --save-dev oxlint
-fi
-
-# svelte-check — install if .svelte files exist
-if ls src/**/*.svelte &>/dev/null 2>&1 || ls *.svelte &>/dev/null 2>&1; then
-  if [ ! -f node_modules/.bin/svelte-check ]; then
-    npm install --save-dev svelte-check
-  fi
-fi
-
-# knip — unused exports, files, dependencies
-if [ ! -f node_modules/.bin/knip ]; then
-  npm install --save-dev knip
-fi
-```
-
-**Tool selection priority**:
-1. If `biome.json` exists → use Biome (`check` covers lint + format)
-2. Else if `eslint.config.*` or `.eslintrc.*` exists → use ESLint
-3. Else → install ESLint (most compatible default)
-
----
-
-## 2. Running the Tools
-
-### ESLint
-```bash
-# Report only (no auto-fix)
-npx eslint . --format=compact
-
-# With specific directories
-npx eslint src/ --format=compact --max-warnings=0
-
-# JSON output for scripting
-npx eslint . --format=json -o eslint-report.json
-
-# Auto-fix safe issues
-npx eslint . --fix
-```
-
-### Biome
-```bash
-# Lint + format check combined
-npx @biomejs/biome check .
-
-# CI mode (stricter — fails on warnings too)
-npx @biomejs/biome ci .
-
-# Auto-fix
-npx @biomejs/biome check --write .
-```
-
-### Oxlint
-```bash
-# Fast lint pass (good for large codebases)
-npx oxlint .
-
-# With TypeScript support
-npx oxlint --tsconfig tsconfig.json .
-
-# Auto-fix
-npx oxlint --fix .
-```
-
-### svelte-check
-```bash
-# Machine-readable output
-npx svelte-check --output machine
-
-# Verbose (includes warnings)
-npx svelte-check --output machine-verbose
-
-# Check specific directory
-npx svelte-check --workspace src/
-```
-
-### knip — unused code & dependencies
-```bash
-# Full report: unused files, exports, dependencies
-npx knip
-
-# Fix automatically where possible
-npx knip --fix
-
-# Specific category
-npx knip --include files          # only unused files
-npx knip --include dependencies   # only unused npm packages
-npx knip --include exports        # only unused exports
-```
-
----
-
-## 3. Comment Quality
-
-### Flag
-```js
-// BAD — restates code
-const total = items.length; // get the total
-
-// BAD — stale JSDoc (param type wrong)
-/**
- * @param {String} id   ← should be number
- */
-function getUser(id) { ... }
-
-// BAD — commented-out dead code
-// const oldApi = fetch('/api/v1/users');
-const data = await fetch('/api/v2/users');
-```
-
-### Keep
-```js
-// GOOD — explains non-obvious behaviour
-// Debounce 300ms: avoids search API call on every keystroke
-const debouncedSearch = debounce(search, 300);
-
-// GOOD — intentional workaround with reason
-// Safari < 16 lacks :has() support; toggling class manually instead
-```
-
----
-
-## 4. Style Conventions
-
-Detect project majority first (ESLint/Biome handle most of this). Flag manually:
-
-```js
-// BAD — var in an ES6+ project
-var count = 0;
-
-// BAD — .then() mixed into async/await function
-async function loadUser() {
-    const res = await fetch('/api/user');
-    return res.json().then(u => u);   // ← inconsistent
-}
-
-// BAD — mixed quote style in same file
-const a = 'hello';
-const b = "world";
-```
-
-**Svelte-specific**:
-- Consistent section order: `<script>`, markup, `<style>`
-- Svelte 5: use `$props()` / `$state()` / `$derived()` — don't mix with Svelte 4 `export let` / stores
-
----
-
-## 5. Duplication
-
-knip covers unused exports. Also flag manually:
-
-```js
-// BAD — same fetch + error handling in 5 files
-const res = await fetch('/api/users');
-if (!res.ok) throw new Error('Failed');
-const data = await res.json();
-// → extract to api(url, options) helper
-
-// BAD — same DOM selector queried multiple times
-document.querySelector('#submit-btn').disabled = true;
-document.querySelector('#submit-btn').textContent = 'Saving...';
-// → const btn = document.querySelector('#submit-btn');
-
-// BAD — near-identical jQuery event handlers
-$('#save-btn').on('click', () => $.post('/api/save', formData(), handleResponse));
-$('#publish-btn').on('click', () => $.post('/api/publish', formData(), handleResponse));
-// → $('[data-action]').on('click', function() { $.post('/api/' + $(this).data('action'), ...) })
-```
-
-### Grep patterns
-```bash
-grep -rn "await fetch(" --include="*.js" --include="*.svelte" | sort
-grep -rn "querySelector(" --include="*.js" | awk -F'"' '{print $2}' | sort | uniq -d
-```
-
----
-
-## 6. Performance & Evaluation Order
+## 1. Performance & Evaluation Order
 
 ESLint/Biome catch some issues; the patterns below require manual review.
 
-### 6.1 Vanilla JS
+### 1.1 Vanilla JS
 
 #### Guard before expensive operation
 ```js
@@ -267,7 +76,7 @@ if (typeof config !== 'undefined' && config.debug === true) { }
 if (config?.debug) { }
 ```
 
-### 6.2 jQuery
+### 1.2 jQuery
 
 #### Cache selectors
 ```js
@@ -307,7 +116,7 @@ grep -rn "\.addClass\b" --include="*.js" -A1 | grep -B1 "\.addClass\b"  # chaine
 grep -rn "\$('.*')\." --include="*.js" | awk -F"'" '{print $2}' | sort | uniq -d  # repeated selectors
 ```
 
-### 6.3 Svelte
+### 1.3 Svelte
 
 #### Move heavy computation out of template
 ```svelte
@@ -347,7 +156,7 @@ grep -rn "{@html" --include="*.svelte"                         # XSS + unnecessa
 grep -rn "\.filter\|\.sort\|\.map" --include="*.svelte"        # heavy ops in template
 ```
 
-### 6.4 HTMX
+### 1.4 HTMX
 
 #### Prefer events over polling
 ```html
@@ -383,13 +192,39 @@ grep -rn 'hx-target.*["\x27]body["\x27]' --include="*.html" --include="*.php"  #
 
 ---
 
-## 7. Svelte Lifecycle & Store Subscription
+## 2. Style & Duplication on the Browser Surface
+
+Environment-neutral style and duplication rules are in `js-toolchain.md` §4–5. These only apply
+where a DOM exists.
+
+**Svelte component structure**:
+- Consistent section order: `<script>`, markup, `<style>`
+- Svelte 5: use `$props()` / `$state()` / `$derived()` — don't mix with Svelte 4 `export let` / stores
+
+```js
+// BAD — same DOM selector queried multiple times
+document.querySelector('#submit-btn').disabled = true;
+document.querySelector('#submit-btn').textContent = 'Saving...';
+// → const btn = document.querySelector('#submit-btn');
+
+// BAD — near-identical jQuery event handlers
+$('#save-btn').on('click', () => $.post('/api/save', formData(), handleResponse));
+$('#publish-btn').on('click', () => $.post('/api/publish', formData(), handleResponse));
+// → $('[data-action]').on('click', function() { $.post('/api/' + $(this).data('action'), ...) })
+```
+
+```bash
+# Repeated selectors — the same string queried in more than one place
+rg -n "querySelector\(" --glob "*.{js,svelte}" | awk -F'"' '{print $2}' | sort | uniq -d
+```
+
+## 3. Svelte Lifecycle & Store Subscription
 
 > **Review principle**: Always read the full component before flagging a lifecycle or subscription issue.
 > Isolated pattern matching produces false positives — the same code is correct or incorrect
 > depending on how the store/subscription is actually used in context.
 
-### 7.1 Auto-subscription vs. manual subscription
+### 3.1 Auto-subscription vs. manual subscription
 
 Svelte's `$store` reactive syntax **automatically unsubscribes** when the component is destroyed.
 Never flag this pattern as a leak — it is safe by design:
@@ -437,7 +272,7 @@ Manual `.subscribe()` calls, however, **do require explicit cleanup**:
 
 Only flag if all three are true.
 
-### 7.2 Svelte 5 — `$effect` cleanup
+### 3.2 Svelte 5 — `$effect` cleanup
 
 In Svelte 5, `$effect` runs setup code and optionally returns a cleanup function.
 A missing cleanup is only a problem when the effect sets up an external resource (event listener, timer, WebSocket).
@@ -466,7 +301,7 @@ A missing cleanup is only a problem when the effect sets up an external resource
 **Only flag `$effect` without a return when it registers an external listener or resource.**
 Pure side effects (logging, updating local state, calling an API) do not need cleanup.
 
-### 7.3 Module-scope stores (`<script context="module">`)
+### 3.3 Module-scope stores (`<script context="module">`)
 
 Stores declared in `<script context="module">` are shared across **all instances** of the component.
 They are intentionally persistent — do not flag them as missing cleanup.
@@ -480,7 +315,7 @@ Do flag if mutable module-scope state causes cross-instance contamination:
 </script>
 ```
 
-### 7.4 Audit grep
+### 3.4 Audit grep
 
 ```bash
 # Manual subscribe calls — check each for onDestroy cleanup

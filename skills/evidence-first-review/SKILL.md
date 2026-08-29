@@ -33,6 +33,39 @@ Choose the mode from the user's requested outcome and state it in the report.
 
 Do not silently drop a prior finding. Preserve its identity, cite the current evidence, and explain why its status changed or stayed the same.
 
+A recheck refers to findings that were numbered in a different document, so the identifier alone carries no meaning for the reader. Render each prior finding as `H-2(feature/label)` on first mention, following the `readable-ids` convention when that skill is installed; otherwise carry a short label beside every identifier in the ledger. **Do not write its registry here** — this skill is read-only in every mode, and rendering a label needs no file. Read an existing `.uniqid/` entry to reuse the label a prior pass already published; where none exists, say the label is unregistered rather than creating one.
+
+### `plan-conformance` profile
+
+A profile is not a fourth mode. It fixes **what the ledger is made of**, leaving the mode above
+to decide what the review has to produce. Where `recheck` builds its ledger from prior findings,
+`plan-conformance` builds it from the requirements of a plan.
+
+Apply it when the user asks whether a named plan, specification, or design was actually built —
+"이 계획대로 구현됐는지 검증해줘", "사양 대비 빠진 구현을 찾아줘". Lock the plan path and the
+revision or working-tree scope with the §1 procedure first; ask for the path when more than one
+plan could be meant.
+
+**Judge authority before conformance.** Every requirement is first `active`, `withdrawn`, or
+`superseded` — a requirement the user has since dropped or replaced is not a missing
+implementation, and calling it one sends people to rebuild something deliberately abandoned.
+Only `active` requirements then take `implemented` / `partial` / `missing` / `unverifiable`.
+
+Report as a table keyed by requirement identifier — or by quoted requirement text when the plan
+has no identifiers — with `file:line` evidence for every row. Behaviour found in the reviewed
+scope that no requirement asked for is listed separately as `unrequested`: it may be scope
+creep, an undocumented decision, or something the plan simply never recorded. **Do not call it
+dead code**, and do not recommend deleting it on the strength of its absence from the plan.
+
+The plan is intent, never proof. It can be stale, or contradicted by a later instruction from
+the user — §1's rule that a context document cannot establish its own claims applies to it in
+full. **Do not modify the plan file.** Report inline; adding the gaps back into the plan is
+`plan-and-build`'s §5, run with its own authority.
+
+When this profile runs alongside `recheck` or `final-approval`, it **adds** a ledger rather than
+replacing one. Prior findings keep their one-to-one tracking, and the two ledgers cross-reference
+where they touch the same code.
+
 ## 3. Build an evidence ledger
 
 Use the strongest available sources in this order:

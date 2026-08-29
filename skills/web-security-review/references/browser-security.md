@@ -1,4 +1,10 @@
-# Web Frontend Security Reference
+# Browser Surface Security Reference
+
+**Surface axis.** These rules hold wherever code runs in a browser, whatever serves it — PHP,
+Node, Go. Pair this file with the **language axis** reference for the backend that produced the
+page (`php-backend-security.md`, `node-security.md`, …). Neither file is complete alone: the
+language axis owns runtime APIs, dependency and supply-chain risk; this file owns the DOM, the
+origin, and client-side storage.
 
 Security checklist for vanilla JS, jQuery, Svelte, and HTMX frontends. Used by the `web-security-review` skill.
 

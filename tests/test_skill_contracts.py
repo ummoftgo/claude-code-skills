@@ -1,6 +1,7 @@
 import json
 import re
 import tempfile
+import unicodedata
 import unittest
 from pathlib import Path
 
@@ -144,6 +145,85 @@ HTML_COMMENT_PATTERN = re.compile(r"<!--.*?-->", re.DOTALL)
 CODE_FENCE_PATTERN = re.compile(r"(?P<fence>`{3,}|~{3,})(?P<info>.*)$")
 
 
+# Pinned documents forbid HTML entirely, avoiding incomplete hidden-element semantics.
+# Bare prose placeholders such as `<path>` remain legal.
+HTML_ELEMENTS = {
+    "a", "abbr", "address", "article", "aside", "b", "blockquote", "body", "button",
+    "canvas", "caption", "cite", "code", "colgroup", "data", "datalist", "dd",
+    "details", "dfn", "dialog", "div", "dl", "dt", "em", "fieldset", "figcaption",
+    "figure", "footer", "form", "h1", "h2", "h3", "h4", "h5", "h6", "head", "header",
+    "hgroup", "html", "i", "iframe", "ins", "kbd", "label", "legend", "li", "main",
+    "map", "mark", "menu", "meter", "nav", "noscript", "object", "ol", "optgroup",
+    "option", "output", "p", "picture", "pre", "progress", "q", "rp", "rt", "ruby",
+    "s", "samp", "script", "search", "section", "select", "slot", "small", "span",
+    "strong", "style", "sub", "summary", "sup", "table", "tbody", "td", "template",
+    "textarea", "tfoot", "th", "thead", "time", "title", "tr", "u", "ul", "var",
+    "video", "audio", "svg", "math", "iframe", "frame", "frameset", "marquee",
+    # Void elements hide nothing but still violate the no-HTML contract.
+    "area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta",
+    "param", "source", "track", "wbr",
+}
+HTML_TAG = re.compile(r"</?(?P<name>[a-zA-Z][\w-]*)(?P<attrs>\s[^>]*)?/?>")
+
+# Inline code can discuss tags without adding HTML to the document.
+INLINE_CODE = re.compile(r"`[^`\n]*`")
+
+
+def unterminated_comments(text: str) -> int:
+    """Count `<!--` openers with no matching `-->`; they hide the remaining document."""
+    return len(re.findall(r"<!--", text)) - len(re.findall(r"-->", text))
+
+
+def assert_html_free(test, text: str, label: str) -> None:
+    """Assert that instructional text has no HTML or unterminated comment.
+
+    Fenced examples are excluded from the element scan, but comments use the raw text.
+    """
+    dangling = unterminated_comments(text)
+    test.assertEqual(dangling, 0, f"{label} has {dangling} unterminated HTML comment(s)")
+    elements = raw_html_elements(instructional_text(text))
+    test.assertEqual(elements, [], f"{label} contains raw HTML: {sorted(set(elements))}")
+
+
+def raw_html_elements(text: str) -> list[str]:
+    """Return tag-shaped markup outside inline code.
+
+    Structure catches closing, self-closing, attributed, and custom tags; the name list
+    catches bare standard tags. Bare placeholders such as `<path>` remain legal.
+    """
+    masked = INLINE_CODE.sub(lambda m: " " * len(m.group(0)), text)
+    found = []
+    for match in HTML_TAG.finditer(masked):
+        name = match.group("name").lower()
+        tag = match.group(0)
+        structural = (
+            tag.startswith("</")
+            or tag.endswith("/>")
+            or bool((match.group("attrs") or "").strip())
+            or "-" in name
+        )
+        if structural or name in HTML_ELEMENTS:
+            found.append(name)
+    return found
+
+
+def assert_not_hidden(test, text: str, needle: str, label: str) -> None:
+    """Assert that `needle` is visible: no HTML wrapper or indented code block."""
+    assert_html_free(test, text, label)
+
+    index = text.find(needle)
+    test.assertNotEqual(index, -1, f"{label}: {needle!r} not found")
+    while index != -1:
+        line_start = text.rfind("\n", 0, index) + 1
+        line = text[line_start : text.find("\n", index)]
+        test.assertRegex(
+            line,
+            r"^ {0,3}(?![ \t])",
+            f"{label}: {needle!r} is indented into a code block",
+        )
+        index = text.find(needle, index + len(needle))
+
+
 def instructional_text(markdown: str) -> str:
     """`markdown` with HTML comments and fenced code blocks removed.
 
@@ -182,6 +262,98 @@ def instructional_text(markdown: str) -> str:
         ):
             fence = None
     return "\n".join(kept)
+
+
+# Deliberately narrow drift detector for imperatives. Bare `not` and `no` also occur in
+# valid surrounding prose; exact blocks or sentence position provide stronger checks.
+INVERTING_NEGATION = re.compile(
+    r"\b(?:do(?:es)?\s+not|don't|never|must\s+not|shall\s+not|no\s+longer|instead\s+of"
+    r"|avoid|refrain|forbidden|forbids|prohibit(?:ed|s)?|omit|rather\s+than"
+    r"|under\s+no\s+circumstances|wrong\s+to|cannot|can't|may\s+not|should\s+not"
+    r"|shouldn't|mustn't|couldn't|won't|will\s+not)\b",
+    re.IGNORECASE,
+)
+
+# Single newlines are hard wraps, not sentence boundaries.
+SENTENCE_BOUNDARY = re.compile(r"(?:\n\s*\n|(?<=[.!?;])[ \n])")
+
+
+def sentences_containing(text: str, needle: str) -> list[str]:
+    """Return every sentence containing `needle`, normalised and in document order.
+
+    Sentence scope permits a neighbouring exception; every occurrence is checked.
+    """
+    boundaries = [match.end() for match in SENTENCE_BOUNDARY.finditer(text)]
+    found: list[str] = []
+    index = text.find(needle)
+    while index != -1:
+        starts = [end for end in boundaries if end <= index]
+        start = starts[-1] if starts else 0
+        end_match = SENTENCE_BOUNDARY.search(text, index + len(needle))
+        end = end_match.start() if end_match else len(text)
+        found.append(" ".join(text[start:end].split()))
+        index = text.find(needle, index + len(needle))
+    return found
+
+
+# Blocks end at blank lines or list items. This catches preceding prose that reverses a
+# rule without pinning neighbouring list items.
+BLOCK_BOUNDARY = re.compile(r"(?:\n\s*\n|\n(?=\s*[-*+] ))")
+
+
+def block_containing(text: str, needle: str) -> list[str]:
+    """Every block `needle` sits in, whitespace normalised, in document order."""
+    boundaries = [match.end() for match in BLOCK_BOUNDARY.finditer(text)]
+    found: list[str] = []
+    index = text.find(needle)
+    while index != -1:
+        starts = [end for end in boundaries if end <= index]
+        start = starts[-1] if starts else 0
+        end_match = BLOCK_BOUNDARY.search(text, index + len(needle))
+        end = end_match.start() if end_match else len(text)
+        found.append(" ".join(text[start:end].split()))
+        index = text.find(needle, index + len(needle))
+    return found
+
+
+def fenced_blocks(markdown: str) -> list[str]:
+    """Return fenced code block contents, excluding comments and surrounding prose."""
+    blocks: list[str] = []
+    current: list[str] | None = None
+    fence: str | None = None
+    for line in HTML_COMMENT_PATTERN.sub("", markdown).splitlines():
+        match = CODE_FENCE_PATTERN.match(line.lstrip())
+        if fence is None:
+            if match:
+                fence = match.group("fence")
+                current = []
+        elif (
+            match
+            and match.group("fence")[0] == fence[0]
+            and len(match.group("fence")) >= len(fence)
+            and not match.group("info").strip()
+        ):
+            blocks.append("\n".join(current or []))
+            fence, current = None, None
+        elif current is not None:
+            current.append(line)
+    if current is not None:                      # unterminated fence: keep what we saw
+        blocks.append("\n".join(current))
+    return blocks
+
+
+def _split_unescaped(text: str, separator: str) -> list[str]:
+    """Split on separators preceded by an even-length backslash run."""
+    parts, current, backslashes = [], [], 0
+    for character in text:
+        if character == separator and backslashes % 2 == 0:
+            parts.append("".join(current))
+            current = []
+        else:
+            current.append(character)
+        backslashes = backslashes + 1 if character == "\\" else 0
+    parts.append("".join(current))
+    return parts
 
 
 def reference_links(markdown: str) -> list[str]:
@@ -232,11 +404,128 @@ def reference_links(markdown: str) -> list[str]:
     return sorted(found)
 
 
+# The wiring sentence each emitting document carries, pinned verbatim.
+#
+# Pinned rather than probed for negations because the net has measured holes that no
+# vocabulary closes - "It is pointless to invoke ...", "Skip this: invoke ...", "This
+# rule is obsolete." all reverse the sense without a listed word. Each of these blocks
+# is exactly one paragraph or one list item, so equality is available here and equality
+# is what no rephrasing survives.
+#
+# The cost is real: rewording one of these fails this test. That is the intended
+# trade. These sentences are the wiring contract, and changing what they instruct
+# should cost a deliberate test edit rather than passing unnoticed.
+EMITTING_CONTRACT_BLOCKS = {
+    "skills/plan-and-build/SKILL.md": (
+        "- **Readable form:** an identifier that reaches the user — in a plan summary, a "
+        "status report, or a question asking them to decide — needs a label a person can "
+        "read. Invoke `readable-ids` if it is installed to register the identifier and render "
+        "it as `FR-001(feature/label)`. Without that skill, keep a label beside every "
+        "identifier in the plan itself; a bare `FR-001` in a sentence costs the reader a "
+        "document lookup that the writer could have spent one phrase avoiding."
+    ),
+    "skills/branch-merge-review/SKILL.md": (
+        "**Finding identifiers**: the report is read by a person and its blocking-items line "
+        "asks them to decide, so `CH-1` alone is not enough. Render each identifier as "
+        "`CH-1(feature/label)` on first mention, following the `readable-ids` convention when "
+        "that skill is installed. **Do not write its registry**: the delivery rule above "
+        "forbids a review from changing the working tree, and that holds for every review "
+        "rather than only an explicitly read-only one — rendering a label needs no file. "
+        "Without that skill, still write a short label beside each identifier, because a "
+        "later recheck refers to these findings by number across a different document, which "
+        "is exactly where a bare number stops meaning anything."
+    ),
+    "skills/branch-merge-review/references/consolidated-report-template.md": (
+        "`(feature/label)` below is the readable form of a finding identifier, owned by the "
+        "`readable-ids` skill: full form on first mention in the report — the blocking-items "
+        "line and each finding heading — and the bare identifier everywhere after that. When "
+        "`readable-ids` is not installed, keep a short label in the same position anyway; a "
+        "recheck later refers to these findings by number from a different document."
+    ),
+    "skills/evidence-first-review/SKILL.md": (
+        "A recheck refers to findings that were numbered in a different document, so the "
+        "identifier alone carries no meaning for the reader. Render each prior finding as "
+        "`H-2(feature/label)` on first mention, following the `readable-ids` convention when "
+        "that skill is installed; otherwise carry a short label beside every identifier in "
+        "the ledger. **Do not write its registry here** — this skill is read-only in every "
+        "mode, and rendering a label needs no file. Read an existing `.uniqid/` entry to "
+        "reuse the label a prior pass already published; where none exists, say the label is "
+        "unregistered rather than creating one."
+    ),
+    "skills/report-output/SKILL.md": (
+        "- **Identifiers**: A report is human-facing output. When it refers to work by a "
+        "short identifier (`A1`, `FR-001`, `CH-2`), write `A1(feature/label)` on first "
+        "mention, short form afterwards, following the `readable-ids` convention when that "
+        "skill is installed. Rendering needs no file, so it applies under the read-only rule "
+        "above too; creating the `.uniqid/` registry is a write, and `readable-ids` owns when "
+        "that is permitted — never when the invoking skill says the report is a review. Where "
+        "that skill is unavailable, keep a label beside the identifier anyway — a reader who "
+        "has to open another document to learn what `A1` is has lost the summary."
+    ),
+    "skills/safe-checkpoint/references/handoff-template.md": (
+        "A handoff is read by someone who does not have this session's context. When it names "
+        "work by a short identifier, write the readable form — `A1(feature/label)` — on first "
+        "mention and the short form afterwards; `readable-ids` owns that convention and its "
+        "registry when the skill is installed. Rendering the label is part of writing the "
+        "handoff; **creating or updating `.uniqid/` is a separate write** and needs its own "
+        "authority under the table in SKILL.md §2 — authority to write the handoff does not "
+        "extend to it. That is this skill's per-artifact rule, which `readable-ids` defers to "
+        "by name."
+    ),
+}
+
+
 class SkillReadingMixin:
     """Reading helpers shared by the contract tests and the tests covering them."""
 
     def read(self, relative_path: str) -> str:
         return (ROOT / relative_path).read_text(encoding="utf-8")
+
+    def readable_ids_body(self) -> str:
+        """Return only readable-ids' instructional body.
+
+        Frontmatter and references repeat contract terms; comments and fences do not
+        instruct. Excluding all four prevents them from satisfying body assertions.
+        """
+        body = self.read("skills/readable-ids/SKILL.md")
+        self.assertTrue(body.startswith("---\n"))
+        return instructional_text(body.split("\n---\n", 1)[1])
+
+    def assertPositiveInstruction(
+        self, text: str, needle: str, sentence_initial: bool = False
+    ) -> None:
+        """Assert that every `needle` occurrence remains a positive instruction.
+
+        The negation vocabulary detects drift but is not semantic proof.
+        `sentence_initial` adds a vocabulary-independent structural check. Scope stays
+        at one sentence so a neighbouring exception is legal; a preceding sentence or
+        block can still negate the instruction. Prefer an exact block when available.
+        """
+        self.assertIn(needle, text)
+        for sentence in sentences_containing(text, needle):
+            negation = INVERTING_NEGATION.search(sentence)
+            self.assertIsNone(
+                negation,
+                f"instruction inverted by {negation.group(0)!r}: {sentence}"
+                if negation
+                else "",
+            )
+            if sentence_initial:
+                self.assertTrue(
+                    sentence.startswith(needle),
+                    f"instruction no longer starts its sentence: {sentence}",
+                )
+
+    def assertContractBlock(self, text: str, anchor: str, expected: str) -> None:
+        """Assert the normalised block around `anchor` exactly matches `expected`.
+
+        Exact block matching catches preceding reversals but intentionally makes any
+        contract-block rewrite require a test update.
+        """
+        found = block_containing(text, anchor)
+        self.assertTrue(found, f"anchor not present: {anchor!r}")
+        for block in found:
+            self.assertEqual(block, expected)
 
     def read_skill(self, name: str) -> str:
         """SKILL.md joined with the reference documents SKILL.md explicitly points at.
@@ -417,6 +706,152 @@ class SkillContractTest(SkillReadingMixin, unittest.TestCase):
         self.assertIn("runtime manifests", skill)
         self.assertIn("upstream synchronization", skill)
 
+    def test_readable_ids_defines_the_registry_and_rendering_contract(self) -> None:
+        skill = self.readable_ids_body()
+
+        # The convention document must expose, not merely contain, its rules.
+        assert_html_free(self, self.read("skills/readable-ids/SKILL.md"), "readable-ids")
+
+        # Registry shape and closed status vocabulary.
+        self.assertContractBlock(
+            skill,
+            ".uniqid/{yyyy-mm-dd}-{slug}.md",
+            "- One file per identifier set: `.uniqid/{yyyy-mm-dd}-{slug}.md` at the "
+            "project root.",
+        )
+        for status in ("open", "in-progress", "done", "withdrawn"):
+            self.assertIn(f"`{status}`", skill)
+
+        # Rendering rule and first-mention constraint.
+        self.assertContractBlock(
+            skill,
+            "Write `A1(feature/label)`",
+            "Write `A1(feature/label)` — for example "
+            "`C1(리뷰신뢰경계/신뢰상태-전달-누락)` — in:",
+        )
+        self.assertIn("full form on the first mention", skill)
+
+        # Structural entry points need their own first mention.
+        self.assertIn("Structural positions each count as a first mention", skill)
+
+        # Registration threshold and label rules.
+        for threshold in (
+            "another document will refer to it",
+            "outlives one session or one report",
+            "asked to decide something by that identifier",
+        ):
+            self.assertIn(threshold, skill)
+        self.assertIn(
+            "Hyphens instead of spaces. No whitespace, and no `/` —", skill
+        )
+
+        # Lifecycle and immutable rendered fields.
+        self.assertIn("Never renumber and never reuse an identifier", skill)
+        self.assertIn("A published label is fixed, and so is its `feature`", skill)
+
+        self.assertIn("the label rules above apply to it too", skill)
+        self.assertIn("two identifiers that share a short form", skill)
+
+    def test_registering_is_separated_from_rendering_for_read_only_callers(self) -> None:
+        """Registration is a write; rendering remains available to read-only callers."""
+        skill = self.readable_ids_body()
+        self.assertIn("Registering is a workspace write; rendering is not", skill)
+        self.assertIn("Three permissions, and none of them implies the next", skill)
+        # Delegation must not launder a review's write prohibition.
+        self.assertContractBlock(
+            skill,
+            "A review never registers",
+            "**A review never registers, whoever ends up writing its report.** The "
+            "prohibition follows the work, not the caller: `branch-merge-review` "
+            "delegating a report file to `report-output` does not turn a review into "
+            "something that may change the working tree, and permission to write *that* "
+            "file is not permission to write this one.",
+        )
+        self.assertContractBlock(
+            skill,
+            "**Staging** is not part of writing",
+            "1. **Writing the registry** follows the caller's authority to write files "
+            "for this task. A caller already creating a plan or a report may create the "
+            "registry beside it. Where the caller grants authority *per artifact* rather "
+            "than per task — `safe-checkpoint` does, deliberately, so a checkpoint "
+            "cannot absorb unrelated work — the registry is a separate artifact and "
+            "needs its own permission. 2. **Staging** is not part of writing. Leave the "
+            "file untracked unless the caller stages this task's output. 3. "
+            "**Committing** is not part of staging. Where the caller has no standing "
+            "permission to commit — an ordinary task has none — say the entry is "
+            "uncommitted rather than committing it.",
+        )
+
+        evidence = self.read("skills/evidence-first-review/SKILL.md")
+        self.assertIn("Do not write its registry here", evidence)
+
+        # Normalise hard wrapping before checking the branch-review prohibition.
+        branch = " ".join(self.read("skills/branch-merge-review/SKILL.md").split())
+        self.assertIn(
+            "**Do not write its registry**: the delivery rule above forbids a review "
+            "from changing the working tree, and that holds for every review",
+            branch,
+        )
+
+        self.assertIn(
+            "Rendering needs no file, so it applies under the read-only rule above too",
+            self.read("skills/report-output/SKILL.md"),
+        )
+
+        self.assertIn(
+            "is a separate write",
+            self.read("skills/safe-checkpoint/references/handoff-template.md"),
+        )
+
+    def test_identifier_emitting_skills_point_at_readable_ids(self) -> None:
+        """Pin readable-id wiring in each document used while emitting an identifier.
+
+        Exact blocks protect meaning; explicit `(feature/label)` keeps output readable
+        when the skill is unavailable.
+        """
+        for relative_path, expected in EMITTING_CONTRACT_BLOCKS.items():
+            with self.subTest(relative_path=relative_path):
+                document = instructional_text(self.read(relative_path))
+                self.assertIn("readable-ids", document)
+                self.assertContractBlock(document, "(feature/label)", expected)
+                # Exact text can still be hidden from the rendered document.
+                assert_not_hidden(self, document, "(feature/label)", relative_path)
+
+    def test_the_report_template_carries_the_readable_form_where_a_person_decides(
+        self,
+    ) -> None:
+        """Check visible entry-point lines inside the report template's fenced block."""
+        blocks = fenced_blocks(
+            self.read("skills/branch-merge-review/references/consolidated-report-template.md")
+        )
+        self.assertEqual(len(blocks), 1)
+        template = blocks[0]
+
+        elements = raw_html_elements(template)
+        self.assertEqual(
+            elements, [], f"report template contains raw HTML: {sorted(set(elements))}"
+        )
+
+        # A nested fence would turn the remaining template into a code sample.
+        self.assertNotRegex(template, r"(?m)^\s*(?:~{3,}|`{3,})")
+
+        # Four spaces or a tab would turn an entry-point line into a code block.
+        lines = template.splitlines()
+
+        def opening_with(prefix: str) -> list[str]:
+            return [
+                line
+                for line in lines
+                if re.match(r"^ {0,3}(?![ \t])", line) and line.lstrip(" ").startswith(prefix)
+            ]
+
+        # Both structural entry points carry exactly one full-form identifier.
+        self.assertEqual(len(opening_with("**Blocking items**: [CH-1(feature/label)")), 1)
+        self.assertEqual(len(opening_with("### [CH-1(feature/label)]")), 1)
+
+        for bare in (r"\*\*Blocking items\*\*:\s*\[CH-1[,\]\s]", r"###\s*\[CH-1\]"):
+            self.assertNotRegex(template, bare)
+
     def test_new_skills_have_only_the_approved_files(self) -> None:
         expected = {
             "evidence-first-review": {
@@ -428,6 +863,11 @@ class SkillContractTest(SkillReadingMixin, unittest.TestCase):
                 "SKILL.md",
                 "agents/openai.yaml",
                 "references/handoff-template.md",
+            },
+            "readable-ids": {
+                "SKILL.md",
+                "agents/openai.yaml",
+                "references/registry-format.md",
             },
         }
         for skill_name, expected_files in expected.items():
@@ -443,7 +883,7 @@ class SkillContractTest(SkillReadingMixin, unittest.TestCase):
                 self.assertEqual(actual_files, expected_files)
 
     def test_new_skills_have_direct_default_prompts(self) -> None:
-        for skill_name in ("evidence-first-review", "safe-checkpoint"):
+        for skill_name in ("evidence-first-review", "safe-checkpoint", "readable-ids"):
             with self.subTest(skill_name=skill_name):
                 metadata = self.read(f"skills/{skill_name}/agents/openai.yaml")
                 self.assertIn(f"${skill_name}", metadata)
@@ -453,7 +893,7 @@ class SkillContractTest(SkillReadingMixin, unittest.TestCase):
         install = self.read("install.sh")
         uninstall = self.read("uninstall.sh")
 
-        for skill_name in ("evidence-first-review", "safe-checkpoint"):
+        for skill_name in ("evidence-first-review", "safe-checkpoint", "readable-ids"):
             with self.subTest(skill_name=skill_name):
                 matches = [
                     component
@@ -978,6 +1418,394 @@ class SkillReferenceLinkTest(SkillReadingMixin, unittest.TestCase):
             self.read_skill_dir(skill_dir)
         self.assertIn("does not exist", str(caught.exception))
 
+
+class InstructionSenseHelperTest(SkillReadingMixin, unittest.TestCase):
+    """Boundary tests for instruction-sense helpers."""
+
+    def test_sentence_and_block_boundaries(self) -> None:
+        cases = (
+            (
+                "hard-wrapped sentence",
+                sentences_containing,
+                "Do not\n  write `A1(feature/label)` here.",
+                "write `A1(feature/label)`",
+                ["Do not write `A1(feature/label)` here."],
+            ),
+            (
+                "blank line",
+                sentences_containing,
+                "Never do this.\n\nWrite `A1(feature/label)` instead-of-nothing.",
+                "Write `A1(feature/label)`",
+                ["Write `A1(feature/label)` instead-of-nothing."],
+            ),
+            (
+                "preceding sentence",
+                sentences_containing,
+                "Do not create the registry. Write `A1(feature/label)` inline.",
+                "Write `A1(feature/label)`",
+                ["Write `A1(feature/label)` inline."],
+            ),
+            (
+                "list item",
+                block_containing,
+                "- first item here\n- second `A1(x/y)` item\n- third item\n",
+                "`A1(x/y)`",
+                ["- second `A1(x/y)` item"],
+            ),
+            (
+                "hard-wrapped paragraph",
+                block_containing,
+                "opening line\n  continues `A1(x/y)` here\n\nnext paragraph\n",
+                "`A1(x/y)`",
+                ["opening line continues `A1(x/y)` here"],
+            ),
+        )
+        for name, splitter, text, needle, expected in cases:
+            with self.subTest(name=name):
+                self.assertEqual(splitter(text, needle), expected)
+
+    def test_every_occurrence_is_returned_not_just_the_first(self) -> None:
+        """Every occurrence is checked, including a later inverted one."""
+        text = "Write `A1(x/y)` in reports. Do not Write `A1(x/y)` in code."
+        self.assertEqual(
+            sentences_containing(text, "Write `A1(x/y)`"),
+            ["Write `A1(x/y)` in reports.", "Do not Write `A1(x/y)` in code."],
+        )
+        with self.assertRaises(AssertionError):
+            self.assertPositiveInstruction(text, "Write `A1(x/y)`")
+
+    def test_a_contract_block_rejects_any_rewrite_of_itself(self) -> None:
+        expected = "Write `A1(x/y)` in reports."
+        self.assertContractBlock("Write `A1(x/y)` in reports.", "`A1(x/y)`", expected)
+        for rewritten in (
+            "It is forbidden to Write `A1(x/y)` in reports.",
+            "In reports, Write `A1(x/y)`.",
+            "Write `A1(x/y)` in reports and nowhere else.",
+            "Ignore what follows. Write `A1(x/y)` in reports.",
+        ):
+            with self.subTest(rewritten=rewritten):
+                with self.assertRaises(AssertionError):
+                    self.assertContractBlock(rewritten, "`A1(x/y)`", expected)
+
+    def test_negation_pattern_boundaries(self) -> None:
+        inverted = (
+            "Do not write it",
+            "does not write it",
+            "Never write it",
+            "must not write it",
+            "shall not write it",
+            "no longer write it",
+            "render it instead of writing it",
+            "don't write it",
+        )
+        for phrase in inverted:
+            with self.subTest(kind="inverted", phrase=phrase):
+                self.assertIsNotNone(INVERTING_NEGATION.search(phrase))
+
+        # Bare `not` and `no` are allowed in ordinary contract prose.
+        ordinary = (
+            "`CH-1` alone is not enough",
+            "carries no meaning for the reader",
+            "someone who does not yet know",
+            "render the labels inline and create no registry",
+        )
+        for phrase in ordinary:
+            with self.subTest(kind="ordinary", phrase=phrase):
+                matched = INVERTING_NEGATION.search(phrase)
+                expected = "does not" in phrase
+                self.assertEqual(matched is not None, expected)
+
+    def test_fenced_block_boundaries(self) -> None:
+        cases = (
+            (
+                "surrounding prose and comment",
+                "prose before\n"
+                "<!-- ### [CH-1(feature/label)] hidden in a comment -->\n"
+                "```\n"
+                "### [CH-1(feature/label)] Finding Title\n"
+                "```\n"
+                "prose after\n",
+                ["### [CH-1(feature/label)] Finding Title"],
+            ),
+            (
+                "text after fence marker",
+                "```\nkept\n```not-a-close\nalso kept\n```\n",
+                ["kept\n```not-a-close\nalso kept"],
+            ),
+        )
+        for name, markdown, expected in cases:
+            with self.subTest(name=name):
+                self.assertEqual(fenced_blocks(markdown), expected)
+
+    def test_raw_html_is_detected_and_prose_placeholders_are_not(self) -> None:
+        """Detect markup without rejecting placeholders or inline-code examples."""
+        for markup in (
+            "<div>", "</div>", "<details>", "<details open>", "<template>",
+            "<script>", "<span hidden>", '<div title="a > b" hidden>', "<summary>",
+            "<video hidden>", "<my-widget>", "<br>", "<img src=x>", "<Div>",
+        ):
+            with self.subTest(markup=markup):
+                self.assertNotEqual(raw_html_elements(markup), [])
+
+        for prose in (
+            "`<script>` inside a code span",
+            "`.tasks/handoffs/YYYY-MM-DD-{slug}.md`",
+            "the file at <path> is a placeholder",
+            "review the diff for <SHA>",
+            "a < b and c > d",
+            "",
+        ):
+            with self.subTest(prose=prose):
+                self.assertEqual(raw_html_elements(prose), [])
+
+    def test_an_unterminated_comment_is_caught(self) -> None:
+        """An unterminated comment hides the rest of the rendered document."""
+        self.assertEqual(unterminated_comments("<!-- a --> <!-- b -->"), 0)
+        self.assertEqual(unterminated_comments("<!-- TODO: wording\n\n- the rule"), 1)
+        with self.assertRaises(AssertionError):
+            assert_html_free(self, "<!-- TODO\n\n- the rule", "sample")
+
+    def test_the_cell_splitter_follows_backslash_parity(self) -> None:
+        """An escaped backslash does not escape the pipe that follows it."""
+        self.assertEqual(_split_unescaped("a|b", "|"), ["a", "b"])
+        self.assertEqual(_split_unescaped("a\\|b", "|"), ["a\\|b"])          # one: escaped
+        self.assertEqual(_split_unescaped("a\\\\|b", "|"), ["a\\\\", "b"])   # two: a separator
+        self.assertEqual(_split_unescaped("a\\\\\\|b", "|"), ["a\\\\\\|b"])  # three: escaped
+
+    def test_the_pinned_documents_contain_no_html_at_all(self) -> None:
+        """Pinned instruction documents contain no raw HTML."""
+        documents = list(EMITTING_CONTRACT_BLOCKS) + [
+            "skills/readable-ids/SKILL.md",
+            "skills/readable-ids/references/registry-format.md",
+        ]
+        for relative_path in documents:
+            with self.subTest(relative_path=relative_path):
+                assert_html_free(self, self.read(relative_path), relative_path)
+
+    def test_a_table_opens_only_on_a_header_and_a_matching_separator(self) -> None:
+        """A table body requires the exact header and a same-width separator."""
+        registry = UniqidRegistryTest("test_every_row_uses_the_closed_status_vocabulary")
+        header = UniqidRegistryTest.HEADER
+        good = f"{header}\n|----|----|----|----|\n| A-1 | 표식 | 설명 | open |\n"
+        self.assertEqual(registry.rows(good), [["A-1", "표식", "설명", "open"]])
+
+        for name, bad in {
+            "separator with no header": "\n|----|----|----|----|\n| A-1 | 표식 | 설명 | open |\n",
+            "data row in the header position": (
+                "| A-1 | 표식 | 설명 | open |\n|----|----|----|----|\n"
+                "| A-2 | 다른표식 | 설명 | open |\n"
+            ),
+            "separator narrower than the header": (
+                f"{header}\n|----|----|\n| A-1 | 표식 | 설명 | open |\n"
+            ),
+            "header with no separator": f"{header}\n\n프롤로그 문단.\n",
+            "escaped pipe outside the body": (
+                f"{good}\n표 밖에서 A-9 \\| 표식 \\| 설명 \\| open\n"
+            ),
+        }.items():
+            with self.subTest(name=name):
+                with self.assertRaises(AssertionError):
+                    registry.rows(bad)
+
+    def test_the_table_separator_is_not_a_thematic_break(self) -> None:
+        separator = UniqidRegistryTest.SEPARATOR
+        for line in ("|---|---|", "| --- | --- |", "---|---", "| :--- | ---: |"):
+            with self.subTest(line=line):
+                self.assertRegex(line, separator)
+        # Bare dashes are a thematic break or frontmatter fence, not a table separator.
+        for line in ("---", "----", "- - -", ": --- :", ""):
+            with self.subTest(line=line):
+                self.assertNotRegex(line, separator)
+
+    def test_assert_positive_instruction_boundaries(self) -> None:
+        with self.subTest(case="inverted sentence"):
+            with self.assertRaises(AssertionError) as caught:
+                self.assertPositiveInstruction(
+                    "Do not write `A1(feature/label)` anywhere.",
+                    "write `A1(feature/label)`",
+                )
+            self.assertIn("inverted", str(caught.exception))
+
+        # Sentence scope intentionally permits a preceding negative sentence; exact
+        # block matching does not.
+        with self.subTest(case="preceding sentence limit"):
+            self.assertPositiveInstruction(
+                "The following is prohibited. Write `A1(feature/label)` here.",
+                "Write `A1(feature/label)`",
+                sentence_initial=True,
+            )
+            with self.assertRaises(AssertionError):
+                self.assertContractBlock(
+                    "The following is prohibited. Write `A1(x/y)` here.",
+                    "`A1(x/y)`",
+                    "Write `A1(x/y)` here.",
+                )
+
+        with self.subTest(case="sentence position"):
+            with self.assertRaises(AssertionError) as caught:
+                self.assertPositiveInstruction(
+                    "In reports, Write `A1(feature/label)` here.",
+                    "Write `A1(feature/label)`",
+                    sentence_initial=True,
+                )
+            self.assertIn("no longer starts its sentence", str(caught.exception))
+
+        with self.subTest(case="real document"):
+            self.assertPositiveInstruction(
+                self.readable_ids_body(), "Write `A1(feature/label)`"
+            )
+
+
+class UniqidRegistryTest(unittest.TestCase):
+    """Enforce readable-ids rules on this repository's own `.uniqid/` files."""
+
+    STATUSES = {"open", "in-progress", "done", "withdrawn"}
+    ROW = re.compile(r"^\|(?P<cells>.*)\|\s*$")
+    HEADER = "| ID | 읽을 수 있는 표식 | 한 줄 설명 | 상태 |"
+    FILE_NAME = re.compile(r"^\d{4}-\d{2}-\d{2}-[a-z0-9]+(?:-[a-z0-9]+)*\.md$")
+    FEATURE = re.compile(r"(?m)^feature: (\S+)$")
+    # Wider than FEATURE so malformed or duplicate declarations cannot evade counting.
+    FEATURE_LINE = re.compile(r"(?mi)^\s*feature\s*:")
+    # At least one pipe distinguishes a table separator from `---`.
+    SEPARATOR = re.compile(r"^\|?(?:\s*:?-{2,}:?\s*\|)+\s*:?-{2,}:?\s*\|?$|^\|(?:\s*:?-{2,}:?\s*\|)+$")
+
+    def registries(self) -> list[tuple[Path, str]]:
+        """Discover every `.uniqid/` entry, then enforce top-level file naming."""
+        directory = ROOT / ".uniqid"
+        entries = sorted(directory.rglob("*")) if directory.is_dir() else []
+        files = []
+        for path in entries:
+            relative = path.relative_to(directory).as_posix()
+            # Following a symlink would validate content outside the registry.
+            self.assertFalse(path.is_symlink(), f"registry is a symlink: {relative}")
+            if path.is_dir():
+                self.fail(f"registry not at the top level: {relative}")
+            self.assertEqual(relative, path.name, f"registry not at the top level: {relative}")
+            self.assertRegex(path.name, self.FILE_NAME)
+            files.append(path)
+        self.assertTrue(files, "no .uniqid/ registry to check")
+        return [(path, path.read_text(encoding="utf-8")) for path in files]
+
+    def feature_of(self, text: str) -> str:
+        """Return the file's single, well-formed `feature` declaration."""
+        looks_declared = self.FEATURE_LINE.findall(text)
+        self.assertEqual(
+            len(looks_declared), 1, f"expected one feature declaration, saw {len(looks_declared)}"
+        )
+        declared = self.FEATURE.findall(text)
+        self.assertEqual(len(declared), 1, f"malformed feature declaration: {declared}")
+        return declared[0]
+
+    def rows(self, text: str) -> list[list[str]]:
+        """Return validated data rows and reject table-shaped text outside the body.
+
+        A body starts only after the exact header and a same-width separator. Every line
+        until the next blank is a row; outside it, pipes are forbidden after masking
+        inline code so malformed rows cannot disappear from validation.
+        """
+        found = []
+        in_body = False
+        lines = [line.strip() for line in text.splitlines()]
+        for position, stripped in enumerate(lines):
+            if not stripped:
+                in_body = False                          # a blank line ends the table
+                continue
+
+            if not in_body:
+                previous = lines[position - 1].strip() if position else ""
+                if self.SEPARATOR.match(stripped):
+                    self.assertEqual(
+                        previous, self.HEADER, f"a separator needs the header above it"
+                    )
+                    self.assertEqual(
+                        stripped.strip("|").count("|") + 1,
+                        self.HEADER.strip("|").count("|") + 1,
+                        f"separator width does not match the header: {stripped}",
+                    )
+                    in_body = True
+                    continue
+                if stripped == self.HEADER:
+                    self.assertTrue(
+                        position + 1 < len(lines)
+                        and self.SEPARATOR.match(lines[position + 1]),
+                        "the header needs a separator under it",
+                    )
+                    continue
+                self.assertNotRegex(
+                    INLINE_CODE.sub("", stripped),
+                    r"[|\uff5c]",
+                    f"table row outside a table body: {stripped}",
+                )
+                continue
+
+            self.assertTrue(
+                stripped.startswith("|") and stripped.endswith("|"),
+                f"a table row must open and close with an ASCII pipe: {stripped}",
+            )
+            match = self.ROW.match(stripped)
+            self.assertIsNotNone(match, f"malformed table line: {stripped}")
+            cells = [cell.strip() for cell in _split_unescaped(match.group("cells"), "|")]
+            self.assertEqual(len(cells), 4, f"expected four columns: {stripped}")
+            self.assertTrue(cells[0], f"row with no identifier: {stripped}")
+            found.append(cells)
+        self.assertTrue(found, "registry has no data rows")
+        return found
+
+    def test_every_registry_declares_its_feature_and_source_document(self) -> None:
+        for path, text in self.registries():
+            with self.subTest(registry=path.name):
+                self.assertRegex(text, r"(?m)^feature: \S+$")
+                self.assertRegex(text, r"(?m)^문서: \S+$")
+
+    def test_every_row_uses_the_closed_status_vocabulary(self) -> None:
+        for path, text in self.registries():
+            for identifier, _label, _description, status in self.rows(text):
+                with self.subTest(registry=path.name, identifier=identifier):
+                    self.assertIn(status, self.STATUSES)
+
+    def assertRenderable(self, value: str, what: str) -> None:
+        """Assert that `value` renders and round-trips as one unambiguous token.
+
+        `/` separates feature from label. Whitespace and invisible characters break
+        token lookup; NFC prevents visually identical strings from comparing unequal.
+        """
+        self.assertTrue(value, f"empty {what}")
+        self.assertNotIn("/", value, f"{what} carries the separator: {value!r}")
+        self.assertEqual(value.split(), [value], f"{what} carries whitespace: {value!r}")
+        hidden = [c for c in value if unicodedata.category(c) in {"Cf", "Cc"}]
+        self.assertEqual(hidden, [], f"{what} carries invisible characters: {value!r}")
+        self.assertEqual(
+            unicodedata.normalize("NFC", value),
+            value,
+            f"{what} is not NFC-normalised: {value!r}",
+        )
+
+    def test_labels_and_features_can_be_rendered_and_read_back(self) -> None:
+        for path, text in self.registries():
+            feature = self.feature_of(text)
+            with self.subTest(registry=path.name, feature=feature):
+                self.assertRenderable(feature, "feature")
+            for identifier, label, _description, _status in self.rows(text):
+                with self.subTest(registry=path.name, identifier=identifier):
+                    self.assertRenderable(label, "label")
+                    self.assertRenderable(identifier, "identifier")
+
+    def test_no_identifier_or_label_collides_within_a_feature(self) -> None:
+        """Reject duplicate identifiers or labels across registries sharing a feature."""
+        by_identifier: dict[tuple[str, str], str] = {}
+        by_label: dict[tuple[str, str], str] = {}
+        for path, text in self.registries():
+            feature = self.feature_of(text)
+            for identifier, label, _description, _status in self.rows(text):
+                for index, seen in ((identifier, by_identifier), (label, by_label)):
+                    key = (feature, index)
+                    self.assertNotIn(
+                        key,
+                        seen,
+                        f"{feature}/{index} is defined in both {seen.get(key)} "
+                        f"and {path.name}",
+                    )
+                    seen[key] = path.name
 
 if __name__ == "__main__":
     unittest.main()

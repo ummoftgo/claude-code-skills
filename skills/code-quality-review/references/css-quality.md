@@ -2,6 +2,12 @@
 
 CLI tools and manual patterns for CSS/SCSS quality review.
 
+> **The read-only rule in `SKILL.md` overrides every instruction in this file.** Under a
+> read-only request, no command here may install a tool, create a config file, write a
+> report file, or auto-fix code — regardless of what an individual section says. Each
+> write-causing command below carries its own read-only contract line; when one is
+> skipped, record it in the report with its reason.
+
 ## Table of Contents
 1. [CLI Tool Setup](#1-cli-tool-setup)
 2. [Running the Tools](#2-running-the-tools)
@@ -17,6 +23,8 @@ CLI tools and manual patterns for CSS/SCSS quality review.
 
 ## 1. CLI Tool Setup
 
+**Read-only:** skip every command in this block; record them as `skipped-read-only`.
+
 ```bash
 # Stylelint — primary CSS/SCSS linter
 if [ ! -f node_modules/.bin/stylelint ]; then
@@ -30,7 +38,11 @@ if [ ! -f node_modules/.bin/stylelint ]; then
 fi
 ```
 
-**Config file detection** (`stylelint.config.*`, `.stylelintrc.*`, `stylelint` key in `package.json`):
+**Config file detection** (`stylelint.config.*`, `.stylelintrc.*`, `stylelint` key in `package.json`).
+Writing a config file changes the user's repository, so the creation path is gated:
+
+**Read-only:** skip this command; record it as `skipped-read-only`.
+
 - If a config already exists → run as-is
 - If no config → create a minimal one before running:
 
@@ -46,19 +58,31 @@ fi
 
 ## 2. Running the Tools
 
+**Stylelint loads whatever the config names, whatever the config is written in.** A
+`.stylelintrc.js` / `.mjs` / `.cjs` — or a `stylelint.config.ts` — is a module it imports. A `.stylelintrc.json` — or a
+`stylelint` key in `package.json` — is data, but `extends`, `plugins`, and `customSyntax` in it
+resolve to packages that get `require`d and run. Both were reproduced here: a JSON `extends` and a
+`package.json` `plugins` each executed the named module.
+
+So the check is not the file extension. On an untrusted diff, resolve the config chain
+(`extends` is recursive) and see whether anything in it names host code; if it does, apply the
+untrusted-diff rule in `SKILL.md`.
+
+
 ### Stylelint
 ```bash
 # Compact output for review
-npx stylelint "**/*.css" "**/*.scss" --formatter=compact
+npx --no -- stylelint "**/*.css" "**/*.scss" --formatter=compact
 
 # Verbose (shows rule names — useful for diagnosing findings)
-npx stylelint "**/*.css" "**/*.scss"
+npx --no -- stylelint "**/*.css" "**/*.scss"
 
 # Auto-fix safe issues (formatting, property order)
-npx stylelint "**/*.css" "**/*.scss" --fix
+# **Read-only:** skip this command; record it as `skipped-read-only`.
+npx --no -- stylelint "**/*.css" "**/*.scss" --fix
 
 # Specific directory
-npx stylelint "src/**/*.scss" --formatter=compact
+npx --no -- stylelint "src/**/*.scss" --formatter=compact
 ```
 
 ---
