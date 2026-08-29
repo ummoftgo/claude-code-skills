@@ -904,7 +904,11 @@ class SkillContractTest(SkillReadingMixin, unittest.TestCase):
             "asked to decide something by that identifier",
         ):
             self.assertIn(threshold, skill)
-        self.assertIn("no `/`", skill)
+        # The label bullet specifically. `no `/`` alone was satisfied by the `feature`
+        # paragraph further down, so deleting the ban from the label left it green.
+        self.assertIn(
+            "Hyphens instead of spaces. No whitespace, and no `/` —", skill
+        )
 
         # Lifecycle, sharing plan-and-build's vocabulary (SC-004). `feature` is pinned
         # alongside the label because both are rendered into references already read.
