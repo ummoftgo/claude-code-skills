@@ -2895,7 +2895,14 @@ class ReadOnlyExecutionBaseline(unittest.TestCase):
                 stripped = line.strip()
                 if not stripped or stripped.startswith("#"):
                     continue
-                tokens = stripped.split()
+                try:
+                    # `.split()` 은 `CARGO_TARGET_DIR="$(mktemp -d)" cargo …` 를
+                    # 따옴표 안 공백에서 쪼개 명령을 놓친다.
+                    tokens = shlex.split(stripped, posix=True, comments=True)
+                except ValueError:
+                    continue
+                if not tokens:
+                    continue
                 index = 0
                 while index < len(tokens) and re.match(r"^[A-Za-z_]\w*=", tokens[index]):
                     index += 1
@@ -2979,11 +2986,30 @@ class ReadOnlyExecutionBaseline(unittest.TestCase):
     def test_rust_read_only_commands_write_nothing(self) -> None:
         target = tempfile.mkdtemp()
         self.addCleanup(shutil.rmtree, target, ignore_errors=True)
-        output = self.run_all("rust-quality", {
+        files = {
             "Cargo.toml": '[package]\nname = "s"\nversion = "0.1.0"\nedition = "2021"\n',
             "src/main.rs": "fn main() {let x=1;println!(\"{}\", x);}\n",
-        }, env={"CARGO_TARGET_DIR": target})
-        self.assertTrue(output.strip(), f"러스트 명령이 아무 출력도 내지 않았다")
+        }
+        commands = self.read_only_commands("rust-quality")
+        self.assertTrue(commands, "rust-quality: 실행할 읽기 전용 명령을 찾지 못했다")
+        # `CARGO_TARGET_DIR` 을 환경에 넣지 **않는다**. 넣으면 명령에서 그것을 빼도
+        # 결과가 같아져, 문서가 그 변수를 잃어버려도 이 검사가 통과한다.
+        env = {"CARGO_NET_OFFLINE": "true"}
+
+        # 두 성질을 각각 재려면 잠금 파일 상태가 달라야 한다.
+        #   잠금 없음 → `--locked` 가 `Cargo.lock` 생성을 막는지
+        #   잠금 있음 → `CARGO_TARGET_DIR` 이 `target/` 을 밖으로 빼는지
+        output = ""
+        for lockfile in (False, True):
+            work = self.workspace(files)
+            if lockfile:
+                subprocess.run(["cargo", "generate-lockfile"], cwd=work,
+                               capture_output=True, timeout=300,
+                               env={**os.environ, **env})
+            for command in commands:
+                with self.subTest(command=command, lockfile=lockfile):
+                    output += self.assertLeavesWorkspaceAlone(work, command, env=env)
+        self.assertTrue(output.strip(), "러스트 명령이 아무 출력도 내지 않았다")
 
 
 class RipgrepSearchPathTest(unittest.TestCase):
@@ -3033,7 +3059,9 @@ class RipgrepSearchPathTest(unittest.TestCase):
                     if not stripped or stripped.startswith("#"):
                         continue
                     try:
-                        tokens = shlex.split(stripped, posix=True, comments=False)
+                        # `comments=True`: 줄 끝 `# 설명` 은 인자가 아니다. 따옴표 안의
+                        # `#` 은 shlex 가 패턴의 일부로 지킨다.
+                        tokens = shlex.split(stripped, posix=True, comments=True)
                     except ValueError:
                         continue                        # 셸 문법이 아니면 명령이 아니다
                     if tokens and tokens[0] == "rg":
