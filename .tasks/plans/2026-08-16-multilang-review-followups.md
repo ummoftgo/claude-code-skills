@@ -1,7 +1,18 @@
 # 다국어 리뷰 지원 — 후속 작업
 
-`feat/multilang-review-support` 브랜치에서 남긴 항목. 브랜치 자체는 코덱스와 19라운드
-검토를 거쳐 합의(GO)에 도달했고, 아래는 그 범위에서 **닫지 않기로 한 것**이다.
+`feat/multilang-review-support` 브랜치에서 남긴 항목.
+
+**상태: P0 닫음.** 19라운드의 단계별 검토는 각 단계의 지적을 닫았지만, 그 뒤 수행한
+**독립 병합 리뷰**(Claude·Codex 각자 수행 후 교차 검증)에서 신뢰 경계 계약이
+오케스트레이션 단계에서 fail-open 이라는 Critical 이 나왔다 — 하위 게이트는
+`READ_ONLY`/`UNTRUSTED_DIFF` 로 켜지는데 상위 dispatch 가 그것을 전달하지 않았다.
+단계별 검토가 각 조각을 봤을 뿐 **조각을 잇는 경로**를 보지 않았다는 뜻이었다.
+
+P0 7건(C1·H1·C2·C3·M3·H3·M1)은 `73d92e8` 에서 닫았다. 식별자와 표식은
+`.uniqid/2026-08-29-multilang-review-merge-block.md` 에 있다.
+
+아래는 그와 별개로 후속에 남기는 항목이다. P1 이하(H2·M2·M4·M5·CR-1·CR-2·L1·CR-3)는
+아직 열려 있다.
 
 ## 1. 네이티브 Windows PHPStan 종단간 검증
 
