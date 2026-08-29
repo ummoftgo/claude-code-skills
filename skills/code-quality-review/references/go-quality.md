@@ -69,6 +69,12 @@ you worked from.
 **Project configuration wins.** If `.golangci.yml` disables a linter, do not report what it
 disabled — the project made that call. Read it before running.
 
+**Every `go` command resolves a toolchain before it runs anything else.** The `toolchain` line
+in `go.mod` is a file the diff controls, so without `GOTOOLCHAIN=local` the `go` command
+downloads and executes a toolchain the diff named — a code-execution path that no per-command
+gate below can see, because it happens first. Prefix every `go` invocation in this file, not just
+the ones that obviously build.
+
 `go vet` needs no install and catches real defects (printf arg mismatches, lost struct tags,
 unreachable code). Run it even when nothing else is available.
 
@@ -76,7 +82,7 @@ unreachable code). Run it even when nothing else is available.
 
 ```bash
 command -v go gofmt staticcheck golangci-lint
-ls "$(go env GOPATH)/bin" 2>/dev/null
+ls "$(GOTOOLCHAIN=local go env GOPATH)/bin" 2>/dev/null
 ```
 
 ```powershell
@@ -87,8 +93,8 @@ Get-Command go, gofmt, staticcheck, golangci-lint -ErrorAction SilentlyContinue
 
 ```bash
 # Normal mode only — `go install` writes a binary into GOPATH/bin
-go install honnef.co/go/tools/cmd/staticcheck@latest
-go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
+GOTOOLCHAIN=local go install honnef.co/go/tools/cmd/staticcheck@latest
+GOTOOLCHAIN=local go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
 ```
 
 ## 4. Execution
@@ -102,10 +108,10 @@ patterns):
 
 ```bash
 # Type-checks and compiles without producing an artefact
-go build -o /dev/null ./...
+GOTOOLCHAIN=local go build -o /dev/null ./...
 
 # The linters. Neither writes to the working tree.
-go vet ./...
+GOTOOLCHAIN=local go vet ./...
 staticcheck ./...
 golangci-lint run
 ```

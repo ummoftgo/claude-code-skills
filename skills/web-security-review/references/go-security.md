@@ -205,8 +205,10 @@ What remains is typosquatting, a compromised release of a real module, and `repl
 
 ```bash
 # Reachable vulnerabilities — symbol-level, so it reports what the code actually calls.
+# `GOTOOLCHAIN=local` for the reason section 5 gives: govulncheck loads packages through the
+# go command, which resolves `go.mod`'s toolchain line before anything else runs.
 # Exit 3 means a reachable vulnerability was found; 1 means the run failed.
-govulncheck ./...
+GOTOOLCHAIN=local govulncheck ./...
 
 # `replace` directives, and any module served from outside the proxy
 rg -n '^\s*replace ' go.mod

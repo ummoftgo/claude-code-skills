@@ -184,7 +184,7 @@ without `composer.json` is common, and losing it would drop backend review entir
 | Category | Extensions / Filenames | Decided by |
 |----------|------------------------|---|
 | **Backend (PHP)** | `*.php`, `composer.json`, `composer.lock` | extension alone |
-| **Backend (Python)** | `*.py`, `pyproject.toml`, `requirements*.txt` | extension alone |
+| **Backend (Python)** | `*.py`, `pyproject.toml`, `setup.py`, `setup.cfg`, `requirements*.txt` | extension alone |
 | **Backend (Go)** | `*.go`, `go.mod`, `go.sum`, `go.work`, `go.work.sum` | extension alone |
 | **Backend (Rust)** | `*.rs`, `Cargo.toml`, `Cargo.lock`, `rust-toolchain.toml`, `rust-toolchain`, `.cargo/config.toml`, `.cargo/config` | extension alone |
 | **JS/TS** | `*.js`, `*.mjs`, `*.cjs`, `*.jsx`, `*.ts`, `*.mts`, `*.cts`, `*.tsx`, `package.json`, `package-lock.json`, `pnpm-lock.yaml`, `yarn.lock`, `bun.lockb`, `.npmrc` | **surface, see below** |

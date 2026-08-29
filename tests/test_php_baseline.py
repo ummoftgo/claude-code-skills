@@ -2565,14 +2565,61 @@ class PromptInjectionBoundaryTest(unittest.TestCase):
             block.index("if ($ExecRisk) {"),
         )
 
+    #: 두 표의 언어 이름 대응. 왼쪽이 `SKILL.md` 분류표, 오른쪽이 디스패치 범위표다.
+    TABLE_PAIRS = {
+        "Backend (PHP)": "PHP",
+        "Backend (Python)": "Python",
+        "Backend (Go)": "Go",
+        "Backend (Rust)": "Rust",
+    }
+
+    @staticmethod
+    def _patterns(row: str, column: int) -> set[str]:
+        """표 한 행의 지정한 열에서 백틱 항목을 뽑는다.
+
+        분류표는 `| 범주 | 패턴 | 판정 |`, 디스패치표는 `| 언어 | 참조 | 범위 |` 라
+        패턴이 놓인 열이 다르다.
+        """
+        cells = [c.strip() for c in row.strip().strip("|").split("|")]
+        return set(re.findall(r"`([^`]+)`", cells[column])) if len(cells) > column else set()
+
+    def _rows(self, text: str, names, column: int) -> dict:
+        found = {}
+        for line in text.splitlines():
+            if not line.startswith("|"):
+                continue
+            cells = [c.strip() for c in line.strip().strip("|").split("|")]
+            first = cells[0].strip("*").strip()
+            # 같은 이름을 쓰는 `{focus}` 표가 뒤따르므로 첫 매치만 취한다. 그 표는 열이
+            # 둘뿐이라 열 개수로도 걸러진다.
+            if first in names and first not in found and len(cells) > column:
+                found[first] = self._patterns(line, column)
+        return found
+
     def test_the_dispatch_scope_table_matches_the_classification(self) -> None:
-        """상위 분류와 디스패치 범위가 어긋나면 수집만 되고 리뷰어에게 안 간다."""
-        prompts = self.prompts()
-        for name in ("`*.jsx`", "`.npmrc`", "`go.work`", "`rust-toolchain.toml`",
-                     "`.cargo/config.toml`", "`.cargo/config`"):
-            with self.subTest(name=name):
-                self.assertIn(name, prompts)
-        self.assertIn("must match the classification table in `SKILL.md` Step 1", prompts)
+        """상위 분류와 디스패치 범위가 어긋나면 수집만 되고 리뷰어에게 안 간다.
+
+        항목을 하나씩 세는 대신 두 표를 실제로 비교한다 — 이름만 확인하던 검사는
+        `setup.cfg` 가 한쪽에만 있는 것을 놓쳤다.
+        """
+        upstairs = self._rows(read("skills/branch-merge-review/SKILL.md"),
+                              set(self.TABLE_PAIRS), column=1)
+        downstairs = self._rows(self.prompts(), set(self.TABLE_PAIRS.values()), column=2)
+        self.assertEqual(set(upstairs), set(self.TABLE_PAIRS), "분류표 행을 찾지 못했다")
+
+        for classification, dispatch in self.TABLE_PAIRS.items():
+            with self.subTest(language=classification):
+                self.assertIn(dispatch, downstairs, "디스패치 범위표 행을 찾지 못했다")
+                self.assertEqual(
+                    upstairs[classification], downstairs[dispatch],
+                    "두 표가 어긋난다. 분류표에만 있으면 수집되고도 리뷰어에게 가지 않고, "
+                    "범위표에만 있으면 리뷰어가 받지 못할 파일을 기다린다",
+                )
+
+    def test_the_scope_table_declares_it_must_match(self) -> None:
+        self.assertIn(
+            "must match the classification table in `SKILL.md` Step 1", self.prompts()
+        )
 
 
 class ExecutingToolGateTest(unittest.TestCase):
@@ -2612,6 +2659,80 @@ class ExecutingToolGateTest(unittest.TestCase):
             rust.index("**Untrusted-diff rule:** `cargo audit`"),
             rust.index("# Known advisories against the lockfile"),
         )
+
+
+class GoToolchainPinTest(unittest.TestCase):
+    """`go.mod` 의 toolchain 줄은 diff 가 정하고, `go` 는 그것을 받아 내려받아 실행한다.
+
+    툴체인 해석은 명령이 하는 다른 모든 일보다 **먼저** 일어나므로, 명령 단위 게이트로는
+    막을 수 없다. 그래서 호출마다 붙어 있어야 한다.
+    """
+
+    REFERENCES = (
+        "skills/code-quality-review/references/go-quality.md",
+        "skills/web-security-review/references/go-security.md",
+    )
+    #: 툴체인을 해석하는 실행 파일. `govulncheck` 는 go 명령을 통해 패키지를 적재한다.
+    RESOLVES_TOOLCHAIN = {"go", "govulncheck"}
+    #: 앞선 환경 변수 대입. `FOO=bar go vet` 에서 실행되는 것은 `go` 다.
+    ENV_ASSIGNMENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=\S*$")
+
+    @staticmethod
+    def shell_lines(text: str) -> list[str]:
+        """셸 블록의 줄만. ```go 블록의 `go process(item)` 은 명령이 아니라 소스다."""
+        lines: list[str] = []
+        for start, end, language, closed in fenced_spans_with_language(text):
+            if not closed or language.strip().lower() not in {"bash", "sh", "shell", "console"}:
+                continue
+            body = text[start:end].splitlines()[1:]      # 여는 펜스 줄 제외
+            lines.extend(body)
+        return lines
+
+    @classmethod
+    def invocations(cls, line: str) -> list[str]:
+        """이 줄에서 **실행되는** 세그먼트 중 go 툴체인을 해석하는 것.
+
+        `command -v go` 는 존재 확인이지 실행이 아니고, `ls "$(go env GOPATH)/bin"` 은
+        안쪽 치환이 실제 호출이다. 그래서 명령 구분자로 자른 뒤 각 세그먼트의 **첫
+        토큰**만 본다 — 앞선 환경 변수 대입은 건너뛴다.
+        """
+        segments = re.split(r"\|\||&&|[|;]|\$\(|`", line)
+        found = []
+        for segment in segments:
+            tokens = segment.strip().split()
+            index = 0
+            while index < len(tokens) and cls.ENV_ASSIGNMENT.match(tokens[index]):
+                index += 1
+            if index < len(tokens) and tokens[index] in cls.RESOLVES_TOOLCHAIN:
+                found.append(segment.strip())
+        return found
+
+    def test_every_go_invocation_pins_the_toolchain(self) -> None:
+        checked = 0
+        for reference in self.REFERENCES:
+            for line in self.shell_lines(read(reference)):
+                stripped = line.strip()
+                if not stripped or stripped.startswith("#"):
+                    continue
+                for invocation in self.invocations(stripped):
+                    checked += 1
+                    with self.subTest(reference=reference, invocation=invocation):
+                        self.assertTrue(
+                            invocation.startswith("GOTOOLCHAIN=local ")
+                            or "GOTOOLCHAIN=local" in invocation,
+                            "toolchain 을 고정하지 않은 go 호출",
+                        )
+        self.assertGreater(checked, 5, "go 호출을 거의 찾지 못했다 — 추출이 깨졌다")
+
+    def test_the_reason_is_stated_where_the_commands_live(self) -> None:
+        quality = read("skills/code-quality-review/references/go-quality.md")
+        self.assertIn(
+            "**Every `go` command resolves a toolchain before it runs anything else.**", quality
+        )
+        security = " ".join(
+            read("skills/web-security-review/references/go-security.md").split()
+        )
+        self.assertIn("`GOTOOLCHAIN=local` is not optional", security)
 
 
 class ToolSelectingFileScopeTest(unittest.TestCase):
