@@ -228,6 +228,14 @@ Untrusted-input parsers deserve fuzzing; note its absence where the crate parses
   registry's immutability.
 - MUST check for a crate name one edit away from a popular one (typosquatting).
 
+**Untrusted-diff rule:** `cargo audit` is a cargo subcommand, so cargo resolves the project's
+`.cargo/config.toml` (and the extensionless `.cargo/config`) before the subcommand runs — the
+same `build.rustc`, `rustc-wrapper`, `credential-provider`, and `[alias]` surface that makes
+`clippy` risky. An `[alias] audit = "run --bin whatever"` replaces the command outright.
+Reading `Cargo.lock` is not the whole story. Run the cargo-config precheck in
+`code-quality-review`'s `rust-quality.md` first, and for a diff you would not execute record
+this block as `skipped-untrusted-execution`.
+
 ```bash
 # Known advisories against the lockfile. Reads Cargo.lock; writes nothing to the crate.
 cargo audit

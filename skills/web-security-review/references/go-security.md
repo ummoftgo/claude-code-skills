@@ -170,12 +170,21 @@ under a debugger.
 
 ```bash
 # The race detector is the tool for this. It needs to build and run tests.
-go test -race ./...
+GOTOOLCHAIN=local go test -race ./...
 ```
 
-**Read-only note:** `go test -race` compiles and runs the test binary. It writes to the build
-cache rather than the working tree, so it is allowed under a read-only review — but it *executes
-project code*, so say that it ran and skip it when running the project's tests is not appropriate.
+**Read-only note:** `go test -race` writes to the build cache rather than the working tree, so
+the write axis alone would allow it under a read-only review.
+
+**Untrusted-diff rule:** the other axis forbids it. `go test -race` compiles and runs the
+project's test binary — the diff's own code, plus anything its `TestMain` or `init` does. For a
+diff you would not execute, record it as `skipped-untrusted-execution` rather than running it.
+Under a read-only review of your own branch it may run; say in the report that it ran.
+
+`GOTOOLCHAIN=local` is not optional. Without it the `toolchain` line in `go.mod` — a file the
+diff controls — makes the `go` command download and execute a different toolchain before it
+reaches your code, which is a code-execution path that the race detector's own gating never
+sees.
 
 ## 6. Dependency & Supply Chain
 

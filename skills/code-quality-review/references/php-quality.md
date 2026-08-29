@@ -217,6 +217,10 @@ fi
 # review that leaves one per run still litters the machine.
 [ -n "${PHPSTAN_TMP:-}" ] && trap 'rm -rf "$PHPSTAN_TMP"' EXIT
 
+# State line — the gates are driven by exported values, so a caller that forgot to set them
+# would otherwise produce a normal-looking report with both gates inert. Say which mode ran.
+echo "static analysis mode: read-only=${READ_ONLY:-0} untrusted=${UNTRUSTED_DIFF:-0}"
+
 # PHPStan — run under the correct PHP binary
 if [ -n "$EXEC_RISK" ]; then
   echo "static analysis: skipped-untrusted-execution — analysis would run project code ($EXEC_RISK)"

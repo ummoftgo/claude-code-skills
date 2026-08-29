@@ -120,6 +120,22 @@ Detect the active shell before using a snippet. On POSIX use `command -v`, `[ -f
 > gate is inert, and outside read-only mode PHPStan runs with the project's own config exactly
 > as before.
 >
+> **Both gates are driven by exported values, never by prose.** `READ_ONLY` and `UNTRUSTED_DIFF`
+> are read by the tool blocks; a prompt that only *says* the review is read-only leaves them at
+> `0` and both gates inert. Set them before running any block:
+>
+> - **Dispatched by `branch-merge-review`** — the values arrive in the prompt's TRUST AND WRITE
+>   STATE section. Export them as given. If a placeholder is unsubstituted, report the dispatch
+>   as incomplete instead of guessing.
+> - **Invoked directly on the user's own checkout** — `UNTRUSTED_DIFF=0`, because the working
+>   tree is the user's own. `READ_ONLY=1` whenever the user asked for no writes, otherwise `0`
+>   so PHPStan keeps its result cache.
+> - **Invoked directly on someone else's branch** — `UNTRUSTED_DIFF=1`. Provenance you cannot
+>   vouch for is the case the gate exists for.
+>
+> Every run prints `static analysis mode: read-only=… untrusted=…` before the analysis, so a
+> caller that forgot is visible in the report rather than silently unprotected.
+>
 > **When the diff is untrusted** — an external contributor's branch, an unfamiliar dependency, any
 > code you would not run — the executing tools need isolation before they run. A workspace mounted
 > read-only is **not** enough on its own: the `build.rs` reproduced above wrote to an absolute path
