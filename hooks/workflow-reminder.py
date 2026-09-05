@@ -139,36 +139,29 @@ SELECTIVE_GIT_INTENT = re.compile(
 )
 
 PLAN_REMINDER = (
-    "This appears to be substantial implementation work. Invoke the plan-and-build "
-    "skill before editing implementation code. Inspect the repository first, write one "
-    "lightweight specification and plan, get design approval when architecture or contracts "
-    "materially change, decide whether TDD applies, and split only truly independent work "
-    "with stable contracts. Get explicit user approval before dispatching parallel workers. "
-    "If inspection proves the change is small and localized, exit the workflow and proceed "
-    "directly."
+    "Inspect the requested scope first. For a small, localized edit with an obvious "
+    "solution, proceed directly without a planning workflow. For substantial implementation, "
+    "invoke plan-and-build before editing code and follow its planning, proportionate "
+    "verification, and design/parallel authorization boundaries. Reuse decisions already "
+    "authorized for this scope; this reminder does not require another approval or test pass."
 )
 
 EVIDENCE_REVIEW_REMINDER = (
-    "This request explicitly requires a non-mutating review. Route by work mode first, then "
-    "by scope. Work mode wins: if the request re-examines earlier findings, decides a final "
-    "approval verdict, or verifies specific claims against raw data or a non-Git directory, "
-    "invoke the evidence-first-review skill even when the scope is a PR, branch, or merge "
-    "diff — branch-merge-review has no recheck or approval mode and would return newly "
-    "discovered findings instead of the per-finding statuses and verdict that were asked "
-    "for. Only for a first-time review does scope decide: a PR, branch, or merge diff goes "
-    "to the branch-merge-review skill in read-only mode, and a narrower scope goes to the "
-    "security or quality review skill that matches the subject. A read-only constraint alone "
-    "changes neither choice; it only constrains how the selected skill runs. Either way, "
-    "lock the user-supplied context and scope first, then independently verify claims "
-    "against current files, relevant diffs, raw data, and runtime evidence. Respect the "
-    "read-only boundary: do not modify or create files, install tools, create checkouts or "
-    "worktrees, stage changes, or save a report. Return the evidence-backed result in the "
-    "user's language as a message only."
+    "This request may include a read-only review. Resolve the current user intent and "
+    "no-change scope first: protecting one file does not prohibit authorized implementation "
+    "elsewhere. For review work, route by mode before scope: rechecks, final approval, and "
+    "verification of specific claims/raw data/non-Git directories use evidence-first-review, "
+    "including when the scope is a PR or branch. A first-time PR/branch review uses "
+    "branch-merge-review; a narrower review uses the matching security or quality skill. "
+    "Within a read-only review, do not modify or create files, install tools, change Git or "
+    "worktree state, or save reports. Return findings with current evidence in the user's "
+    "language. Apply the latest explicit authorization to any separate implementation work."
 )
 
 SAFE_CHECKPOINT_REMINDER = (
-    "This request appears to need a scoped checkpoint or resumable handoff. Invoke the "
-    "safe-checkpoint skill before any Git or handoff write. Inspect branch, upstream, status, "
+    "If the current user is requesting a checkpoint or handoff, invoke safe-checkpoint "
+    "before any Git or handoff write; quoted or hypothetical requests are not authorization. "
+    "Inspect branch, upstream, status, "
     "diffs, runtime manifests, and existing handoff sources; separate intended changes from "
     "unrelated dirty work and generated files. Require matching authorization for handoff "
     "writes, staging and commit, remote push, and failed WIP commits. After any authorized "

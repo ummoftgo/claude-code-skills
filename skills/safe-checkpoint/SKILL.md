@@ -53,7 +53,7 @@ Read [references/handoff-template.md](references/handoff-template.md) before cre
 
 Inspect runtime manifests before choosing commands, including `composer.json`, `package.json`, lockfiles, toolchain files, and repository scripts. Prefer the PHP, Node, or other runtime version required by those manifests. Do not install missing verification tools unless the user separately authorizes installation.
 
-Run the focused checks for the intended paths, then the relevant wider checks in proportion to risk. Record exact commands and results for the handoff and final report.
+Use the completed implementation/review checks when they cover the intended changes and their relevant code, inputs, and environment are unchanged. A commit request alone does not require new tests or another suite run. Run missing required checks or checks invalidated by relevant changes, failures, or a concrete unresolved concern; keep their scope proportional to risk. Still inspect the staged diff for scope and whitespace errors. Record exact commands and results, distinguishing reused evidence from newly executed checks.
 
 - For a normal commit request, stop before staging and commit when required verification fails.
 - For an explicitly authorized failed WIP checkpoint, record the failure, evidence, and exact resume point in the handoff, then allow a commit whose subject begins with `wip:`.

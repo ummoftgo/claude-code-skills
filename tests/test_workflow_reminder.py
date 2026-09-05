@@ -44,14 +44,6 @@ class WorkflowReminderTest(unittest.TestCase):
             "plan-and-build",
             context,
         )
-        self.assertIn(
-            "explicit user approval",
-            context,
-        )
-        self.assertIn(
-            "design approval",
-            context,
-        )
 
     def assert_silent(self, prompt: str) -> None:
         result = run_hook(prompt)

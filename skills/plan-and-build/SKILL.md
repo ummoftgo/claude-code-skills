@@ -1,6 +1,6 @@
 ---
 name: plan-and-build
-description: "Plan and execute substantial new code work with a lightweight specification, implementation plan, TDD decision, and safe parallel task split. Use when creating a new project, adding a feature or other non-trivial new code, or handling multiple implementation tasks that may be independent. Do not use for small localized edits, read-only review or explanation, pure research, or routine maintenance with an already-obvious change."
+description: "Plan and execute substantial new code work with a lightweight specification, implementation plan, proportionate verification, and safe parallel task split. Use when creating a new project, adding a feature or other non-trivial new code, or handling multiple implementation tasks that may be independent. Do not use for small localized edits, read-only review or explanation, pure research, or routine maintenance with an already-obvious change."
 ---
 
 # Plan and Build
@@ -26,7 +26,7 @@ Include:
 2. **Current context** — record the relevant architecture, constraints, and files inspected. **Separate what you confirmed from what you are assuming**, and for each assumption name the external dependency behind it and which requirements or steps break if it turns out false. An assumption that still needs an answer does not belong here as settled fact — send it to `## Clarifications` or `## Deferred` below.
 3. **Specification** — define behavior, interfaces or data contracts, error cases, and acceptance criteria.
 4. **Implementation plan** — list ordered steps with likely files and verification for each step.
-5. **TDD decision** — state whether tests will be written first and why.
+5. **Verification strategy** — choose the checks, any new tests, and whether a specific part benefits from test-first work; give a brief reason.
 6. **Parallelization decision** — identify independent workstreams or state why the work remains sequential.
 7. **Design approval decision** — state whether the change requires the checkpoint below and why.
 
@@ -138,24 +138,23 @@ Before editing implementation code, present a recommended design with concise al
 
 Use one approval checkpoint for the overall direction rather than approval after every section. When none of these conditions apply and the design is straightforward, record why no checkpoint is needed, share the plan summary, and continue without another prompt. A user who already explicitly approved the same proposed design does not need to be asked again.
 
-## 3. Decide whether TDD fits
+## 3. Choose proportionate verification
 
-Treat TDD as a deliberate choice, not an automatic requirement. Prefer it when the behavior can be expressed with a focused test at reasonable cost and either condition holds:
+Choose verification per changed behavior, not once for every file or for the entire project. Honor explicit user requirements and applicable project checks. Separate three decisions: what evidence is sufficient, whether a new permanent test is needed, and whether writing it first adds value.
 
-- The project is new and incremental behavior tests will provide useful design feedback. Establish only the smallest appropriate test foundation.
-- The existing project explicitly follows a TDD or test-first convention for nearby behavior.
+| Change | Default approach |
+|---|---|
+| Documentation, wording, formatting, or a reversible low-impact edit | Use relevant existing checks or direct inspection; no new test or TDD cycle by default. A changed executable/configuration contract still needs its relevant checks. |
+| Straightforward wiring or ordinary new behavior | Implement, then use existing tests or a focused runtime/integration check. Add coverage only for a meaningful gap. |
+| Calculations, parsing, authorization, state transitions, or other consequential branching | Add focused behavioral coverage where missing. Prefer TDD when an inexpensive failing test clarifies the contract or guards a likely failure. |
+| Reproduced bug | Reuse the failing test or reproduction. Add a regression test when it provides lasting protection at reasonable cost. |
+| Explicit test-first requirement | Apply TDD within the requested scope. |
 
-The mere presence of a test runner or test directory does not require TDD. Consider coupling, legacy constraints, integration cost, and the value of a failing-first test. Record the decision and rationale in the planning artifact.
+A new project or an existing test runner alone does not select TDD. Judge regression risk, existing coverage, and setup/maintenance cost. Do not build test infrastructure for a trivial edit or add tests that merely mirror implementation details or pin prose wording. Keep permanent tests for stable behavior or contracts; temporary probes need not become repository files. For risky legacy changes, characterization tests may be the appropriate starting point; when isolation is disproportionately expensive, use focused runtime evidence and disclose its limits.
 
-When TDD is selected, follow red-green-refactor:
+When TDD is selected, group related acceptance, failure, and boundary cases into one focused feature-level batch. Confirm failure for the expected behavioral reason, implement the coherent change, then run that batch. An existing relevant failure already supplies the red evidence; do not break working code or repeat a separate red-green cycle for each helper or assertion. Refactor only as needed for the requested change.
 
-1. Write the smallest test that expresses one acceptance criterion.
-2. Run it and confirm it fails for the expected reason.
-3. Implement only enough production code to pass.
-4. Run the focused test, then the relevant wider suite.
-5. Refactor while keeping tests green.
-
-When TDD is not the best fit, use the strongest proportionate alternative: characterization tests before risky legacy changes, tests alongside or immediately after implementation, focused integration tests, or explicit runtime verification. Do not force TDD onto generated files, documentation-only changes, formatting, exploratory spikes explicitly intended to be discarded, or behavior that cannot be isolated without disproportionate infrastructure.
+Run wider checks when affected dependencies, integration, or project requirements warrant them, normally after the related changes are complete. Once the chosen checks pass, stop testing unless subsequent changes, failures, changed inputs/environment, or a specific unresolved concern justify another run. Do not add a reviewer or another suite merely to reconfirm success.
 
 When test or application code depends on a library, framework, SDK, API, CLI, or cloud service, invoke `use-context7` first if it is installed.
 
@@ -182,10 +181,10 @@ Give each worker:
 - the relevant specification and shared contract;
 - exact files or directories it may edit;
 - explicit files it must not edit;
-- its test responsibility and verification command;
+- its verification strategy, existing evidence, and ownership of any new tests;
 - the expected summary and any assumptions it must report.
 
-After workers finish, inspect every diff, check for overlaps and contract mismatches, integrate centrally, and run the combined verification. Never treat successful isolated work as proof that the integrated result works.
+After workers finish, inspect every diff, check for overlaps and contract mismatches, and integrate centrally. Reuse valid worker results and run the checks needed for the combined behavior; isolated success does not cover a newly connected boundary.
 
 ## 5. Update the plan when implementation diverges
 
@@ -208,11 +207,11 @@ handoff, and any later plan-versus-code audit all take it as current intent.
 
 ## 6. Finish with evidence
 
-Run the focused tests, relevant wider tests, and project checks appropriate to the risk. Report:
+Use the verification strategy from §3 and report its completed evidence; this is not a separate test pass. Report:
 
 - what was implemented;
 - where the specification and plan live;
-- which tests were written first or why TDD was skipped;
+- the verification used, including any coverage added and material gaps;
 - which workstreams ran in parallel or why execution stayed sequential;
 - verification results and any remaining risk;
 - anything left under `## Deferred`, and what it leaves unsettled.

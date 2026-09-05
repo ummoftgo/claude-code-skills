@@ -73,7 +73,7 @@ Windows 프로젝트 범위는 스킬과 에이전트만 설치합니다. Window
 | 스킬 | Claude | Codex | 역할 |
 |---|:---:|:---:|---|
 | `use-context7` | ✓ | ✓ | 외부 라이브러리 코드 전 최신 문서 조회 |
-| `plan-and-build` | ✓ | ✓ | 기능 사양·계획·TDD·병렬화 판단 |
+| `plan-and-build` | ✓ | ✓ | 기능 사양·계획·변경에 맞는 검증·병렬화 판단 |
 | `evidence-first-review` | ✓ | ✓ | 컨텍스트와 현재 코드·원본 데이터에 근거한 읽기 전용 검토 |
 | `safe-checkpoint` | ✓ | ✓ | 요청 범위와 쓰기 권한을 확인하는 커밋·인수인계 체크포인트 |
 | `systematic-debugging` | ✓ | ✓ | 재현과 증거 기반 디버깅 |
@@ -311,6 +311,31 @@ Windows 프로젝트 범위는 스킬과 에이전트만 설치합니다. Window
 
 브랜치 리뷰의 [미커밋 경로 전환](skills/branch-merge-review/references/uncommitted-routing.md)과 [교차 검증 명령 예제](skills/branch-merge-review/references/cross-validation-patterns.md)는 필요한 경우에만 읽습니다.
 
+### 테스트와 완료 기준
+
+검증 방법, 새 테스트의 필요성, 테스트를 먼저 작성할지는 별도로 판단합니다. TDD는 필요한 동작에만 적용하며, 프로젝트가 새롭거나 테스트 도구가 있다는 이유만으로 선택하지 않습니다. 사용자와 프로젝트가 명시한 필수 검사는 따릅니다.
+
+- 문구·문서·스타일이나 되돌리기 쉬운 작은 수정은 기존 검사 또는 직접 확인으로 검증합니다. 실행·설정 계약이 바뀌면 해당 계약 검사는 필요합니다.
+- 새 테스트는 기존 검증에 의미 있는 빈틈이 있을 때 추가합니다. 구현 구조나 지침 문구를 그대로 고정하는 검사, 일회성 확인을 위한 영구 테스트 파일은 늘리지 않습니다.
+- 계산·파싱·권한·상태 전이와 재현된 버그는 실패 테스트의 효과와 비용을 보고 TDD를 선택합니다. 기존 실패 테스트는 재사용합니다.
+- 관련 성공·실패·경계 사례를 기능 단위로 묶어 확인합니다. 작은 함수나 조건 하나마다 RED→GREEN과 넓은 테스트를 반복하지 않습니다.
+- 작업자·통합·커밋 단계는 검증 결과를 공유합니다. 관련 코드·입력·환경 변경, 실패, 미해결 우려, 필수 검사 요구가 있을 때만 추가 실행하며, 새로 연결된 통합 경계는 따로 확인합니다.
+
+선택 기준은 [plan-and-build](skills/plan-and-build/SKILL.md), 버그 재현은 [systematic-debugging](skills/systematic-debugging/SKILL.md), 커밋 시 결과 재사용은 [safe-checkpoint](skills/safe-checkpoint/SKILL.md)에 있습니다.
+
+### 공식 프롬프트 가이드 대조
+
+2026-09-05에 아래 공식 가이드를 대조했습니다. 모델별 설정을 강제하지 않고, 이 저장소가 제공하는 지침과 훅에 해당하는 원칙을 반영했습니다.
+
+| 모델 | 공식 가이드에서 확인한 적용 원칙 |
+|---|---|
+| [GPT-5.6](https://developers.openai.com/api/docs/guides/latest-model?model=gpt-5.6#prompting-best-practices) | 중복 지시를 줄이고 목표·제약·완료 기준을 명확히 합니다. |
+| [GPT-6 Astra](https://developers.openai.com/api/docs/guides/latest-model?model=gpt-6-astra#prompting-best-practices) | 스킬 간 충돌과 불필요한 승인 중단을 줄이고, 변경 규모에 맞게 검증합니다. |
+| [Claude Fable 5.1](https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/prompting-claude-fable-5-1) | 요청 범위 밖의 수정·테스트 확장을 막고, 이미 승인된 작업을 마무리합니다. |
+| [Claude Opus 5](https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/prompting-claude-opus-5) | 관성적인 재검증과 작은 작업의 과도한 에이전트 분할을 줄입니다. |
+
+API 대화 이력·캐시·추론 강도는 실행 클라이언트가 관리하므로 이 저장소의 훅에서 바꾸지 않습니다. 이 대조는 구성 검토이며, 네 모델의 성능·비용을 실측한 비교 결과는 아닙니다.
+
 ## 훅과 재시작
 
 개발 워크플로우 리마인더 훅은 요청에 따라 다음 안내를 실행 순서대로 결합하며, 오류가 나도 프롬프트를 차단하지 않습니다.
@@ -320,6 +345,8 @@ Windows 프로젝트 범위는 스킬과 에이전트만 설치합니다. Window
 - 선택적 커밋·체크포인트·인수인계·재개: `safe-checkpoint`
 
 명시적인 무수정 제약이 있으면 구현 관련 단어가 포함되어도 `plan-and-build`를 억제합니다. 평범한 코드·보안·브랜치 리뷰, 체크포인트에 관한 설명 요청, 단순한 퇴근 인사에는 동작하지 않습니다. 훅은 안내만 제공하며 명령, 파일 변경, staging, commit, push를 실행하지 않습니다.
+
+훅의 키워드 판정은 범위 확정이 아닙니다. 안내를 받은 에이전트는 작은 변경인지 먼저 판단하고, 특정 파일의 수정 금지를 별도로 승인된 구현 전체의 금지로 확대하지 않습니다. 계획·승인·검증의 세부 절차는 해당 스킬을 따릅니다.
 
 **훅이 위 세 개만 리마인드하는 원칙**: 훅은 권한·작업 상태·구조적 의사결정 경계를 놓쳤을 때 영향이 큰 워크플로우만 리마인드합니다. 디버깅처럼 "수행 방법론"에 해당하는 스킬은 훅이 아니라 스킬 description 기반 자동 선택에 맡깁니다. 예를 들어 `systematic-debugging`은 훅에 넣지 않습니다 — "고쳐줘" 같은 표현이 대부분의 버그 요청과 구별되지 않아 거짓 양성이 급증하기 때문입니다. 새 워크플로우를 훅에 추가하려면 유용한 것만으로는 부족하고 이 기준을 통과해야 합니다.
 

@@ -41,9 +41,9 @@ Four patterns cover most PHP + JS/Svelte/HTMX scenarios. See `references/dispatc
    Use the exact skill name: `use-context7`.
 3. **Verify independence** — Confirm agents will not write to the same files.
 4. **Resolve authorization** — Present the proposed workers, responsibilities, file ownership boundaries, shared contract, and why the split is safe. Reuse an explicit request for parallel execution, earlier approval for this scope, or applicable project instructions permitting parallel work. When that authorization covers the split, proceed without another question. An implementation request alone is not parallel authorization. Otherwise ask whether to proceed in parallel and wait for explicit user approval; continue independent work that does not depend on that answer. Ask again only for a material scope, cost, or operational-risk change beyond the existing authorization.
-5. **Write focused agent prompts** — Each prompt: scope, shared context, deliverable, constraints.
+5. **Write focused agent prompts** — Each prompt: scope, shared context, deliverable, constraints, and the agreed verification strategy. Assign any permanent test files to an owner; share existing test results and specify what integration remains for the lead. Workers must not independently expand the test plan or create duplicate test infrastructure.
 6. **Dispatch in parallel** using the available subagent tool within that authorization. Use only as many workers as have substantial independent work, respect the runtime concurrency limit, and keep the lead agent working on an independent part. Inherit model and reasoning settings unless the user or project explicitly selects others.
-7. **Integrate** — Read each agent's summary, check for conflicts, test the integration.
+7. **Integrate** — Read each agent's summary, check for conflicts, and verify the affected integration. Reuse valid worker evidence; do not repeat isolated checks without a relevant change or unresolved concern.
 
 ## Integration Checklist
 

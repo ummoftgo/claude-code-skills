@@ -2,6 +2,8 @@
 
 Full agent prompt templates and guidance for each dispatch pattern.
 
+Adapt the chosen template to the assigned scope and verification strategy from SKILL.md. Include existing evidence, ownership of any new tests, and the integration checks left to the lead; a template does not authorize additional test files or a new test framework.
+
 ## Table of Contents
 1. [API First Pattern](#1-api-first-pattern)
 2. [Frontend Split Pattern](#2-frontend-split-pattern)
@@ -143,7 +145,7 @@ Return: file created, event handlers implemented, API calls made
 
 **When**: 2 or more independent pages/features need to be built. They share the DB schema and auth system but have no runtime dependency on each other.
 
-**Rule**: One agent per page. Keep parallel agent count to 4–5 maximum.
+**Rule**: Group small pages into one workstream. Use separate agents only for substantial independent scopes, within the runtime's concurrency limit and the authorized split.
 
 > Before dispatching, if the `use-context7` skill is installed, invoke it once for each distinct framework used across the pages (e.g., once for Svelte if multiple pages use Svelte components).
 

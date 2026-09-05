@@ -46,12 +46,12 @@ If evidence disproves the current hypothesis, return to tracing. After three use
 
 ## 5. Add regression protection
 
-For an authorized fix, prefer a focused test that fails for the confirmed reason before changing production code. Use a characterization test first for risky legacy behavior. When an automated test would require disproportionate infrastructure, define the strongest focused runtime check and record why.
+For an authorized fix, first reuse an existing failing test or the reproduction from §2. Add a permanent regression test only when coverage is missing and the failure's impact or recurrence risk justifies its maintenance and setup cost. When a focused test can cheaply capture the confirmed cause, check that failure before the fix; existing failure evidence already counts. Do not create a separate red-green cycle for each helper or duplicate a reproduction solely to satisfy a sequence. Use characterization tests for risky legacy behavior, or focused runtime checks when automated isolation is disproportionately expensive. Diagnosis-only work stops at findings.
 
 ## 6. Make the smallest causal fix
 
 Change only what is needed to break the confirmed causal chain. Avoid unrelated refactoring, broad defensive code, silent fallbacks, or error suppression unless the evidence requires them.
 
-Run the focused regression check, then the relevant wider suite and runtime verification. Remove temporary probes and confirm that the working comparison case still works.
+After the causal changes are complete, run the focused reproduction/regression checks together, including the working comparison case. Expand to affected integration or wider checks only when the change's risk or project requirements warrant it. Reuse passing results for unchanged code, inputs, and environment; repeat only after relevant changes, failures, or a concrete unresolved concern. Remove temporary probes you created; they need not become permanent test files.
 
 Report the root cause, evidence, changed files, regression protection, verification results, and any remaining uncertainty.
