@@ -72,6 +72,26 @@ function Get-InstallLayout {
     }
 }
 
+function Assert-DefaultConfigDirectories {
+    param(
+        [ValidateSet('global', 'project')][string]$Scope,
+        [string]$Root,
+        [ValidateSet('claude', 'codex')][string[]]$Clients
+    )
+    if ($Scope -ne 'global') { return }
+    foreach ($client in $Clients) {
+        $variable = if ($client -eq 'claude') { 'CLAUDE_CONFIG_DIR' } else { 'CODEX_HOME' }
+        $directory = if ($client -eq 'claude') { '.claude' } else { '.codex' }
+        $configured = [Environment]::GetEnvironmentVariable($variable)
+        if ([string]::IsNullOrEmpty($configured)) { continue }
+        $default = [IO.Path]::GetFullPath((Join-Path $Root $directory)).TrimEnd('\', '/')
+        $actual = [IO.Path]::GetFullPath($configured).TrimEnd('\', '/')
+        if (-not $actual.Equals($default, [StringComparison]::OrdinalIgnoreCase)) {
+            throw "Unsupported global configuration: $variable differs from $default. No managed files were changed. Use project scope or manage components in the custom configuration directory manually."
+        }
+    }
+}
+
 function Test-PathInside {
     param([string]$Path, [string]$Root)
     $fullPath = [IO.Path]::GetFullPath($Path).TrimEnd('\')
@@ -1094,4 +1114,4 @@ function Show-DependencyDiagnostics {
     else { Write-Host '  [MISSING] Google Chrome - https://www.google.com/chrome/' -ForegroundColor Yellow }
 }
 
-Export-ModuleMember -Function Get-RepositoryRoot, Get-ComponentCatalog, Get-SupportedComponents, Get-InstallLayout, Test-SymbolicLinkEligible, Install-ManagedComponent, Remove-ManagedComponent, Invoke-LegacyCodexSkillMigration, Test-CodexInlineHooks, Get-CodexHookFeatureState, Install-WorkflowHook, Remove-WorkflowHook, Show-DependencyDiagnostics
+Export-ModuleMember -Function Get-RepositoryRoot, Get-ComponentCatalog, Get-SupportedComponents, Get-InstallLayout, Assert-DefaultConfigDirectories, Test-SymbolicLinkEligible, Install-ManagedComponent, Remove-ManagedComponent, Invoke-LegacyCodexSkillMigration, Test-CodexInlineHooks, Get-CodexHookFeatureState, Install-WorkflowHook, Remove-WorkflowHook, Show-DependencyDiagnostics

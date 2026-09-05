@@ -17,6 +17,8 @@ sandbox_mode = "read-only" above is a worthwhile DEFAULT: left alone, it blocks 
 
 ## Language Scope — and What Falls Outside It
 
+When explicitly assigned the `web-security-review` workflow, invoke that skill and follow its assigned language/surface references within the delegated scope. The fallback checklists below do not replace or narrow that workflow.
+
 The checklists below are **PHP and browser-surface** checklists. They are deliberately unchanged:
 this is the stack the audit is tuned for, and its findings are trustworthy because the checks
 match the language.

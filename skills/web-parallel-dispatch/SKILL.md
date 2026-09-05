@@ -1,6 +1,6 @@
 ---
 name: web-parallel-dispatch
-description: "Dispatch multiple sub-agents in parallel to accelerate web development tasks after explicit user approval. Use when: (1) API contract is finalized and PHP backend + frontend can be built simultaneously, (2) multiple independent pages or components need implementation, (3) a feature can be split into DB schema + API + frontend work, (4) UI layout and JS logic are independent. Never start parallel workers before presenting the split and receiving user approval."
+description: "Dispatch independent web implementation work to subagents with explicit file ownership and shared contracts. Use for substantial backend/frontend splits, independent pages, or separate UI layout and logic. Reuse user or project authorization for parallel execution; ask only when the proposed split is not already authorized."
 ---
 
 # Web Parallel Dispatch
@@ -40,9 +40,9 @@ Four patterns cover most PHP + JS/Svelte/HTMX scenarios. See `references/dispatc
    (e.g., Svelte runes for a frontend agent, PDO for a PHP backend agent).
    Use the exact skill name: `use-context7`.
 3. **Verify independence** — Confirm agents will not write to the same files.
-4. **Request approval** — Present the proposed workers, responsibilities, file ownership boundaries, shared contract, and why the split is safe. Ask whether to proceed in parallel and wait for explicit user approval.
+4. **Resolve authorization** — Present the proposed workers, responsibilities, file ownership boundaries, shared contract, and why the split is safe. Reuse an explicit request for parallel execution, earlier approval for this scope, or applicable project instructions permitting parallel work. When that authorization covers the split, proceed without another question. An implementation request alone is not parallel authorization. Otherwise ask whether to proceed in parallel and wait for explicit user approval; continue independent work that does not depend on that answer. Ask again only for a material scope, cost, or operational-risk change beyond the existing authorization.
 5. **Write focused agent prompts** — Each prompt: scope, shared context, deliverable, constraints.
-6. **Dispatch in parallel** using the available subagent tool only after approval. A prior request to implement the feature is not by itself approval for the proposed parallel split.
+6. **Dispatch in parallel** using the available subagent tool within that authorization. Use only as many workers as have substantial independent work, respect the runtime concurrency limit, and keep the lead agent working on an independent part. Inherit model and reasoning settings unless the user or project explicitly selects others.
 7. **Integrate** — Read each agent's summary, check for conflicts, test the integration.
 
 ## Integration Checklist

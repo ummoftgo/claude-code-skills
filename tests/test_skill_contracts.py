@@ -624,6 +624,15 @@ class SkillReadingMixin:
 
 
 class SkillContractTest(SkillReadingMixin, unittest.TestCase):
+    def test_claude_security_reviewer_can_invoke_skills_without_edit_tools(self) -> None:
+        frontmatter = self.read("agents/security-auditor/claude.md").split("---", 2)[1]
+        tools = re.search(r"^tools:\s*(.+)$", frontmatter, re.MULTILINE)
+        self.assertIsNotNone(tools)
+        allowed = {name.strip() for name in tools.group(1).split(",")}
+        self.assertIn("Skill", allowed)
+        self.assertTrue({"Read", "Grep", "Glob"}.issubset(allowed))
+        self.assertTrue({"Write", "Edit"}.isdisjoint(allowed))
+
     def test_plan_and_build_requires_proportional_design_approval(self) -> None:
         skill = self.read("skills/plan-and-build/SKILL.md")
         self.assertIn("Design approval checkpoint", skill)

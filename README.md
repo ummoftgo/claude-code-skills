@@ -62,6 +62,8 @@ bash uninstall.sh
 
 Windows 프로젝트 범위는 스킬과 에이전트만 설치합니다. Windows 훅은 전역 범위에서만 설치합니다.
 
+전역 설치·제거는 기본 설정 경로를 관리합니다. `CODEX_HOME` 또는 `CLAUDE_CONFIG_DIR`가 다른 위치를 가리키면 변경 전에 중단합니다. 사용자 지정 경로는 [설치 가이드](INSTALL.md#사용자-지정-설정-디렉터리)를 참고하세요.
+
 기존 Codex 스킬 경로 `~/.codex/skills/local/`은 설치기가 안전하게 이전합니다. 저장소 링크 대상 또는 매니페스트 해시로 소유가 확인되고 새 `.agents/skills/` 대상에 충돌이 없을 때만 복사 후 이전 항목을 제거합니다. 수정됨·미확인·충돌 항목은 그대로 보존합니다.
 
 ## 제공 컴포넌트
@@ -76,7 +78,7 @@ Windows 프로젝트 범위는 스킬과 에이전트만 설치합니다. Window
 | `safe-checkpoint` | ✓ | ✓ | 요청 범위와 쓰기 권한을 확인하는 커밋·인수인계 체크포인트 |
 | `systematic-debugging` | ✓ | ✓ | 재현과 증거 기반 디버깅 |
 | `web-security-review` | ✓ | ✓ | 언어 축(PHP·Node·Python·Go·Rust) × 표면 축(HTTP 서버·브라우저·네이티브) 보안 검토 |
-| `web-parallel-dispatch` | ✓ | ✓ | 승인 기반 병렬 구현 분할 |
+| `web-parallel-dispatch` | ✓ | ✓ | 기존 승인을 재사용하는 병렬 구현 분할 |
 | `code-quality-review` | ✓ | ✓ | 언어별 코드 품질·성능 검토 (PHP·Node/TS·Python·Go·Rust·프론트엔드·CSS) |
 | `branch-merge-review` | ✓ | ✓ | 머지 전 다중 리뷰 |
 | `web-browser-preview` | ✓ | ✓ | Windows/WSL Chrome CDP 미리보기 |
@@ -112,7 +114,7 @@ Windows 프로젝트 범위는 스킬과 에이전트만 설치합니다. Window
 | 증거 우선 검증 — 특정 주장 대조, 원본 JSON/CSV/DB·비Git 디렉터리 점검 | “컨텍스트 문서의 주장을 원본 데이터로 검증해줘” | `evidence-first-review` |
 | 최초 검토 (`initial`) — 새 문제를 찾는 첫 리뷰 | “브랜치 리뷰해줘” | 2단계로 |
 
-**범위가 PR·브랜치여도 작업 모드가 이깁니다.** `evidence-first-review`만 이전 지적을 1:1 원장으로 추적해 `resolved`·`partially resolved`·`unresolved`·`regressed`로 분류하고, must-fix 조건을 재검증해 `approved`·`conditionally approved`·`hold`를 판정합니다. `branch-merge-review`에는 이 모드가 없습니다 — 감지된 언어마다 품질 리뷰어를 띄우고 보안 리뷰어를 더한 병렬 팀으로 **신규 발견**을 하는 스킬입니다. 재검토·승인 요청을 범위만 보고 `branch-merge-review`로 보내면 사용자가 요청한 산출물(지적별 상태 분류, 승인 판정)이 나오지 않습니다.
+**범위가 PR·브랜치여도 작업 모드가 이깁니다.** `evidence-first-review`만 이전 지적을 1:1 원장으로 추적해 `resolved`·`partially resolved`·`unresolved`·`regressed`로 분류하고, must-fix 조건을 재검증해 `approved`·`conditionally approved`·`hold`를 판정합니다. `branch-merge-review`에는 이 모드가 없습니다 — 작은 변경은 주 에이전트가 직접, 큰 독립 범위는 언어별 품질·보안 리뷰 팀이 **신규 발견**을 하는 스킬입니다. 재검토·승인 요청을 범위만 보고 `branch-merge-review`로 보내면 사용자가 요청한 산출물(지적별 상태 분류, 승인 판정)이 나오지 않습니다.
 
 #### 2단계 — 최초 검토일 때의 범위 (주제보다 우선)
 
@@ -124,7 +126,7 @@ Windows 프로젝트 범위는 스킬과 에이전트만 설치합니다. Window
 | 브랜치 diff보다 좁음 | 품질·리팩터링·성능이 주제 | `code-quality-review` |
 | 불분명 | 대상이 불분명한 일반 “리뷰해줘” | 현재 대상 문맥으로 판단하고, 모호하면 사용자에게 묻습니다 |
 
-**범위가 주제보다 우선합니다.** "이 PR을 보안 리뷰해줘"처럼 보안이 명시돼도 범위가 브랜치·PR 전체이면 `branch-merge-review`를 사용합니다. `branch-merge-review`가 내부에서 `web-security-review`를 보안 리뷰어로 디스패치하므로 보안 검토가 빠지지 않습니다. `web-security-review`와 `code-quality-review`를 직접 호출하는 것은 범위가 브랜치 diff보다 좁을 때입니다. 두 스킬의 description도 브랜치·PR 전체 검토는 `branch-merge-review`로 넘기도록 명시하고 있습니다.
+**범위가 주제보다 우선합니다.** "이 PR을 보안 리뷰해줘"처럼 보안이 명시돼도 범위가 브랜치·PR 전체이면 `branch-merge-review`를 사용합니다. `branch-merge-review`가 직접 검토와 팀 검토 모두에서 `web-security-review`를 실행하므로 보안 검토가 빠지지 않습니다. `web-security-review`와 `code-quality-review`를 직접 호출하는 것은 범위가 브랜치 diff보다 좁을 때입니다. 두 스킬의 description도 브랜치·PR 전체 검토는 `branch-merge-review`로 넘기도록 명시하고 있습니다.
 
 #### 미커밋 변경 전체 — 자동 수집하는 리뷰 스킬이 없습니다
 
@@ -297,6 +299,17 @@ Windows 프로젝트 범위는 스킬과 에이전트만 설치합니다. Window
 - `security-auditor`
 
 각 에이전트는 Claude용 `.md`와 Codex용 `.toml`을 제공합니다.
+
+### 모델과 실행 규모
+
+모델 ID와 추론 강도는 스킬에서 고정하지 않습니다. 현재 세션의 기본값을 사용하되 사용자나 프로젝트에서 명시한 설정을 따릅니다. 모델을 바꿀 때는 대표 작업의 품질·소요 시간·비용을 함께 비교하세요. 같은 추론 강도 이름이 서로 다른 모델에서 같은 비용이나 동작을 뜻하지는 않습니다.
+
+- 병렬 구현은 명시적인 병렬 요청, 같은 범위에 대한 기존 승인, 프로젝트의 병렬 실행 지침을 재사용합니다. 단순 구현 요청만 있고 병렬 허용 근거가 없으면 승인을 확인합니다. 이미 허용된 작업은 분할 내용을 알리고 진행하며, 승인 범위를 넘어서는 변경만 다시 확인합니다.
+- 작은 브랜치 변경은 주 에이전트가 품질·보안 검토를 모두 수행합니다. 인증·권한·저장소/API 계약·동시성·도구 실행 설정 변경은 이 간소 경로에 포함하지 않습니다.
+- 큰 독립 범위는 언어별 리뷰 팀을 사용합니다. 실행 환경의 동시 실행 한도보다 리뷰어가 많으면 순서대로 배치하며, 검토 범위를 생략하지 않습니다.
+- 직접 검토와 팀 검토는 같은 참조·신뢰·완료 판정 기준을 사용합니다. 직접 검토를 독립 리뷰로 보고하지 않습니다.
+
+브랜치 리뷰의 [미커밋 경로 전환](skills/branch-merge-review/references/uncommitted-routing.md)과 [교차 검증 명령 예제](skills/branch-merge-review/references/cross-validation-patterns.md)는 필요한 경우에만 읽습니다.
 
 ## 훅과 재시작
 

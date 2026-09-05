@@ -1,6 +1,6 @@
 # Reviewer Dispatch Prompts
 
-Full prompt text for the reviewers dispatched in SKILL.md Step 2. The roster is variable — one quality reviewer per detected backend language, plus a frontend quality reviewer when a browser surface exists, plus the security reviewer. Dispatch every agent **in a single message** (parallel Agent tool calls).
+Full prompt text for the review passes in SKILL.md Step 2. In team mode the roster is variable — one quality reviewer per detected backend language, plus a frontend quality reviewer when a browser surface exists, plus the security reviewer. Dispatch independent reviewers up to the runtime concurrency limit and queue the rest. Honor an explicit sequential-execution request. In direct mode the lead applies the Common Instructions and each applicable language/surface requirement without spawning agents; the same trust, scope, and completion gates apply.
 
 Supply each agent with:
 - Their specific file list (from Step 1 categorization)

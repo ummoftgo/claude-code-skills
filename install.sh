@@ -948,6 +948,9 @@ main() {
     echo
 
     ask_install_scope
+    local clients=(claude)
+    if $USE_CODEX; then clients+=(codex); fi
+    python3 "$SCRIPT_DIR/scripts/config_paths.py" --scope "$INSTALL_SCOPE" --clients "${clients[@]}" || return 1
     set_manifest_path
     ask_skill_install_mode
     create_skill_links

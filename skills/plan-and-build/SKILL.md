@@ -173,7 +173,9 @@ Parallelize only when all are true:
 
 Keep work sequential when scopes overlap, requirements are unsettled, or integration risk outweighs the time saved. For web backend/frontend splits, invoke `web-parallel-dispatch` if installed.
 
-Before dispatching any parallel workers, present the proposed workstreams to the user, including their responsibilities, file ownership boundaries, shared contracts, and why parallel execution is safe. Ask whether to proceed in parallel and wait for explicit user approval. Do not spawn workers or begin parallel edits before that approval. When the work remains sequential, record the reason and continue without an additional approval prompt.
+Before dispatching parallel workers, state their responsibilities, file ownership boundaries, shared contracts, and why the split is safe. Reuse an explicit request for parallel execution, earlier approval for this scope, or applicable project instructions that permit parallel execution. When that authorization covers the proposed split, announce the split and proceed without asking again. An implementation request alone is not parallel authorization. If no existing authorization covers the split, ask whether to proceed and wait for explicit user approval; continue independent work that does not depend on that answer. Reopen the decision only when the split introduces a material scope, cost, or operational-risk change beyond the existing authorization. When work remains sequential, record the reason and continue.
+
+Use the fewest workers that make useful independent progress, respect the runtime's concurrency limit, and keep working on an independent part while they run. Inherit the session's model and reasoning settings unless the user or project explicitly selects others; this skill does not prescribe model IDs or a universal effort level.
 
 Give each worker:
 

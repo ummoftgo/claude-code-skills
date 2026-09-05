@@ -9,7 +9,8 @@ Structure for the team leader's consolidated output (SKILL.md Step 5). The same 
 **Date**: [date]
 **Branch**: [current-branch] vs [base-branch]
 **Changed files reviewed**: N (Backend: X | Frontend: Y | Style: Z | Config: W | Deleted: D)
-**Reviewers**: [Backend Quality ·] Security [· Frontend Quality]  ← omit skipped reviewers
+**Execution**: Direct review | Team review
+**Reviewers**: [lead or actual child names, with quality/security responsibilities; do not invent independent reviewers]
 
 ## Executive Summary
 [2–3 sentences: overall quality and security posture, most critical findings]
@@ -22,6 +23,7 @@ Structure for the team leader's consolidated output (SKILL.md Step 5). The same 
 
 ## Review Coverage
 - Files reviewed: [list or count by category]
+- Completed passes: [language/surface, quality/security references, lead or child reviewer]
 - Skipped reviewers: [e.g., "PHP quality — no PHP files changed"]
 - Excluded from quality scope: [deleted files, if any]
 
@@ -60,6 +62,7 @@ Structure for the team leader's consolidated output (SKILL.md Step 5). The same 
 ---
 
 ## Appendix: Raw Reviewer Reports
+Omit this appendix in direct mode; no child reports were produced.
 > The consolidated sections above are authoritative. These are the unedited reviewer outputs for reference.
 
 ### Backend Quality Reviewer

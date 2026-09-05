@@ -45,6 +45,7 @@ if ($scopeChoice -eq '1') {
     if ([string]::IsNullOrWhiteSpace($inputPath)) { $inputPath = (Get-Location).Path }
     $root = (Resolve-Path -LiteralPath $inputPath).Path
 }
+Assert-DefaultConfigDirectories -Scope $scope -Root $root -Clients $clients
 $layout = Get-InstallLayout -Scope $scope -Root $root
 
 $skillMethod = 'copy'

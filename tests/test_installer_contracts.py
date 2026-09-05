@@ -1,4 +1,6 @@
 import json
+import os
+import shlex
 import shutil
 import subprocess
 import sys
@@ -11,6 +13,54 @@ ROOT = Path(__file__).resolve().parents[1]
 CATALOG = ROOT / "components.json"
 CATALOG_TOOL = ROOT / "scripts" / "catalog.py"
 MANIFEST_TOOL = ROOT / "scripts" / "manifest.py"
+
+
+class GlobalConfigPathTest(unittest.TestCase):
+    def test_posix_entrypoints_reject_custom_roots_before_any_mutation(self) -> None:
+        for script in ("install.sh", "uninstall.sh"):
+            for variable in ("CODEX_HOME", "CLAUDE_CONFIG_DIR"):
+                with self.subTest(script=script, variable=variable), tempfile.TemporaryDirectory() as tmp:
+                    home = Path(tmp)
+                    marker = home / "mutation"
+                    scope_function = "ask_install_scope" if script == "install.sh" else "ask_uninstall_scope"
+                    scope_variable = "INSTALL_SCOPE" if script == "install.sh" else "UNINSTALL_SCOPE"
+                    # The real main must reject before even importing a legacy manifest.
+                    body = f"""
+source {shlex.quote(str(ROOT / script))}
+{scope_function}() {{ {scope_variable}=global; }}
+set_manifest_path() {{ touch {shlex.quote(str(marker))}; exit 0; }}
+main
+"""
+                    env = {**os.environ, "HOME": tmp, "CODEX_HOME": "", "CLAUDE_CONFIG_DIR": "", variable: str(home / "custom")}
+                    done = subprocess.run(["bash", "-c", body], env=env, capture_output=True, text=True, timeout=30)
+                    self.assertNotEqual(done.returncode, 0)
+                    self.assertIn(variable, done.stderr)
+                    self.assertFalse(marker.exists(), "path guard ran after a mutation")
+
+    def test_default_and_project_roots_reach_manifest_processing(self) -> None:
+        for script in ("install.sh", "uninstall.sh"):
+            for scope, mode in (("global", "unset"), ("global", "empty"), ("global", "default"), ("project", "custom")):
+                with self.subTest(script=script, scope=scope, mode=mode), tempfile.TemporaryDirectory() as tmp:
+                    home = Path(tmp)
+                    marker = home / "reached"
+                    scope_function = "ask_install_scope" if script == "install.sh" else "ask_uninstall_scope"
+                    scope_variable = "INSTALL_SCOPE" if script == "install.sh" else "UNINSTALL_SCOPE"
+                    body = f"""
+source {shlex.quote(str(ROOT / script))}
+{scope_function}() {{ {scope_variable}={scope}; }}
+set_manifest_path() {{ touch {shlex.quote(str(marker))}; exit 0; }}
+main
+"""
+                    env = dict(os.environ, HOME=tmp)
+                    for variable, directory in (("CODEX_HOME", ".codex"), ("CLAUDE_CONFIG_DIR", ".claude")):
+                        env.pop(variable, None)
+                        if mode == "empty":
+                            env[variable] = ""
+                        elif mode != "unset":
+                            env[variable] = str(home / (directory if mode == "default" else "custom")) + "/"
+                    done = subprocess.run(["bash", "-c", body], env=env, capture_output=True, text=True, timeout=30)
+                    self.assertEqual(done.returncode, 0, done.stderr)
+                    self.assertTrue(marker.exists())
 
 
 class ComponentCatalogTest(unittest.TestCase):

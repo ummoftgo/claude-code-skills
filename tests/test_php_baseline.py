@@ -689,7 +689,7 @@ class PhpReviewerBaseline(unittest.TestCase):
         )
         for failure_mode in (
             r"did not complete|실패",
-            r"not dispatched|미디스패치|디스패치되지",
+            r"not performed|not dispatched|미수행|미디스패치|디스패치되지",
             # 부재를 뜻하는 표현이면 형태는 자유다 — 한 가지 철자만 받으면 정상 문구를 거부한다.
             r"(?:without|not|missing|미)[^\n]{0,40}reference[^\n]{0,40}load"
             r"|reference[^\n]{0,40}(?:not|without|missing)[^\n]{0,20}load"
@@ -3238,7 +3238,7 @@ class TrustStateDeliveryTest(unittest.TestCase):
 
     def test_the_team_leader_must_decide_the_trust_value(self) -> None:
         skill = read("skills/branch-merge-review/SKILL.md")
-        step = between(skill, "## Step 2: Dispatch Reviewers in Parallel", "## Step 2.5",
+        step = between(skill, "## Step 2: Choose Review Execution", "## Step 2.5",
                        label="디스패치 단계")
         self.assertIn("Determine `[UNTRUSTED_DIFF]` before dispatching", step)
         # 판단 불가일 때의 방향이 정해져 있어야 fail-closed 다.
@@ -3945,12 +3945,7 @@ class PhpCrossValidationBaseline(unittest.TestCase):
     )
 
     def cross_validation_block(self) -> str:
-        return between(
-            read("skills/branch-merge-review/SKILL.md"),
-            "**4b. Cross-validate Critical and High findings**",
-            "**4c. Mark each Critical/High finding**",
-            label="교차 검증 절",
-        )
+        return read("skills/branch-merge-review/references/cross-validation-patterns.md")
 
     def test_the_non_dismissal_rule_survives(self) -> None:
         """GREEN — 정규식 불일치가 곧 기각은 아니다.

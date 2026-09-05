@@ -138,6 +138,34 @@ function Assert-WorkflowHookRun {
 $temporaryRoot = Join-Path ([IO.Path]::GetTempPath()) ('skills 설치 행렬 ' + [guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $temporaryRoot | Out-Null
 try {
+    # Global path validation must not create anything, and only checks selected clients.
+    $configProbeRoot = Join-Path $temporaryRoot 'Config path probe'
+    $savedCodexHome = [Environment]::GetEnvironmentVariable('CODEX_HOME')
+    $savedClaudeConfig = [Environment]::GetEnvironmentVariable('CLAUDE_CONFIG_DIR')
+    try {
+        foreach ($client in @('claude', 'codex')) {
+            [Environment]::SetEnvironmentVariable('CODEX_HOME', $null)
+            [Environment]::SetEnvironmentVariable('CLAUDE_CONFIG_DIR', $null)
+            Assert-DefaultConfigDirectories -Scope global -Root $configProbeRoot -Clients @($client)
+            $variable = if ($client -eq 'claude') { 'CLAUDE_CONFIG_DIR' } else { 'CODEX_HOME' }
+            $other = if ($client -eq 'claude') { 'CODEX_HOME' } else { 'CLAUDE_CONFIG_DIR' }
+            $directory = if ($client -eq 'claude') { '.claude' } else { '.codex' }
+            [Environment]::SetEnvironmentVariable($variable, (Join-Path $configProbeRoot $directory) + '\')
+            [Environment]::SetEnvironmentVariable($other, (Join-Path $temporaryRoot 'Unselected client'))
+            Assert-DefaultConfigDirectories -Scope global -Root $configProbeRoot -Clients @($client)
+            [Environment]::SetEnvironmentVariable($variable, (Join-Path $temporaryRoot 'Custom config'))
+            Assert-DefaultConfigDirectories -Scope project -Root $configProbeRoot -Clients @($client)
+            $rejected = $false
+            try { Assert-DefaultConfigDirectories -Scope global -Root $configProbeRoot -Clients @($client) }
+            catch { $rejected = $_.Exception.Message -like "*$variable*" }
+            Assert-True $rejected "$variable custom global path is rejected"
+            Assert-True (-not (Test-Path -LiteralPath $configProbeRoot)) 'config guard leaves filesystem unchanged'
+        }
+    } finally {
+        [Environment]::SetEnvironmentVariable('CODEX_HOME', $savedCodexHome)
+        [Environment]::SetEnvironmentVariable('CLAUDE_CONFIG_DIR', $savedClaudeConfig)
+    }
+
     $components = @(Get-SupportedComponents -Client claude -Platform windows -Kind skill)
     $plan = @($components | Where-Object { $_.name -eq 'plan-and-build' })[0]
 

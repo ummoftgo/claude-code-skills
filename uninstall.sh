@@ -604,6 +604,7 @@ main() {
     info "이 저장소가 소유한 스킬/훅/에이전트 링크·파일만 제거합니다."
 
     ask_uninstall_scope
+    python3 "$SCRIPT_DIR/scripts/config_paths.py" --scope "$UNINSTALL_SCOPE" --clients claude codex || return 1
     set_manifest_path
     remove_claude_skills
     remove_workflow_hook "Claude Code" "$CLAUDE_HOOKS_DIR" "$CLAUDE_SETTINGS_FILE"
