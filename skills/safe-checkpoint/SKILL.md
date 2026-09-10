@@ -56,7 +56,7 @@ Inspect runtime manifests before choosing commands, including `composer.json`, `
 Use the completed implementation/review checks when they cover the intended changes and their relevant code, inputs, and environment are unchanged. A commit request alone does not require new tests or another suite run. Run missing required checks or checks invalidated by relevant changes, failures, or a concrete unresolved concern; keep their scope proportional to risk. Still inspect the staged diff for scope and whitespace errors. Record exact commands and results, distinguishing reused evidence from newly executed checks.
 
 - For a normal commit request, stop before staging and commit when required verification fails.
-- For an explicitly authorized failed WIP checkpoint, record the failure, evidence, and exact resume point in the handoff, then allow a commit whose subject begins with `wip:`.
+- For an explicitly authorized failed WIP checkpoint, retain the failure, evidence, and exact resume point for the final response, then allow a commit whose subject begins with `wip:`. Also record them in a handoff document only when writing that document is authorized. A WIP commit alone needs neither a new handoff file nor another approval to proceed.
 - Never convert an ordinary failed commit into WIP without authority.
 
 ## 5. Stage and commit only the intended scope

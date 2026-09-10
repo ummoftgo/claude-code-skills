@@ -77,10 +77,12 @@ cargo fmt --version 2>/dev/null
 Get-Command cargo, rustc -ErrorAction SilentlyContinue
 ```
 
+Install only under the common [installation authority](../SKILL.md#installation-authority).
+
 **Read-only:** skip every command in this block; record them as `skipped-read-only`.
 
 ```bash
-# Normal mode only — these install toolchain components and binaries
+# Authorized installs only — these install toolchain components and binaries
 rustup component add clippy rustfmt
 cargo install cargo-audit
 ```

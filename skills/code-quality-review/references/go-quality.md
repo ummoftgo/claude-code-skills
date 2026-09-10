@@ -89,10 +89,12 @@ ls "$(GOTOOLCHAIN=local go env GOPATH)/bin" 2>/dev/null
 Get-Command go, gofmt, staticcheck, golangci-lint -ErrorAction SilentlyContinue
 ```
 
+Install only under the common [installation authority](../SKILL.md#installation-authority).
+
 **Read-only:** skip every command in this block; record them as `skipped-read-only`.
 
 ```bash
-# Normal mode only — `go install` writes a binary into GOPATH/bin
+# Authorized installs only — `go install` writes a binary into GOPATH/bin
 GOTOOLCHAIN=local go install honnef.co/go/tools/cmd/staticcheck@latest
 GOTOOLCHAIN=local go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
 ```

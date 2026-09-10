@@ -33,37 +33,46 @@ if [ -f composer.json ]; then
   PHP_CONSTRAINT=$(grep -oP '"php"\s*:\s*"\K[^"]+' composer.json 2>/dev/null | head -1)
   PROJECT_PHP_VER=$(echo "$PHP_CONSTRAINT" | grep -oP '\d+\.\d+' | head -1)
 fi
-
-# Current CLI version
-CLI_PHP_VER=$(php -r 'echo PHP_MAJOR_VERSION . "." . PHP_MINOR_VERSION;' 2>/dev/null)
 ```
 
 ### Resolve PHP_CMD
 
 ```bash
-PHP_CMD="php"   # default
+PHP_CMD="${PHP_CMD:-php}"   # supplied binary or default
+CLI_PHP_VER=$("$PHP_CMD" -r 'echo PHP_MAJOR_VERSION . "." . PHP_MINOR_VERSION;' 2>/dev/null) || CLI_PHP_VER=""
 
 if [ -n "$PROJECT_PHP_VER" ] && [ "$PROJECT_PHP_VER" != "$CLI_PHP_VER" ]; then
-  echo "⚠ PHP version mismatch — project requires $PROJECT_PHP_VER, system php is $CLI_PHP_VER"
-
-  # 1) Try versioned CLI first (php8.3, php8.4, ...)
+  # An installed versioned CLI is usable only if its actual version matches.
   ALT_PHP="php${PROJECT_PHP_VER}"
-  if command -v "$ALT_PHP" &>/dev/null; then
+  ALT_PHP_VER=$("$ALT_PHP" -r 'echo PHP_MAJOR_VERSION . "." . PHP_MINOR_VERSION;' 2>/dev/null) || ALT_PHP_VER=""
+  if [ "$ALT_PHP_VER" = "$PROJECT_PHP_VER" ]; then
     PHP_CMD="$ALT_PHP"
-    echo "✓ Using $ALT_PHP"
+    CLI_PHP_VER="$ALT_PHP_VER"
   else
-    # 2) Ask the user
-    echo "  Versioned CLI '$ALT_PHP' not found on PATH."
-    echo "  Options:"
-    echo "    a) Proceed with system php $CLI_PHP_VER (PHPStan may report false positives)"
-    echo "    b) Provide the path to a php$PROJECT_PHP_VER binary"
-    # Wait for user response; if they provide a path, set PHP_CMD accordingly:
-    # PHP_CMD="/usr/local/bin/php8.3"
+    echo "Matching CLI unavailable: $ALT_PHP (${ALT_PHP_VER:-missing or failed})"
   fi
 fi
 
-echo "PHP_CMD=$PHP_CMD ($(${PHP_CMD} -r 'echo PHP_VERSION;' 2>/dev/null))"
+if [ -z "$CLI_PHP_VER" ] || { [ -n "$PROJECT_PHP_VER" ] && [ "$PROJECT_PHP_VER" != "$CLI_PHP_VER" ]; }; then
+  echo "PHP runtime: execution-error — required: ${PROJECT_PHP_VER:-project-compatible PHP}; $PHP_CMD: ${CLI_PHP_VER:-missing or failed}"
+  unset PHP_CMD
+  exit 1
+fi
+
+echo "PHP_CMD=$PHP_CMD ($CLI_PHP_VER)"
 ```
+
+If resolution fails, do not run the later PHP blocks; continue static/manual review and mark
+runtime-dependent checks unverified. The shell exits instead of falling through with the wrong PHP.
+
+Both direct and delegated reviews automatically try an installed matching versioned CLI above;
+the executable's name alone is not version evidence. If no compatible runtime is found:
+
+- **Delegated review:** do not ask the user or validate with a mismatched PHP. Return the failure
+  reason, project requirement, observed binaries/versions, and required matching runtime/path to
+  the lead agent in the single report.
+- **Direct review:** ask the user for a matching runtime's path. Set `PHP_CMD` and rerun
+  resolution before any later block; do not validate with a mismatched runtime.
 
 ### Derive the source directory
 
@@ -80,6 +89,7 @@ Two shapes the naive read gets wrong, both ordinary Composer:
 
 ```bash
 # Every PSR-4 root, one per line, string and array values alike.
+: "${PHP_CMD:?Resolve PHP_CMD successfully before running PHP blocks}"
 SRC_DIRS=$($PHP_CMD -r '
   $map = json_decode(file_get_contents("composer.json"), true)["autoload"]["psr-4"] ?? [];
   $dirs = [];
@@ -136,6 +146,7 @@ project declared, and in whichever of NEON's spellings, the cache lands outside.
 # One variable decides everything below: which config PHPStan will actually use.
 # Resolve it in PHPStan's own priority order — NOT with `ls | head -1`, which sorts
 # alphabetically and would pick phpstan.dist.neon over phpstan.neon.
+: "${PHP_CMD:?Resolve PHP_CMD successfully before running PHP blocks}"
 PHPSTAN_CONFIG=""
 if [ -n "${PHPSTAN_EXPLICIT_CONFIG:-}" ]; then
   PHPSTAN_CONFIG="$PHPSTAN_EXPLICIT_CONFIG"          # set only when the run passes --configuration
@@ -310,6 +321,10 @@ Until that check happens, treat Windows PHPStan as **provisional**: safe to run 
 branch, not to be relied on as the untrusted-diff barrier.
 
 ```powershell
+# Apply the version resolution above in PowerShell first; a failed resolution must throw
+# and clear $PhpCmd. Never enter this block with an unresolved runtime.
+if (-not $PhpCmd) { throw 'Resolve PhpCmd successfully before running PHP blocks' }
+
 # Every path written into the generated NEON goes through this. Single quotes so `\` stays
 # literal (Windows paths), forward slashes because PHP accepts them and they sidestep the
 # escape question entirely, and `''` doubling because an apostrophe would otherwise end the
@@ -442,7 +457,8 @@ config-driven execution path and still gets analysed.
 
 ## 1. CLI Tool Setup
 
-Install all tools as global PHAR binaries. Check existence before installing.
+For an installation allowed by the common [installation authority](../SKILL.md#installation-authority),
+use global PHAR binaries and install only missing tools.
 
 **Read-only:** skip every command in this block; record them as `skipped-read-only`.
 

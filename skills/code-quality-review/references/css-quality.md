@@ -23,6 +23,8 @@ CLI tools and manual patterns for CSS/SCSS quality review.
 
 ## 1. CLI Tool Setup
 
+Installation and setup writes follow the common [installation authority](../SKILL.md#installation-authority).
+
 **Read-only:** skip every command in this block; record them as `skipped-read-only`.
 
 ```bash
@@ -44,7 +46,8 @@ Writing a config file changes the user's repository, so the creation path is gat
 **Read-only:** skip this command; record it as `skipped-read-only`.
 
 - If a config already exists → run as-is
-- If no config → create a minimal one before running:
+- If no config → create a minimal one only when setup is authorized under the rule above;
+  otherwise record `execution-error` (missing configuration) and continue manual review:
 
 ```js
 // .stylelintrc.json (plain CSS)

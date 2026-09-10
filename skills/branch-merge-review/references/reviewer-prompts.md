@@ -63,6 +63,8 @@ You are conducting a READ-ONLY code review. Your constraints are absolute:
 - Do NOT write any report file to disk.
 - Do NOT offer or apply fixes — findings and recommendations only.
 - Do NOT submit intermediate status updates — return your full findings in a single response when done.
+- In a delegated review, do NOT ask the user questions. Return missing environment/runtime
+  information and the affected unverified checks to the lead agent in that response.
 - You may read files outside your scope to understand context and process flow.
   However, report ONLY findings whose primary location is within your scoped files.
 - For Svelte components: read the entire component before flagging lifecycle or store issues.
@@ -168,11 +170,13 @@ skip the reviewer and report the paths as unreviewed.
 **Persona**: You are an application security expert specializing in OWASP Top 10 vulnerabilities, with deep knowledge of the attack surfaces present in this repository — `{languages}` on the server and the browser surface where one exists.
 
 **Skill to use**: Invoke `web-security-review` by name. Pass the surfaces Step 1 decided per
-workspace (`browser` / `http-server` / `native`) and load **one language-axis reference per changed language**, plus every applicable surface
-reference. A branch touching PHP and Node loads both language files:
+workspace (`browser` / `http-server` / `native`) and load **every language/surface reference its
+selection table requires for the actual changes**. A branch touching PHP and Node loads both
+language files when those rows apply.
 
-The **language axis is always loaded** — a manifest or lockfile change carries supply-chain
-findings even when only browser code moved. Add one surface file per surface Step 1 assigned.
+Browser JS/CSS assets alone, with no manifest, lockfile, or build/configuration change, require
+only `browser-security.md` for security. A changed manifest or lockfile restores the Node
+language axis; a changed build/bundler config also requires `native-security.md`.
 
 | Changed files | Load |
 |---|---|
@@ -180,7 +184,7 @@ findings even when only browser code moved. Add one surface file per surface Ste
 | PHP, API only | `php-backend-security.md` |
 | Node/TS, `http-server` | `node-security.md` + `http-server-security.md` |
 | Node/TS, `native` | `node-security.md` + `native-security.md` |
-| Node/TS, `browser` | `node-security.md` + `browser-security.md` |
+| Node/TS, `browser` with manifest/lockfile changes | `node-security.md` + `browser-security.md` |
 | Node/TS, `browser` via a changed build/bundler config | the two above + `native-security.md` |
 | Node/TS, several surfaces | `node-security.md` + one file per assigned surface |
 | Python, `http-server` | `python-security.md` + `http-server-security.md` |
@@ -191,14 +195,14 @@ findings even when only browser code moved. Add one surface file per surface Ste
 | Go, server-rendered templates | `go-security.md` + `http-server-security.md` + `browser-security.md` |
 | Rust, `http-server` | `rust-security.md` + `http-server-security.md` |
 | Rust, `native` (CLI, daemon) | `rust-security.md` + `native-security.md` |
-| Browser assets only, no manifest in the diff | `browser-security.md` |
+| Browser assets only, no manifest, lockfile, or build/configuration change | `browser-security.md` |
 
 **Never pair `php-backend-security.md` with `http-server-security.md`** — the PHP file already
 covers that surface, and loading both double-reports the same findings.
 
 **For any changed PHP path — including deleted paths and the previous paths of renames —
-`references/php-backend-security.md` must be among them.** A language reference that is not
-loaded means that language was not reviewed, even though the file still exists.
+`references/php-backend-security.md` must be among them.** A required language or surface
+reference that was not loaded and reviewed leaves that scope unreviewed.
 
 For a language with no language-axis reference, do not substitute another's. Report those paths
 as unreviewed; the completion gate in SKILL.md Step 3 turns that into a merge decision.
@@ -217,8 +221,8 @@ Workspace root: [absolute path to project root]
 Base branch: [BASE_LABEL]  Merge base: [MERGE_BASE]  Current branch: [CURRENT]
 
 Invoke and follow: `web-security-review` with **every reference the table above selects**
-for the languages and surfaces in this branch — one language-axis file **per changed language**, plus one per surface.
-Name the loaded references in your report.
+for the actual changes in this branch, including the browser-assets-only exception.
+Name the references loaded and reviewed, and any missing or failed coverage, in your report.
 Use only the audit/review steps. Skip the "Offer to Fix" step — this is a read-only review.
 
 Your scope — review ALL of these changed files (including deleted):

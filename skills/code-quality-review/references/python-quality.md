@@ -101,10 +101,12 @@ Get-ChildItem .venv\Scripts\ -ErrorAction SilentlyContinue |
   Where-Object Name -match '^(ruff|mypy|pyright|vulture|radon)\.exe$'
 ```
 
+Install only under the common [installation authority](../SKILL.md#installation-authority).
+
 **Read-only:** skip every command in this block; record them as `skipped-read-only`.
 
 ```bash
-# Normal mode only. Prefer the project's own tooling — uv, then pip in its virtualenv.
+# For an authorized install, prefer the project's own tooling — uv, then pip in its virtualenv.
 # `uv tool install` takes ONE package per invocation (verified on uv 0.9.17: a second
 # positional argument is rejected with `unexpected argument`).
 uv tool install ruff

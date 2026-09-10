@@ -1,6 +1,6 @@
 ---
 name: code-quality-review
-description: "Review code for quality and performance issues: unnecessary or misleading comments, style inconsistencies vs project conventions, duplicated code, and performance inefficiencies — especially evaluation order. Trigger when the user asks for a code quality review, refactoring advice, or code cleanup. Covers PHP, Python, Go, Rust, JavaScript/TypeScript (browser and Node), and CSS/SCSS, running each language's CLI tools automatically; a language with no reference here is reported as unsupported rather than checked against another language's rules. Do not use when the request names security as the subject (use web-security-review) or when the scope is a whole branch/PR before merge (use branch-merge-review)."
+description: "Review code for quality and performance issues: unnecessary or misleading comments, style inconsistencies vs project conventions, duplicated code, and performance inefficiencies — especially evaluation order. Trigger when the user asks for a code quality review, refactoring advice, or code cleanup. Covers PHP, Python, Go, Rust, JavaScript/TypeScript (browser and Node), and CSS/SCSS, running each language's available CLI tools automatically; a language with no reference here is reported as unsupported rather than checked against another language's rules. Do not use when the request names security as the subject (use web-security-review) or when the scope is a whole branch/PR before merge (use branch-merge-review)."
 ---
 
 # Code Quality Review
@@ -25,7 +25,7 @@ Detect the active shell before using a snippet. On POSIX use `command -v`, `[ -f
 > Never redirect a write out of the workspace to make a *code-modifying* command acceptable; that
 > is a different rule and it has no exceptions.
 >
-> When in doubt, treat the request as read-only and ask before installing or writing.
+> When in doubt, treat the request as read-only and continue with the available checks.
 >
 > **A second, separate axis: does the tool *execute* the code under review?** Not writing files and
 > not running attacker-controlled code are different guarantees, and the read-only flags above
@@ -202,7 +202,7 @@ nothing loads it.
 | 0 | **Applicability and scope** — detection signals, package/workspace root, generated and vendor paths to exclude |
 | 1 | **Version resolution** — runtime, toolchain, package manager, and lockfile the project pins |
 | 2 | **Tool roles** — static analysis / style / complexity / duplication, and which project config takes precedence |
-| 3 | **Availability and authority** — existence check, install path for normal mode, and the read-only contract below |
+| 3 | **Availability and authority** — existence check, install path subject to Installation authority in Step 2, and the read-only contract below |
 | 4 | **Execution** — POSIX and PowerShell 5.1 forms, exit-code and output interpretation, and any write side effect |
 | 5 | **Manual patterns** — what the tools cannot catch |
 | 6 | **Severity mapping** — tool output to High/Medium/Low, plus the run-state vocabulary below |
@@ -217,7 +217,7 @@ Do not force one tool per role. When a role has no established tool in that lang
 | `passed` | Ran clean |
 | `findings` | Ran and reported problems |
 | `skipped-read-only` | A **command** writes, and the request is read-only, so it was withheld. This is what the contract line below records |
-| `skipped-not-installed` | A **tool role** could not run because its tool is absent — under read-only because the install was withheld, in normal mode because the install failed |
+| `skipped-not-installed` | A **tool role** could not run because its tool is absent — installation was not authorized, was withheld under read-only, or an authorized install failed |
 | `unavailable` | No tool fills this role in this language |
 | `skipped-untrusted-execution` | The tool would run code from the diff and no isolation was available |
 | `timeout` / `execution-error` | Started but did not produce a usable result |
@@ -286,7 +286,17 @@ Infer project conventions from **existing code majority** (not assumed standards
 
 ## Step 2: Run CLI Tools
 
-Run all applicable tools. For each tool, check if it exists first — if not, install per the reference file instructions. **Under read-only, the install command is withheld (`skipped-read-only`) and the tool role it would have enabled stays unrun (`skipped-not-installed`).** In normal mode, `skipped-not-installed` means the install itself failed. Capture output for integration into the report.
+Run all applicable tools already present, checking availability first. Capture output for integration into the report.
+
+### Installation authority
+
+A review request alone does not authorize tool installation or setup writes. Use a reference's
+installation procedure only when that installation is already separately authorized; reuse
+that approval within its scope. The read-only rule above still forbids installation.
+Without approval, record each missing tool role as `skipped-not-installed` and continue the
+static/manual review without asking for installation permission. Under read-only, also record
+the withheld install command as `skipped-read-only`. An authorized install that fails leaves
+the role `skipped-not-installed`; it does not stop the remaining review.
 
 ### PHP stack
 
@@ -323,7 +333,7 @@ including the `-o /dev/null` form that keeps `go build` from leaving a binary be
 `references/css-quality.md` §2 owns Stylelint invocation.
 
 Installation for every stack lives in its reference file's setup section, gated by the
-read-only contract above.
+installation authority and read-only contract above.
 
 ## Step 3: Manual Review — Four Categories
 

@@ -174,7 +174,11 @@ def normalize(prompt: str) -> str:
 
 
 def should_plan_and_build(text: str) -> bool:
-    if not text or NO_CHANGES.search(text) or not ACTION.search(text):
+    if not text or not ACTION.search(text):
+        return False
+    # ponytail: keyword intent only; use explicit scope metadata if routing must decide authority.
+    mixed_intent = EVIDENCE_REVIEW_INTENT.search(text) and EXPLICIT_MUTATION.search(text)
+    if NO_CHANGES.search(text) and not mixed_intent:
         return False
 
     substantial = bool(SUBSTANTIAL.search(text))

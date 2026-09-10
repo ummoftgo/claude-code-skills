@@ -345,18 +345,22 @@ changed files, `Ready to merge` **must not** be selected when any of these holds
 - any required quality or security pass is incomplete or failed, whether assigned to the lead or a child;
 - its quality reviewer **did not complete** or returned an error twice;
 - its quality pass was **not performed** — neither a completed direct pass nor a completed child review exists, for example because no reference file exists or an ambiguous surface never resolved;
-- the security reviewer ran without the **reference for that language being loaded**.
+- the security pass did not load and review **every language/surface reference required for
+  the actual changes by the `web-security-review` selection table**.
+
+For browser JS/CSS assets only, with no manifest, lockfile, or build/configuration change,
+`browser-security.md` alone satisfies the security-reference requirement. This exception does
+not waive the required quality pass or turn a missing, failed, or unsupported review into a pass.
 
 In any of those cases the recommendation is `Block merge` or `Merge after fixes`, and the report
-says which language went unreviewed and why. Silence about a missing reviewer reads as a clean
+says which language/surface went unreviewed and why. Silence about a missing reviewer reads as a clean
 result, and the risk grows precisely as the roster grows — with one fixed backend reviewer a
 failure was obvious; with one per language it is not.
 
-> **Languages covered today** — each has both a quality reference and a security language-axis
-> reference, so none of them is blocked by this gate: **PHP, Python, Go, Rust, and JS/TS**
-> (server and browser surfaces). The surface-axis files `http-server-security.md`,
-> `browser-security.md`, and `native-security.md` pair with all of them except PHP, which carries
-> its HTTP surface in its own file.
+> **Languages covered today** — **PHP, Python, Go, Rust, and JS/TS** (server and browser
+> surfaces) have quality and security references. CSS/SCSS is covered by the frontend quality
+> pass and `browser-security.md`. Load the combination required by the selection table; PHP
+> carries its HTTP surface in its own language file, and browser assets alone use the exception above.
 >
 > The gate still applies to any **other** language in the diff. For those, report the paths as
 > unreviewed and let the recommendation reflect it, rather than approving a review that never

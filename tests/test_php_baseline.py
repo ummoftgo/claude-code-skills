@@ -853,20 +853,12 @@ class PhpToolchainBaseline(unittest.TestCase):
             "새 정책(격리)이 산문에 없다",
         )
 
-    def test_normal_mode_still_installs_missing_tools(self) -> None:
-        """GREEN — 읽기 전용 조건을 잘못 걸어 일반 모드까지 죽이면 리뷰가 빈 껍데기가 된다.
-
-        일반 모드에서 도구가 없으면 설치한다는 지시가 살아 있어야 한다. 이것이 사라지면
-        리뷰는 `skipped-not-installed` 만 잔뜩 내고 실제 검사를 하지 않는다.
-        """
+    def test_missing_tools_and_withheld_commands_have_distinct_run_states(self) -> None:
+        """설치 권한이 없으면 검토를 계속하되 미실행 상태를 누락하지 않는다."""
         skill = read("skills/code-quality-review/SKILL.md")
         step_two = between(
             skill, "## Step 2: Run CLI Tools", "## Step 3", label="Step 2"
         )
-        # 일반 모드 설치 경로가 살아 있어야 한다.
-        self.assertIn("install per the reference file instructions", step_two)
-        # 그리고 읽기 전용에서만 보류돼야 한다 — 게이트 없이 설치하면 우선 규칙을 어긴다.
-        self.assertRegex(step_two, r"read-only")
         self.assertIn("skipped-read-only", step_two)
         self.assertIn("skipped-not-installed", step_two)
 
@@ -983,6 +975,48 @@ class PhpToolchainBaseline(unittest.TestCase):
         self.assertEqual(
             len(next(iter(distinct))), 1, f"조각이 두 파일에 중복된다: {owners}"
         )
+
+    @unittest.skipUnless(shutil.which("bash") and shutil.which("grep") and shutil.which("head"),
+                         "PHP 런타임 선택 예제에 필요한 셸 도구 없음")
+    def test_php_runtime_resolution_stops_before_using_an_incompatible_binary(self) -> None:
+        section = between(
+            quality_reference("php-quality"), "### Detect project PHP version",
+            "### Derive the source directory", label="PHP 런타임 선택",
+        )
+        script = code_blocks(section) + '\nprintf "RESOLVED:%s\\n" "$PHP_CMD"\n'
+        for system_version, alternate_version, selected in (
+            ("8.1", None, None),
+            ("8.1", "8.3", "php8.3"),
+            ("8.1", "8.2", None),
+            ("8.3", None, "php"),
+            (None, "8.3", "php8.3"),
+        ):
+            with self.subTest(system=system_version, alternate=alternate_version):
+                with tempfile.TemporaryDirectory() as tmp:
+                    work = Path(tmp)
+                    binaries = work / "bin"
+                    binaries.mkdir()
+                    for tool in ("grep", "head"):
+                        (binaries / tool).symlink_to(shutil.which(tool))
+                    for name, version in (("php", system_version), ("php8.3", alternate_version)):
+                        if version is not None:
+                            binary = binaries / name
+                            binary.write_text(f"#!/bin/sh\nprintf '%s\\n' '{version}'\n")
+                            binary.chmod(0o755)
+                    (work / "composer.json").write_text('{"require":{"php":"^8.3"}}')
+                    env = {**os.environ, "PATH": str(binaries)}
+                    env.pop("PHP_CMD", None)
+                    env.pop("BASH_ENV", None)
+                    result = subprocess.run(
+                        [shutil.which("bash"), "--noprofile", "--norc", "-c", script], cwd=work, env=env,
+                        capture_output=True, text=True, timeout=10,
+                    )
+                    if selected is None:
+                        self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+                        self.assertNotIn("RESOLVED:", result.stdout)
+                    else:
+                        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                        self.assertIn(f"RESOLVED:{selected}", result.stdout)
 
     def test_every_write_causing_instruction_carries_a_read_only_guard(self) -> None:
         """GREEN (1단계에서 전환됨) — 쓰기를 유발하는 **명령 각각**이 읽기 전용 가드를 동반해야 한다.
@@ -3876,15 +3910,20 @@ class SecurityMetadataAndGuidanceTest(unittest.TestCase):
             "미지원 언어를 미검토로 보고한다는 경계가 description 에 없다",
         )
 
-    def test_the_security_prompt_loads_one_language_file_per_language(self) -> None:
-        """PHP+Node 브랜치를 리뷰어 하나가 처리한다 — 단수로 쓰면 한 언어가 빠진다."""
-        prompts = " ".join(
-            read("skills/branch-merge-review/references/reviewer-prompts.md").split()
-        )
-        self.assertRegex(
-            prompts, r"per changed language",
-            "언어 축을 언어마다 로드한다는 지시가 없다",
-        )
+    def test_security_reference_selection_preserves_browser_and_backend_coverage(self) -> None:
+        """브라우저 전용 예외가 백엔드 언어별 참조를 제거해서는 안 된다."""
+        prompts = read("skills/branch-merge-review/references/reviewer-prompts.md")
+        rows = [line.split("|")[1:3] for line in prompts.splitlines() if line.startswith("| ")]
+        for scope, expected in (
+            ("PHP, API only", {"php-backend-security.md"}),
+            ("Node/TS, `http-server`", {"node-security.md", "http-server-security.md"}),
+            ("Node/TS, `native`", {"node-security.md", "native-security.md"}),
+            ("Browser assets only", {"browser-security.md"}),
+        ):
+            with self.subTest(scope=scope):
+                matching = [refs for label, refs in rows if label.strip().startswith(scope)]
+                self.assertEqual(len(matching), 1, scope)
+                self.assertEqual(set(re.findall(r"`([^`]+\.md)`", matching[0])), expected)
 
     def test_scrypt_guidance_pins_every_cost_parameter(self) -> None:
         """`N` 만 고정하면 같은 N 으로도 r 을 낮춰 메모리 비용을 반감할 수 있다."""

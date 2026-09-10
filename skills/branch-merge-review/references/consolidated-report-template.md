@@ -15,9 +15,10 @@ Structure for the team leader's consolidated output (SKILL.md Step 5). The same 
 ## Executive Summary
 [2–3 sentences: overall quality and security posture, most critical findings]
 
-**Review completeness**: [per language — `PHP: reviewed` · `Node: reviewer did not complete` · `Go: no reference, unreviewed`]
+**Review completeness**: [per language/surface — `PHP: reviewed` · `Browser JS/CSS: reviewed` · `Node: reviewer did not complete` · `Go: no reference, unreviewed`]
 **Recommendation**: Block merge | Merge after fixes | Ready to merge
-  ↳ `Ready to merge` requires every language with changed files to be `reviewed`.
+  ↳ `Ready to merge` requires all applicable quality passes and every security reference selected
+    for the actual changes to be reviewed (SKILL.md Step 3, including the browser-assets-only exception).
 **Blocking items**: [CH-1(feature/label), H-2(feature/label), ...] | None
 **Findings**: Critical: N · High: N · Medium: N · Low: N  |  Validated: N · Needs verification: N
 

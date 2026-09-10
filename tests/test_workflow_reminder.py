@@ -9,6 +9,12 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 HOOK = ROOT / "hooks" / "workflow-reminder.py"
 POWERSHELL_HOOK = ROOT / "hooks" / "workflow-reminder.ps1"
+MIXED_SCOPE_PROMPTS = (
+    "API 코드는 수정하지 말고 검토해줘. 새 UI 기능은 구현해줘.",
+    "새 UI 기능은 구현해줘. API 코드는 읽기 전용으로 검토해줘.",
+    "Review the API without changing code. Then implement a new UI feature.",
+    "Implement a new UI feature; review the API in read-only mode.",
+)
 
 
 def run_hook(
@@ -147,6 +153,24 @@ class WorkflowReminderTest(unittest.TestCase):
     def test_reminds_when_review_also_requests_new_implementation(self) -> None:
         self.assert_reminds("현재 구조를 검토하고 새 인증 기능을 구현해줘")
 
+    def test_combines_scoped_review_and_implementation(self) -> None:
+        for prompt in MIXED_SCOPE_PROMPTS:
+            with self.subTest(prompt=prompt):
+                context = self.reminder_context(prompt)
+                self.assertLess(
+                    context.index("plan-and-build"),
+                    context.index("evidence-first-review"),
+                )
+                self.assertNotIn("safe-checkpoint", context)
+
+    def test_no_change_constraint_without_separate_review_stays_silent(self) -> None:
+        for prompt in (
+            "새 인증 기능을 구현해줘. 파일 수정 금지.",
+            "Do not modify any files. Implement a new authentication feature.",
+        ):
+            with self.subTest(prompt=prompt):
+                self.assert_silent(prompt)
+
     def test_reminds_when_english_review_requests_follow_up_implementation(self) -> None:
         self.assert_reminds(
             "Review the current structure, then implement a new authentication feature."
@@ -251,6 +275,9 @@ class WorkflowReminderTest(unittest.TestCase):
             {"user_prompt": "수정하지 말고 브랜치 리뷰해줘"},
             {"prompt": "read-only branch review please"},
             {"user_prompt": "머지 전에 브랜치 리뷰해줘"},
+            *({"user_prompt": prompt} for prompt in MIXED_SCOPE_PROMPTS),
+            {"user_prompt": "새 인증 기능 구현 계획을 검토해줘. 파일 수정 금지."},
+            {"user_prompt": "새 인증 기능을 구현해줘. 파일 수정 금지."},
         )
         for fixture in fixtures:
             with self.subTest(fixture=fixture):

@@ -172,7 +172,9 @@ try {
     $reminders = @()
 
     $shouldPlan = $false
-    if (-not $noChanges.IsMatch($text) -and $action.IsMatch($text)) {
+    # ponytail: keyword intent only; use explicit scope metadata if routing must decide authority.
+    $mixedIntent = $evidenceReviewIntent.IsMatch($text) -and $explicitMutation.IsMatch($text)
+    if ((-not $noChanges.IsMatch($text) -or $mixedIntent) -and $action.IsMatch($text)) {
         $isSubstantial = $substantial.IsMatch($text)
         $isSmallOnly = $smallEdit.IsMatch($text) -and -not $isSubstantial
         $isReviewOnly = $reviewIntent.IsMatch($text) -and -not $explicitMutation.IsMatch($text)

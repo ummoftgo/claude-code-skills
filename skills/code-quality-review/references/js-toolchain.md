@@ -26,7 +26,8 @@ point here rather than repeating commands.
 
 ## 1. CLI Tool Setup
 
-Tools are project-local (npm). Install only what is missing.
+Tools are project-local (npm). Install missing tools only under the common
+[installation authority](../SKILL.md#installation-authority).
 
 **Read-only:** skip every command in this block; record them as `skipped-read-only`.
 
@@ -63,7 +64,7 @@ fi
 **Tool selection priority**:
 1. If `biome.json` exists → use Biome (`check` covers lint + format)
 2. Else if `eslint.config.*` or `.eslintrc.*` exists → use ESLint
-3. Else → install ESLint (most compatible default)
+3. Else → use ESLint if available; any installation follows the common authority above.
 
 ---
 

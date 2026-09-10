@@ -27,22 +27,22 @@ All browser navigation, snapshot, and screenshot commands are defined in the age
 
 ## Step 1: Determine the URL
 
-Inspect the project to decide whether the URL can be auto-derived or must be requested from the user.
+Use the first applicable source below. A routing framework or SPA does not require a question when the intended URL is already known.
 
-| Project type | Detection signal | Action |
+| Priority | Available evidence | Action |
 |---|---|---|
-| Simple PHP files | `index.php` present, no routing framework | Auto-derive from CWD |
-| Routing app | `composer.json` has laravel/slim/etc., or SPA `package.json` | Ask user for URL |
-| Local dev server | `php -S` process running, or `npm run dev` / Vite port | Detect port, build URL |
+| 1 | The user supplied the URL in this request or the current task context | Reuse it, including its host, port, and route |
+| 2 | This project's running dev server or configuration establishes the intended URL | Reuse that URL; resolve the requested route from the project when needed |
+| 3 | Simple PHP files with a known web root and no routing framework | Auto-derive from CWD |
+| 4 | The target host, port, or route remains unresolved or has multiple plausible candidates | Ask only for the missing choice |
 
 **Auto-derive rule**: map CWD to web root relative path.
 - `/var/www/html/myapp/` → `http://<host>/myapp/`
 - `/var/www/html/myapp/pages/users.php` → `http://<host>/myapp/pages/users.php`
 
-On native Windows use `127.0.0.1` unless the project declares another host. In WSL replace `<host>` with `WINDOWS_HOST` from Step 2.
+For auto-derived local URLs, on native Windows use `127.0.0.1` unless the project declares another host. In WSL replace `<host>` with `WINDOWS_HOST` from Step 2.
 
-If a routing framework is detected (e.g., Laravel, Slim in `composer.json`), stop and ask the user for the URL:
-> "A routing framework was detected. Please provide the URL you want to open in the browser."
+Finding a port alone does not establish an unknown route. Continue with the known URL when it identifies the requested page; otherwise explain which part could not be resolved and ask for it.
 
 ## Step 2: Select the platform endpoint
 
@@ -76,7 +76,7 @@ If both return empty, ask the user to provide the Windows host IP directly.
 
 With the platform endpoint resolved:
 
-1. **Apply the application host to the URL**: use `127.0.0.1` on native Windows or `${WINDOWS_HOST}` for a server running in WSL.
+1. **Apply the application host only to auto-derived local URLs**: use `127.0.0.1` on native Windows or `${WINDOWS_HOST}` for a server running in WSL. Preserve an absolute URL supplied by the user or established by the project.
    - Example: `http://${WINDOWS_HOST}/myapp/pages/users.php`
 2. **Connect CDP and open the page** — follow the agent-browser skill:
    - Native Windows connect: `agent-browser connect http://127.0.0.1:9333`

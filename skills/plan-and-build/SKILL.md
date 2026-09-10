@@ -30,7 +30,7 @@ Include:
 6. **Parallelization decision** — identify independent workstreams or state why the work remains sequential.
 7. **Design approval decision** — state whether the change requires the checkpoint below and why.
 
-Keep the artifact short enough to guide implementation. Pause for the user when an unresolved choice would materially change behavior, schema, external integration, or scope. Design and parallel execution have the explicit approval requirements below.
+Keep the artifact short enough to guide implementation. Ask only for missing information that materially affects implementation or verification and cannot be established from the available context, or for a material choice outside the user's delegated decision-making scope. Continue independent work while that answer is pending. Resolve design and parallel authority under the checkpoints below; an already delegated choice does not need another approval.
 
 ### Resolve ambiguity before planning further
 
@@ -130,13 +130,15 @@ SC-001 (verifies FR-001) — 검증: <observable, checkable method>
 
 ### Design approval checkpoint
 
-Before editing implementation code, present a recommended design with concise alternatives and trade-offs, then wait for explicit user approval when any of these apply:
+First reuse an approved design or an explicit delegation to make design decisions within the agreed goal, scope, and constraints (for example, "choose the design and carry this through"). Record the chosen design and continue within that authority; the user does not need to be asked again just because this is a new project or contract change. Delegation does not authorize changes beyond that scope or separate external actions.
+
+When the design decision is not already covered by that authority, present a recommended design with concise alternatives and trade-offs before editing implementation code, then wait for explicit user approval when any of these apply:
 
 - a new project is being created;
 - architecture, persistence, API/schema contracts, or external integrations materially change;
 - multiple viable approaches differ meaningfully in scope, cost, compatibility, or operational risk.
 
-Use one approval checkpoint for the overall direction rather than approval after every section. When none of these conditions apply and the design is straightforward, record why no checkpoint is needed, share the plan summary, and continue without another prompt. A user who already explicitly approved the same proposed design does not need to be asked again.
+Use one approval checkpoint for the overall direction rather than approval after every section. When existing authority covers the decision, or none of these conditions applies and the design is straightforward, record why no checkpoint is needed, share the plan summary, and continue without another prompt.
 
 ## 3. Choose proportionate verification
 
@@ -199,8 +201,9 @@ code drift apart**:
 - the verification strategy for a step.
 
 Re-run the ambiguity scan only for the categories the change touches — a storage change reopens
-§2 and §5 of that table, not all seven. Ask for approval again **only when the change crosses the
-design approval boundary above**; a smaller correction is recorded and carried on with.
+§2 and §5 of that table, not all seven. Ask for approval again **only when the changed decision
+falls outside existing authority and meets the design checkpoint above**; record and continue
+corrections within the approved or delegated scope.
 
 A plan that silently stops describing the code is worse than no plan: the next reader, the
 handoff, and any later plan-versus-code audit all take it as current intent.
