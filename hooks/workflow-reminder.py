@@ -139,33 +139,27 @@ SELECTIVE_GIT_INTENT = re.compile(
 )
 
 PLAN_REMINDER = (
-    "Inspect the requested scope first. For a small, localized edit with an obvious "
-    "solution, proceed directly without a planning workflow. For substantial implementation, "
-    "invoke plan-and-build before editing code and follow its planning, proportionate "
-    "verification, and design/parallel authorization boundaries. Reuse decisions already "
-    "authorized for this scope; this reminder does not require another approval or test pass."
+    "Inspect the requested scope first. A small, localized edit with an obvious solution "
+    "proceeds directly; substantial implementation invokes plan-and-build before editing "
+    "code. Reuse decisions already authorized for this scope; this reminder is not a request "
+    "for another approval or test pass."
 )
 
 EVIDENCE_REVIEW_REMINDER = (
-    "This request may include a read-only review. Resolve the current user intent and "
-    "no-change scope first: protecting one file does not prohibit authorized implementation "
-    "elsewhere. For review work, route by mode before scope: rechecks, final approval, and "
-    "verification of specific claims/raw data/non-Git directories use evidence-first-review, "
-    "including when the scope is a PR or branch. A first-time PR/branch review uses "
-    "branch-merge-review; a narrower review uses the matching security or quality skill. "
-    "Within a read-only review, do not modify or create files, install tools, change Git or "
-    "worktree state, or save reports. Return findings with current evidence in the user's "
-    "language. Apply the latest explicit authorization to any separate implementation work."
+    "This request may include a read-only review. Route by mode before scope: rechecks, "
+    "final approval, and verification of specific claims, raw data, or non-Git directories "
+    "use evidence-first-review even for a PR or branch; a first-time PR/branch review uses "
+    "branch-merge-review; a narrower review uses the matching quality or security skill. "
+    "Within the read-only review, do not modify or create files, install tools, change Git "
+    "state, or save reports. A no-change constraint on one scope does not withdraw "
+    "authorization for separate implementation work."
 )
 
 SAFE_CHECKPOINT_REMINDER = (
-    "If the current user is requesting a checkpoint or handoff, invoke safe-checkpoint "
-    "before any Git or handoff write; quoted or hypothetical requests are not authorization. "
-    "Inspect branch, upstream, status, "
-    "diffs, runtime manifests, and existing handoff sources; separate intended changes from "
-    "unrelated dirty work and generated files. Require matching authorization for handoff "
-    "writes, staging and commit, remote push, and failed WIP commits. After any authorized "
-    "push, re-read HEAD, upstream synchronization, and remaining dirty state."
+    "If the user is requesting a checkpoint or handoff, invoke safe-checkpoint before any "
+    "Git or handoff write. Handoff writes, staging and commit, remote push, and failed WIP "
+    "commits each need their own explicit authorization; quoted or hypothetical requests "
+    "are not authorization."
 )
 
 

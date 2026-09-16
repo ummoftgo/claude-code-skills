@@ -52,7 +52,7 @@ Windows 설치기는 WSL 경로를 대상으로 하지 않습니다. WSL 모드�
    갈래를 명령으로 직접 나눠도 됩니다(단 **위 allowlist 게이트를 통과한 뒤에**): `git diff --name-only -z --diff-filter=d HEAD`(내용 검토 대상, 이름변경은 새 경로만) + `git ls-files -z --others --exclude-standard`(untracked) + `git diff --name-only -z --diff-filter=D HEAD`(삭제, diff 검토 대상). 소문자 `d`는 "삭제만 제외"라는 뜻으로, allowlist를 통과한 상태에서는 위 status 루프와 같은 집합을 냅니다 — **`ACMR`를 쓰면 `T`(type change, 예: 일반 파일 → 심볼릭 링크)가 빠져** 형식이 바뀐 설정 파일이 조용히 검토에서 누락됩니다. 열거식을 쓰려면 최소한 `ACMRT`여야 합니다. 미해결 충돌에서는 두 방식이 어긋납니다 — 실측에서 `DU`는 `--diff-filter=d` 갈래에 들어가고 `UD`만 두 갈래 어디에도 들어가지 않으며(`AA`도 `d` 갈래), status 루프도 대안이 아니므로 게이트가 중단시킵니다. `git diff --name-only HEAD` 단독은 untracked 파일을 출력하지 않으므로 대안이 아닙니다.
 5. 읽기 전용·무수정 제약은 위 세 축 어느 것도 바꾸지 않고 실행 방식만 바꿉니다. "수정하지 말고 브랜치 리뷰해줘"는 여전히 `branch-merge-review`를 읽기 전용으로 실행합니다.
 
-`agents/security-auditor`는 스킬이 아닌 서브에이전트 층입니다. 보안 요청에서 리뷰 스킬과 동시에 매칭될 수 있지만, 어느 스킬을 실행할지는 위 우선순위가 정하고 에이전트는 그 절차 안에서 보안 점검을 수행하는 실행 단위로 쓰입니다.
+`agents/security-auditor`는 스킬이 아닌 서브에이전트 층입니다. 보안 요청에서 리뷰 스킬과 동시에 매칭될 수 있지만, 어느 스킬을 실행할지는 위 우선순위가 정합니다. 이 에이전트는 사용자가 직접 보안 감사를 위임할 때 쓰이며, Claude에서는 `web-security-review`를 사전 로드하고 Codex에서는 배정받은 스킬을 호출합니다. `branch-merge-review`의 리뷰어는 별도 인라인 persona로 구성됩니다.
 
 자세한 라우팅 기준과 다중 매칭 예시는 [README.md](./README.md)의 "리뷰 스킬 라우팅"을 참고하세요.
 

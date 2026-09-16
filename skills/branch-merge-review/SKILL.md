@@ -1,6 +1,6 @@
 ---
 name: branch-merge-review
-description: "Run a first-time (initial) discovery review of all committed changes between the current branch and main/master before merging. Trigger when user says '브랜치 리뷰해줘', '머지 전에 리뷰해줘', 'PR 리뷰해줘', 'branch review', 'merge review', or similar. Reviewers never modify code, so a read-only branch review ('수정하지 말고 브랜치 리뷰해줘') still belongs here. Work mode outranks scope, so do NOT use this skill for a recheck of prior findings, a second or final review, a final approval or sign-off decision, or evidence-first verification of specific claims or raw data — use evidence-first-review instead, even when the scope is a PR, branch, or merge diff ('이 PR의 이전 지적을 재검토하고 최종 승인해줘'). Collection is commit-based, so this skill cannot review uncommitted staged, unstaged, or untracked work. Not for a single file or feature outside a branch diff (use code-quality-review or web-security-review)."
+description: "Run a first-time discovery review of all committed changes between the current branch and main/master before merging. Trigger on '브랜치 리뷰해줘', '머지 전에 리뷰해줘', 'PR 리뷰해줘', 'branch review', 'merge review'. A read-only constraint ('수정하지 말고 브랜치 리뷰해줘') still belongs here; reviewers never modify code. Not for a recheck of prior findings, a final approval decision, or evidence verification of specific claims — those use evidence-first-review even on a PR or branch scope. Commit-based: cannot review uncommitted work. A single file or feature outside a branch diff uses code-quality-review or web-security-review."
 ---
 
 # Branch Merge Review
@@ -238,9 +238,9 @@ CHANGED_SEC=$(printf '%s\n%s\n' "$CHANGED_SEC" "$RENAMES" | sort -u | grep -v '^
 ```
 
 `CHANGED_SEC` stays newline-joined, so a path containing a literal newline is still lost here —
-that is the pre-existing shape of this variable, not something `-z` introduces. What `-z` fixes
-is the common case: a renamed path with a space or a Korean filename used to enter the list
-quoted, and no such file exists.
+that is the shape of this variable, not something `-z` introduces. What `-z` fixes is the common
+case: without it a renamed path with a space or a Korean filename enters the list quoted, and no
+such file exists.
 
 Deleted paths are already in `CHANGED_SEC` (no `--diff-filter`) and stay classified by
 extension — a deleted `.php` is still PHP for security purposes even though no current file

@@ -3312,13 +3312,9 @@ class UntrustedExecutionContractTest(unittest.TestCase):
     """
 
     def rule(self) -> str:
-        # 인용 블록이므로 줄머리 `>` 를 걷어내야 문장이 이어진다.
-        raw = between(
-            read("skills/code-quality-review/SKILL.md"),
-            "**Read-only mode (priority rule).**", "## Reference Files",
-            label="읽기 전용 규칙",
-        )
-        return " ".join(re.sub(r"(?m)^\s*>\s?", "", raw).split())
+        # 실행 축의 상세는 references/untrusted-execution.md 가 소유한다. SKILL.md 본문은
+        # 게이트 결정(READ_ONLY·UNTRUSTED_DIFF)과 그 참조로의 포인터만 갖는다.
+        return " ".join(quality_reference("untrusted-execution").split())
 
     def test_the_execution_axis_is_stated_separately_from_the_write_axis(self) -> None:
         rule = self.rule()

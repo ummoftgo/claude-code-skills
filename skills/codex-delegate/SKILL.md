@@ -28,12 +28,13 @@ codex -a never -s read-only exec review --uncommitted     # staged + unstaged + 
 
 Pick exactly one of `--commit` / `--base` / `--uncommitted`. Also available:
 `--title <TITLE>`, `-m <MODEL>`, and `--output-schema <FILE>` / `--json` for
-machine-readable output.
+machine-readable output. Current codex-cli also exposes the same reviewer as a
+top-level `codex review …` subcommand; the examples keep the `exec review` spelling.
 
 **A range flag and a custom focus are mutually exclusive.** All three of `--commit`,
 `--base`, and `--uncommitted` conflict with the trailing `[PROMPT]` argument (and
-therefore with `-`, which is just `[PROMPT]` read from stdin) — verified against
-codex-cli 0.145.0, which rejects the combination at argument parsing:
+therefore with `-`, which is just `[PROMPT]` read from stdin); the CLI rejects the
+combination at argument parsing:
 
 ```
 error: the argument '--uncommitted' cannot be used with '[PROMPT]'
@@ -47,7 +48,7 @@ without a range flag, so do not infer that the two compose. Choose per need:
 codex -a never -s read-only exec review --commit <SHA>
 
 # Custom focus, no range flag — the reviewer resolves its own default range:
-codex -a never -s read-only exec review "보안 위주로 검토: SQL injection, CSRF, 세션, 파일 업로드"
+codex -a never -s read-only exec review "보안 위주로 검토: SQL injection, CSRF, 세션, 파일 업로드" < /dev/null
 printf '%s' "$focus_text" | codex -a never -s read-only exec review -
 ```
 
@@ -56,8 +57,22 @@ reviewer: use a plain read-only `exec` and state the range in the prompt, so Cod
 resolves the diff itself with git.
 
 ```bash
-codex -a never -s read-only exec "Review only the changes introduced by commit <SHA> (diff it against its parent). Focus on SQL injection, CSRF, session handling, and file uploads. Report findings only — change nothing."
+codex -a never -s read-only exec "Review only the changes introduced by commit <SHA> (diff it against its parent). Focus on SQL injection, CSRF, session handling, and file uploads. Report findings only — change nothing." < /dev/null
 ```
+
+### Non-interactive stdin and long runs
+
+`codex exec` appends anything on a non-terminal stdin to the prompt and waits for
+EOF. When the call inherits an open pipe as stdin — the usual case under an agent's
+shell tool — a call that passes the prompt as an argument hangs at
+`Reading additional input from stdin...` until it is killed. **Close stdin with `< /dev/null` on every argument-prompt form.** Do not add
+it to the `-` form, which reads the prompt from stdin on purpose.
+
+A review of a large diff can run past ten minutes. Run it in the background with
+stdout and stderr redirected to files, and judge progress by the **stderr file
+growing** — stdout is written once at the end, so an empty result file does not
+distinguish work in progress from a hang. Kill a stuck run by PID; a `pkill -f`
+pattern can match the wrapper shell of the very command that issued it.
 
 ### Collecting the result
 
@@ -67,14 +82,10 @@ So redirecting stdout is all it takes to collect the result — **use stdout, no
 it.
 
 `-o` / `--output-last-message <FILE>` is *additive*, not a redirect: it writes the
-final message to FILE **while still printing it to stdout**. Verified against
-codex-cli 0.145.0 — after `codex ... -o out.txt > stdout.txt`, both files hold the
-answer (the `-o` copy has no trailing newline). Treating `-o` as "send the answer to
-a file instead of stdout" is what produces duplicated findings: passing stdout
-through *and* reading the result file reports the review twice and breaks any
-parsing or aggregation downstream. If you do use `-o`, pick exactly one reader —
-either discard stdout (`> /dev/null`) and read the file, or read stdout and ignore
-the file.
+final message to FILE **while still printing it to stdout**. Reading both reports
+the review twice and breaks any parsing downstream. If you do use `-o`, pick exactly
+one reader — either discard stdout (`> /dev/null`) and read the file, or read stdout
+and ignore the file.
 
 Create the run directory outside the user's repository and remove it whether the
 review succeeds or fails. **Check that `mktemp` actually succeeded before doing
@@ -94,7 +105,7 @@ if [ -z "$outdir" ] || [ ! -d "$outdir" ]; then               # never proceed on
 fi
 trap 'rm -rf "$outdir"' EXIT                                  # armed only once $outdir is valid
 
-if codex -a never -s read-only exec review --commit "$sha" \
+if codex -a never -s read-only exec review --commit "$sha" < /dev/null \
      > "$outdir/review.md" 2> "$outdir/review.err.txt"; then   # stdout = findings only
   cat "$outdir/review.md"                                     # findings
 else
@@ -138,16 +149,13 @@ Three Windows-specific traps in that block:
   run `Remove-Item` on a path that was never created, or on `$null` if `$env:TEMP`
   is unset and `Join-Path` fails. Validate up front and let the whole review abort
   if the directory is not there.
-- **Send the failure diagnosis to stderr and exit non-zero.** `Write-Warning`
-  followed by a bare `Get-Content` of the error file is the trap this block used to
-  fall into, and it fails three ways at once: `$WarningPreference` can silence the
-  warning, the error text lands on **stdout** right next to real findings, and the
-  script keeps running and still exits `0` — so the caller records a *successful*
-  review whose "findings" are a Codex crash dump. Write diagnostics with
-  `[Console]::Error.WriteLine(...)`, which goes to the process's stderr regardless of
-  `$ErrorActionPreference` / `$WarningPreference` and without the `Write-Error`
-  banner and `+ CategoryInfo` decoration wrapped around the cause, and end the run
-  with `exit`.
+- **Send the failure diagnosis to stderr and exit non-zero.** Do not use
+  `Write-Warning` plus a bare `Get-Content` of the error file: `$WarningPreference`
+  can silence the warning, the error text lands on **stdout** beside real findings,
+  and the script still exits `0`, so the caller records a successful review whose
+  "findings" are a crash dump. Write diagnostics with `[Console]::Error.WriteLine(...)`,
+  which reaches stderr regardless of `$ErrorActionPreference` / `$WarningPreference`,
+  and end the run with `exit`.
 
 ```powershell
 $sha = '<SHA>'
@@ -188,27 +196,14 @@ if ($exitCode -ne 0) {
 Both blocks now carry the same contract: **findings on stdout, diagnosis on stderr,
 non-zero exit on failure, run directory removed either way.**
 
-**Why `exit $exitCode` after the `finally`, and not a bare `throw`.** A `throw` is a
-script-terminating error, and Windows PowerShell flattens that to a fixed process
-exit code: with `powershell.exe -File`, "when a script-terminating error occurs, the
-exit code is set to `1`", and `-Command` behaves the same, with the documented remedy
-being "add `exit $LASTEXITCODE` to your command string or script block"
-([about_PowerShell_exe](https://learn.microsoft.com/powershell/module/microsoft.powershell.core/about/about_powershell_exe?view=powershell-5.1)).
-So `throw` would report *a* failure but throw away Codex's own exit code — and worse,
-`$ErrorActionPreference` "can suppress `throw` when set to `SilentlyContinue` or
-`Ignore`", in which case "the error doesn't propagate and execution continues at the
-next statement"
-([about_Error_Handling](https://learn.microsoft.com/powershell/module/microsoft.powershell.core/about/about_error_handling?view=powershell-5.1)),
-which is exactly the run-on-after-failure bug this block exists to prevent. `exit` is
-not suppressible and sets the process exit code verbatim. Putting it *after* the
-`try`/`finally` keeps the cleanup provable: the `finally` statements "run regardless
-of whether the `try` block encounters a terminating error", and the only `exit` case
-the docs spell out is one issued "from within a `catch` block"
-([about_Try_Catch_Finally](https://learn.microsoft.com/powershell/module/microsoft.powershell.core/about/about_try_catch_finally?view=powershell-5.1)),
-so nothing here rests on `exit`-inside-`try` semantics — the run directory is already
-gone before `exit` runs. Use this shape as a script; if you paste it into a function
+**Why `exit $exitCode` after the `finally`, and not a bare `throw`.** Windows
+PowerShell flattens a script-terminating error to exit code `1`, discarding Codex's
+own code, and `$ErrorActionPreference = 'SilentlyContinue'` can suppress `throw`
+entirely so the script runs on after the failure. `exit` is not suppressible and sets
+the process exit code verbatim; placing it after the `try`/`finally` keeps the cleanup
+provable, because `finally` has already run. If you paste this block into a function
 or dot-source it, replace the final `exit` with `throw` and let the caller map the
-failure to an exit code — the diagnosis goes to stderr either way.
+failure to an exit code.
 
 Report the findings grouped by severity (Critical → High → Medium → Low), in the
 language the user used to ask. A review never edits code — findings only.
@@ -218,7 +213,7 @@ language the user used to ask. A review never edits code — findings only.
 Only after the user has approved the change:
 
 ```bash
-codex -a never exec -s workspace-write "<task, explicit file scope, constraints>"
+codex -a never exec -s workspace-write "<task, explicit file scope, constraints>" < /dev/null
 ```
 
 State the in-scope files explicitly and add a hard "do not touch files outside this
