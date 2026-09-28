@@ -73,7 +73,7 @@ disabled — the project made that call. Read it before running.
 in `go.mod` is a file the diff controls, so without `GOTOOLCHAIN=local` the `go` command
 downloads and executes a toolchain the diff named — a code-execution path that no per-command
 gate below can see, because it happens first. Prefix every `go` invocation in this file, not just
-the ones that obviously build.
+the ones that obviously build — and every tool that shells out to `go` (staticcheck, golangci-lint).
 
 `go vet` needs no install and catches real defects (printf arg mismatches, lost struct tags,
 unreachable code). Run it even when nothing else is available.
@@ -96,7 +96,7 @@ Install only under the common [installation authority](../SKILL.md#installation-
 ```bash
 # Authorized installs only — `go install` writes a binary into GOPATH/bin
 GOTOOLCHAIN=local go install honnef.co/go/tools/cmd/staticcheck@latest
-GOTOOLCHAIN=local go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
+GOTOOLCHAIN=local go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest
 ```
 
 ## 4. Execution
@@ -119,8 +119,8 @@ GOTOOLCHAIN=local go build -o "$DISCARD" ./...
 
 # The linters. Neither writes to the working tree.
 GOTOOLCHAIN=local go vet ./...
-staticcheck ./...
-golangci-lint run
+GOTOOLCHAIN=local staticcheck ./...
+GOTOOLCHAIN=local golangci-lint run
 ```
 
 ```bash

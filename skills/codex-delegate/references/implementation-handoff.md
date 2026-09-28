@@ -6,7 +6,9 @@ file.
 ## Splitting the work
 
 Only split when the parts are genuinely independent. One `codex -a never exec -s
-workspace-write` call per part, each with its own explicit file scope.
+workspace-write` call per part, each with its own explicit file scope. Run the calls
+concurrently only when parallel execution is already authorized (as in
+`plan-and-build` §4); otherwise run them one after another.
 
 | Split | When | Calls |
 |---|---|---|

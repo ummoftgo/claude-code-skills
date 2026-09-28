@@ -67,14 +67,16 @@ if (/error/.test(message)) { }
 if (message.includes('error')) { }
 ```
 
-#### Optional chaining over typeof guard
+#### Optional chaining over explicit null checks
 ```js
 // BAD
-if (typeof config !== 'undefined' && config.debug === true) { }
+if (config !== undefined && config !== null && config.debug === true) { }
 
 // GOOD
-if (config?.debug) { }
+if (config?.debug === true) { }
 ```
+
+Keep `typeof x !== 'undefined'` for a possibly undeclared global — `?.` throws there.
 
 ### 1.2 jQuery
 
@@ -268,9 +270,8 @@ Manual `.subscribe()` calls, however, **do require explicit cleanup**:
 **Before flagging a subscription as a leak, confirm**:
 1. Is it using `.subscribe()` directly (not `$store` syntax)?
 2. Is there no `onDestroy` that returns or calls the unsubscribe function anywhere in the component?
-3. Is the store not a derived or readable that auto-completes?
 
-Only flag if all three are true.
+Only flag if both are true.
 
 ### 3.2 Svelte 5 — `$effect` cleanup
 

@@ -1,6 +1,6 @@
 ---
 name: codex-delegate
-description: "Delegate code review or implementation to Codex. Trigger when user says '코덱스에게 검토해', '코덱스에게 구현시켜', 'codex로 리뷰해', 'codex로 만들어줘' or similar. Reviews go through Codex's native reviewer (`codex exec review` with `--commit`, `--base`, or `--uncommitted`) and are collected from a result file; implementation goes through `codex -a never exec -s workspace-write` once the user has approved it. Reviews stay read-only — they never change git state and never write a context file under any circumstance; context files belong only to implementation prompts that are too large to pass inline. When OpenAI's official codex-plugin-cc is installed, its `/codex:*` slash commands are an equivalent entry point."
+description: "Delegate code review or implementation to Codex. Trigger when user says '코덱스에게 검토해', '코덱스에게 구현시켜', 'codex로 리뷰해', 'codex로 만들어줘' or similar. Reviews go through Codex's native reviewer (`codex exec review` with `--commit`, `--base`, or `--uncommitted`) and are collected from a result file; implementation goes through `codex -a never exec -s workspace-write` once the user has asked for or approved it. Reviews stay read-only — they never change git state and never write a context file under any circumstance; context files belong only to implementation prompts that are too large to pass inline. When OpenAI's official codex-plugin-cc is installed, its `/codex:*` slash commands are an equivalent entry point."
 ---
 
 # Codex Delegate
@@ -21,9 +21,9 @@ checkout, detach, or stash anything to shape the range** — a read-only review 
 not touch the user's working tree.
 
 ```bash
-codex -a never -s read-only exec review --commit <SHA>    # exactly one commit
-codex -a never -s read-only exec review --base main       # current branch vs. a base
-codex -a never -s read-only exec review --uncommitted     # staged + unstaged + untracked
+codex -a never -s read-only exec review --commit <SHA> < /dev/null    # exactly one commit
+codex -a never -s read-only exec review --base main < /dev/null       # current branch vs. a base
+codex -a never -s read-only exec review --uncommitted < /dev/null     # staged + unstaged + untracked
 ```
 
 Pick exactly one of `--commit` / `--base` / `--uncommitted`. Also available:
@@ -45,7 +45,7 @@ without a range flag, so do not infer that the two compose. Choose per need:
 
 ```bash
 # Native range resolution, reviewer's own default focus:
-codex -a never -s read-only exec review --commit <SHA>
+codex -a never -s read-only exec review --commit <SHA> < /dev/null
 
 # Custom focus, no range flag — the reviewer resolves its own default range:
 codex -a never -s read-only exec review "보안 위주로 검토: SQL injection, CSRF, 세션, 파일 업로드" < /dev/null
@@ -65,8 +65,8 @@ codex -a never -s read-only exec "Review only the changes introduced by commit <
 `codex exec` appends anything on a non-terminal stdin to the prompt and waits for
 EOF. When the call inherits an open pipe as stdin — the usual case under an agent's
 shell tool — a call that passes the prompt as an argument hangs at
-`Reading additional input from stdin...` until it is killed. **Close stdin with `< /dev/null` on every argument-prompt form.** Do not add
-it to the `-` form, which reads the prompt from stdin on purpose.
+`Reading additional input from stdin...` until it is killed. **Close stdin with `< /dev/null` on every form — range-flag reviews included —
+except `-`, which reads the prompt from stdin on purpose.**
 
 A review of a large diff can run past ten minutes. Run it in the background with
 stdout and stderr redirected to files, and judge progress by the **stderr file
@@ -193,7 +193,7 @@ if ($exitCode -ne 0) {
 }
 ```
 
-Both blocks now carry the same contract: **findings on stdout, diagnosis on stderr,
+Both blocks carry the same contract: **findings on stdout, diagnosis on stderr,
 non-zero exit on failure, run directory removed either way.**
 
 **Why `exit $exitCode` after the `finally`, and not a bare `throw`.** Windows
@@ -210,7 +210,7 @@ language the user used to ask. A review never edits code — findings only.
 
 ## Mode 2: Implement (write-capable)
 
-Only after the user has approved the change:
+Only when the user has asked for Codex implementation or approved the change:
 
 ```bash
 codex -a never exec -s workspace-write "<task, explicit file scope, constraints>" < /dev/null
@@ -218,7 +218,9 @@ codex -a never exec -s workspace-write "<task, explicit file scope, constraints>
 
 State the in-scope files explicitly and add a hard "do not touch files outside this
 scope" constraint. If the work splits cleanly (e.g. backend vs. frontend), use one
-call per independent scope and make sure no two scopes list the same file. If the
+call per independent scope and make sure no two scopes list the same file. Run the
+calls concurrently only when parallel execution is already authorized (as in
+`plan-and-build` §4); otherwise run them one after another. If the
 `use-context7` skill is installed, invoke it by name for the relevant
 libraries/frameworks *before* writing the prompt. Afterwards check for overlapping
 edits, cross-layer naming, and the happy path — split strategy, verification steps,

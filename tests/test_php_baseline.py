@@ -3174,7 +3174,7 @@ class ConfigNameCountTest(unittest.TestCase):
         prompts = read("skills/branch-merge-review/references/reviewer-prompts.md")
         # 개수를 두 곳에서 말하면 한쪽이 낡는다. 실제로 세 개 대 여섯 개로 어긋나 있었다.
         self.assertNotRegex(prompts, r"auto-discovers (three|six|\d+) config names")
-        self.assertIn("the count of auto-discovered config names lives there", prompts)
+        self.assertIn("config discovery — follow `php-quality.md` §0", prompts)
 
     def test_the_authority_states_it_once(self) -> None:
         quality = quality_reference("php-quality")

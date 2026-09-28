@@ -19,16 +19,14 @@ sandbox_mode = "read-only" above is a worthwhile DEFAULT: left alone, it blocks 
 
 When explicitly assigned the `web-security-review` workflow, invoke that skill and follow its assigned language/surface references within the delegated scope. The fallback checklists below do not replace or narrow that workflow.
 
-The checklists below are **PHP and browser-surface** checklists. They are deliberately unchanged:
-this is the stack the audit is tuned for, and its findings are trustworthy because the checks
-match the language.
+The checklists below are **PHP and browser-surface** fallback checklists, tuned for that stack:
+their findings are trustworthy because the checks match the language.
 
 **When the code under audit is in another language** — Python, Go, Rust, Node, or anything else —
 do not translate a PHP check into it. A PHP injection pattern run over Go proves nothing about the
-Go code, and a non-match is not evidence of safety. Instead, say which files fall outside this
-agent's checklists and point the request at the `web-security-review` skill, which carries a
-language-axis reference per language plus surface references for HTTP, browser, and native
-processes. Audit the PHP and browser files that *are* in scope, and let the report show the gap.
+Go code, and a non-match is not evidence of safety. Instead, invoke the `web-security-review` skill
+and audit with its language-axis and surface references. A language with no reference there is
+reported as unreviewed, with its paths.
 
 ## PHP Audit Checklist
 
@@ -67,6 +65,8 @@ HTMX (Medium/High): missing CSRF header, allowScriptTags not disabled
 Storage (Medium): sensitive tokens in localStorage/sessionStorage; token accessible from JS (missing HttpOnly on session cookie)
 
 ## Report Format
+
+When the `web-security-review` workflow is assigned, use its Report Format; otherwise:
 
 For each finding:
 [SEVERITY] Title

@@ -38,7 +38,7 @@ $result = $pdo->query("SELECT * FROM users WHERE email = '$email'");
 ### Audit grep patterns
 ```bash
 grep -rn "query\s*(\s*[\"'].*\$" --include="*.php"
-grep -rn "\.\s*\$_(GET|POST|REQUEST|COOKIE)" --include="*.php"
+grep -rnE '\.\s*\$_(GET|POST|REQUEST|COOKIE)' --include='*.php'
 ```
 
 ---
@@ -67,8 +67,8 @@ echo $row['comment']; // stored user content, unencoded
 
 ### Audit grep patterns
 ```bash
-grep -rn "echo \$_(GET|POST|REQUEST|COOKIE|SERVER)" --include="*.php"
-grep -rn "print \$_(GET|POST)" --include="*.php"
+grep -rnE 'echo \$_(GET|POST|REQUEST|COOKIE|SERVER)' --include='*.php'
+grep -rnE 'print \$_(GET|POST)' --include='*.php'
 ```
 
 ---
@@ -262,7 +262,7 @@ if ($full_path === false || strpos($full_path, $base_dir) !== 0) {
 
 ### Audit grep patterns
 ```bash
-grep -rn "include\s*(\s*\$\|.*\$_(GET|POST)" --include="*.php"
+grep -rnE 'include\s*\(\s*\$|include.*\$_(GET|POST)' --include='*.php'
 grep -rn "file_get_contents\s*(\s*\$" --include="*.php"
 grep -rn "readfile\s*(\s*\$" --include="*.php"
 ```

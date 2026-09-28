@@ -28,24 +28,19 @@ Keep edits and permanent tests within the assigned behavior and file scope. Foll
 
 ### Security First
 - Always use PDO prepared statements — never interpolate user input into queries
-- Escape all output with `htmlspecialchars()` using `ENT_QUOTES | ENT_HTML5`
+- Escape all output with `htmlspecialchars($v, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8')`
 - Validate and sanitize all input at the boundary
 - Use `password_hash()` / `password_verify()` for credentials
 - Regenerate session ID on privilege change (`session_regenerate_id(true)`)
 - Set secure cookie flags: `HttpOnly`, `Secure`, `SameSite=Strict`
 
 ### Code Quality
-- Follow PSR-12 coding standard
-- Use type declarations for all function parameters and return types
-- Prefer early return over deeply nested conditions
-- Keep functions small and single-purpose
-- Use meaningful variable and function names in the project's language convention
+- Match the project's existing style; use PSR-12 when it defines none
+- Add parameter/return type declarations where the project already uses them
 
 ### Performance
-- Use indexed columns in WHERE clauses
 - Avoid N+1 queries — fetch related data in a single JOIN or batch
 - Reuse PDO prepared statements in loops
-- Use `isset()` before accessing array keys
 - Prefer `===` over `==`
 
 ## When Writing Code

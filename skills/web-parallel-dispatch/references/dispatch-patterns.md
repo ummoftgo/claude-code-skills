@@ -43,7 +43,7 @@ Implement the PHP backend API endpoints described below.
 - Use PDO prepared statements for all queries
 - Return JSON: {"success": true, "data": {...}} on success, {"success": false, "error": "..."} on failure
 - Validate all inputs server-side (type, length, format)
-- Check CSRF token for POST/PUT/DELETE: hash_equals($_SESSION['csrf_token'], $_POST['csrf_token'] ?? '')
+- Check CSRF token for POST/PUT/DELETE: isset($_SESSION['csrf_token']) && hash_equals($_SESSION['csrf_token'], $_SERVER['HTTP_X_CSRF_TOKEN'] ?? $_POST['csrf_token'] ?? '')
 
 ## Deliverable
 Return a summary listing:
@@ -157,7 +157,7 @@ Return: file created, event handlers implemented, API calls made
 - Auth check: require_once '../auth.php'; // redirects to /login if not authenticated
 - DB schema: [paste relevant tables]
 - JSON response format: {"success": bool, "data": any} or {"success": false, "error": "string"}
-- CSRF: validate with hash_equals($_SESSION['csrf_token'], $_POST['csrf_token'] ?? '')
+- CSRF: validate with isset($_SESSION['csrf_token']) && hash_equals($_SESSION['csrf_token'], $_SERVER['HTTP_X_CSRF_TOKEN'] ?? $_POST['csrf_token'] ?? '')
 - Frontend stack: [Svelte / HTMX / jQuery / vanilla JS]
 ```
 
@@ -264,7 +264,7 @@ Implement the frontend for [feature name].
 ```
 DB: require '../db.php' → $pdo (PDO, emulate_prepares=false)
 Auth: require '../auth.php' → redirects if unauthenticated
-CSRF: $_SESSION['csrf_token'], validate with hash_equals()
+CSRF: $_SESSION['csrf_token'], X-CSRF-Token header (or POST field), validate with hash_equals()
 JSON response: {"success": bool, "data": any, "error": string}
 Frontend stack: [specify]
 ```

@@ -188,7 +188,7 @@ pyright --outputjson
 
 ```bash
 vulture . --min-confidence 60      # default: includes unused functions and classes
-vulture . --min-confidence 90      # unused imports and variables only
+vulture . --min-confidence 90      # unused imports, unused arguments, unreachable code only
 ```
 
 **Know what the floor throws away before choosing one.** Measured on vulture 2.16, an unused
@@ -363,7 +363,7 @@ line by line.
 | Quadratic string or list building on unbounded input | Medium–High by input size |
 | Evaluation order (expensive check first) | Medium |
 | `radon cc` rank D or worse | Medium |
-| Dead code (vulture ≥80 confidence) | Low |
+| Dead code (vulture, at the floor the report states) | Low |
 | Formatting drift where the project pins a formatter | Low |
 | Stale or contradictory docstring | Low, High if it documents a security-relevant contract |
 

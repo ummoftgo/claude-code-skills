@@ -4,10 +4,9 @@
 serves them. Pair this file with the **language axis** reference for the runtime in use
 (`node-security.md`, …) — that file owns runtime APIs, dependency risk, and secrets handling.
 
-**PHP is the exception, deliberately.** `php-backend-security.md` predates this split and
-carries its language rules and HTTP-surface rules together. It stays that way until the split is
-proven on another language; for a PHP change, load that file and **not** this one. Loading both
-would double-report the same findings.
+**PHP is the exception.** `php-backend-security.md` carries PHP language rules and HTTP-surface
+rules together; for a PHP change, load that file and **not** this one. Loading both would
+double-report the same findings.
 
 **Severity if violated** is stated per section — the impact decides, not the `MUST` wording.
 

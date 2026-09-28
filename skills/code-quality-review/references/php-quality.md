@@ -207,10 +207,9 @@ if [ "${UNTRUSTED_DIFF:-0}" = "1" ]; then
 fi
 
 # Read-only cache handling. **Do not try to judge where the cache would land — move it.**
-# Judging means reading the config, and reading it soundly means a NEON parser: five rounds of
-# review found five valid spellings a regex missed (`tmpDir = x`, a quoted `"tmpDir":`, a
-# one-line `{tmpDir: x}`, a multi-line `includes: [...]`, a trailing `# comment` glued onto the
-# value). Asking PHPStan instead is worse, not better: `dump-parameters` builds its DI container
+# Judging means reading the config, and reading it soundly means a NEON parser: a regex misses
+# valid spellings such as `tmpDir = x`, a quoted `"tmpDir":`, a one-line `{tmpDir: x}`, a
+# multi-line `includes: [...]`, or a trailing `# comment` glued onto the value. Asking PHPStan instead is worse, not better: `dump-parameters` builds its DI container
 # under the project's own `tmpDir`, so with `tmpDir: .cache` it writes four files into the
 # repository *before* any gate could speak (measured on 2.1.42).
 #
@@ -241,8 +240,8 @@ if [ "${READ_ONLY:-0}" = "1" ] && [ -z "$EXEC_RISK" ]; then
     {
       # **Every path here is quoted and escaped the same way.** Unquoted, NEON reads ` #` as a
       # comment and `,` as a separator, so a project under `/srv/has #hash/` or `/srv/a,b/`
-      # fails to parse. Quoted, an apostrophe in the path ends the string early — `O'Brien`
-      # broke it until this escape went in. Single quotes with `''` doubling, not double
+      # fails to parse. Quoted, an apostrophe in the path (`O'Brien`) ends the string early
+      # unless doubled. Single quotes with `''` doubling, not double
       # quotes: NEON treats `\` as an escape inside double quotes, which would break Windows
       # paths. All three measured on PHPStan 2.1.42.
       neon_quote() { printf "'%s'" "$(printf '%s' "$1" | sed "s/'/''/g")"; }
@@ -327,11 +326,27 @@ if (-not $PhpCmd) { throw 'Resolve PhpCmd successfully before running PHP blocks
 
 # Every path written into the generated NEON goes through this. Single quotes so `\` stays
 # literal (Windows paths), forward slashes because PHP accepts them and they sidestep the
-# escape question entirely, and `''` doubling because an apostrophe would otherwise end the
-# string early — `O'Brien` in a path broke the Bash form until the same escape went in.
+# escape question entirely, and `''` doubling because an apostrophe (`O'Brien`) would otherwise
+# end the string early — the same escape the Bash form uses.
 function ConvertTo-NeonPath($p) {
     "'" + $p.Replace('\', '/').Replace("'", "''") + "'"
 }
+
+# Every existing PSR-4 root, as the Bash SRC_DIRS block derives it; fall back to src.
+$SrcDir = @()
+try {
+    $psr4 = (Get-Content -LiteralPath 'composer.json' -Raw -ErrorAction Stop | ConvertFrom-Json).autoload.'psr-4'
+    if ($psr4) {
+        foreach ($value in $psr4.PSObject.Properties.Value) {
+            foreach ($dir in @($value)) {
+                $dir = ([string]$dir).TrimEnd(' ', '/')
+                if ($dir -and (Test-Path -LiteralPath $dir -PathType Container)) { $SrcDir += $dir }
+            }
+        }
+    }
+} catch { $SrcDir = @() }
+$SrcDir = @($SrcDir | Select-Object -Unique)
+if (-not $SrcDir) { $SrcDir = @('src') }
 
 $PhpstanConfig = ''
 if ($env:PHPSTAN_EXPLICIT_CONFIG) {
@@ -494,7 +509,7 @@ if ! command -v phpcpd &>/dev/null; then
 fi
 ```
 
-> Install path is `~/.local/bin` (no sudo required). Ensure it is in `$PATH`; `install.sh` handles this automatically.
+> Install path is `~/.local/bin` (no sudo required); make sure it is on `$PATH`.
 
 ---
 
@@ -509,10 +524,10 @@ Replace `<src>` with the actual source directory (e.g., `src/`, `.`, `app/`).
 bare `phpstan analyse --level=5` would override the level the project deliberately set.
 
 Under a read-only request the cache is **relocated, not judged** — §0 writes an override config
-outside the workspace that includes the project's own and redirects both cache keys there. So
-there is no "cache path is inside, therefore skip" decision to make any more: the analysis runs,
-the findings are the project's own, and the repository is untouched. In normal mode PHPStan uses
-the project's cache exactly as before, which is what makes repeat runs fast.
+outside the workspace that includes the project's own and redirects both cache keys there. Do not
+skip the analysis because the cache path is inside the repository: the analysis runs, the findings
+are the project's own, and the repository is untouched. In normal mode PHPStan uses the project's
+own cache, which is what makes repeat runs fast.
 
 Output: one line per error — `file.php:line:message`. Feed directly into report.
 
@@ -714,8 +729,9 @@ foreach ($orders as $order) {
 // GOOD — 2 queries total
 $userIds = array_column($orders, 'user_id');
 $placeholders = implode(',', array_fill(0, count($userIds), '?'));
-$users = $pdo->prepare("SELECT * FROM users WHERE id IN ($placeholders)")
-             ->execute($userIds)->fetchAll();
+$stmt = $pdo->prepare("SELECT * FROM users WHERE id IN ($placeholders)");
+$stmt->execute($userIds);    // execute() returns bool, so it cannot be chained
+$users = $stmt->fetchAll();
 $usersById = array_column($users, null, 'id');
 ```
 
@@ -747,6 +763,6 @@ foreach ($items as $item) {
 ```bash
 grep -rn "for.*count(" --include="*.php"                    # loop invariant
 grep -rn "SELECT \*" --include="*.php"                       # over-fetching
-grep -rn "->fetch\b" --include="*.php" -A3 | grep "if ("    # fetch-then-existence
+grep -rn -e '->fetch\b' --include="*.php" -A3 | grep "if ("  # fetch-then-existence
 grep -rn "in_array" --include="*.php"                        # potential O(n) lookup
 ```

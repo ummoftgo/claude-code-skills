@@ -100,7 +100,7 @@ npx --no -- eslint . --fix
 # Lint + format check combined
 npx --no -- @biomejs/biome check .
 
-# CI mode (stricter — fails on warnings too)
+# CI mode (never writes; add --error-on-warnings to fail on warnings)
 npx --no -- @biomejs/biome ci .
 
 # Auto-fix

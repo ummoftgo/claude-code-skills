@@ -90,7 +90,7 @@ Use installed tools only. Do not weaken verification by silently substituting an
 
 ## 4. Enforce the read-only boundary
 
-This workflow is non-mutating. When the user explicitly says read-only, no changes, or an equivalent constraint, treat these rules as absolute even if another workflow normally writes a report:
+This workflow is non-mutating in every mode, including when another workflow would normally write a report:
 
 - Do not create or modify files, including report files and generated artifacts.
 - Do not install tools or dependencies.

@@ -83,7 +83,7 @@ Syntax is only the **last** signal, because mode can be forced explicitly. Resol
 - Use event delegation: `$(document).on('event', 'selector', fn)` for dynamic elements
 - Never use `.html()` with untrusted data — use `.text()` or sanitize first
 - Use `.prop()` not `.attr()` for boolean attributes
-- Chain AJAX with `.done()` / `.fail()` — avoid deprecated `$.ajax` success/error callbacks
+- Attach handlers with `.done()` / `.fail()` / `.always()`; `jqXHR.success()/.error()/.complete()` were removed in jQuery 3.0
 
 ## Vanilla JS
 

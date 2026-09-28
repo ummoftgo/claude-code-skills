@@ -309,7 +309,7 @@ Windows 프로젝트 범위는 스킬과 에이전트만 설치합니다. Window
 - 큰 독립 범위는 언어별 리뷰 팀을 사용합니다. 실행 환경의 동시 실행 한도보다 리뷰어가 많으면 순서대로 배치하며, 검토 범위를 생략하지 않습니다.
 - 직접 검토와 팀 검토는 같은 참조·신뢰·완료 판정 기준을 사용합니다. 직접 검토를 독립 리뷰로 보고하지 않습니다.
 
-브랜치 리뷰의 [미커밋 경로 전환](skills/branch-merge-review/references/uncommitted-routing.md)과 [교차 검증 명령 예제](skills/branch-merge-review/references/cross-validation-patterns.md)는 필요한 경우에만 읽습니다.
+[미커밋 경로 수집·게이트](skills/code-quality-review/references/uncommitted-routing.md)와 브랜치 리뷰의 [교차 검증 명령 예제](skills/branch-merge-review/references/cross-validation-patterns.md)는 필요한 경우에만 읽습니다.
 
 ### 테스트와 완료 기준
 

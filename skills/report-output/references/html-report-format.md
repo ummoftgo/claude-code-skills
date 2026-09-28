@@ -31,7 +31,7 @@ Required CSP meta tag (in `<head>`, kept from the template):
 
 Why each directive matters:
 
-- `script-src 'sha256-…'` pins the report's **own** inline script by hash. An injected `<script>` (escaping failure) has a different hash and will not execute. Never use `script-src 'unsafe-inline'` — it would run injected scripts too, defeating the defense. Recompute the hash after *any* script edit (command in SKILL.md Step 3B).
+- `script-src 'sha256-…'` pins the report's **own** inline script by hash. An injected `<script>` (escaping failure) has a different hash and will not execute. Never use `script-src 'unsafe-inline'` — it would run injected scripts too, defeating the defense. Recompute the hash after *any* script edit (command in `html-verification.md` §1).
 - `form-action 'none'` — `form-action` does not fall back to `default-src`, so without it a DOM-built `<form>` could POST report content to an external host. `base-uri 'none'` blocks `<base>` hijacking of relative URLs.
 - `default-src 'none'` + `img-src data:` block every network fetch, frame, and beacon; only inline CSS (`style-src 'unsafe-inline'` — accepted residual risk, styles cannot exfiltrate under `default-src 'none'`) and `data:` images render.
 
@@ -107,8 +107,8 @@ Before delivering, verify:
 - [ ] Severity conveyed by text label as well as color.
 - [ ] All untrusted content HTML-escaped (§1.5) and the CSP meta tag present.
 - [ ] Contrast meets WCAG AA (≥ 4.5:1) for every text/background pair, both themes — badges included. When you add or change colors, compute it (relative luminance `L`, ratio `(L1+0.05)/(L2+0.05)`) with a quick node/python snippet instead of eyeballing; the template's shipped palette is pre-verified.
-- [ ] No live external references: run the triage scan from SKILL.md Step 3B (case-insensitive; resource attributes, embedding elements, `meta refresh`, `url(`, `@import`, network APIs) and classify every match by source context — live markup/script/CSS matches are blockers unless they are `#` anchors, visible doc links, or `data:` URIs; matches inside escaped evidence text are data and stay.
-- [ ] CSP `script-src` hash matches the current inline script (recompute after any script edit, with CRLF→LF normalization — see SKILL.md Step 3B).
+- [ ] No live external references: run the triage scan from `html-verification.md` §2 (case-insensitive; resource attributes, embedding elements, `meta refresh`, `url(`, `@import`, network APIs) and classify every match by source context — live markup/script/CSS matches are blockers unless they are `#` anchors, visible doc links, or `data:` URIs; matches inside escaped evidence text are data and stay.
+- [ ] CSP `script-src` hash matches the current inline script (recompute after any script edit, with CRLF→LF normalization — see `html-verification.md` §1).
 - [ ] Opens with zero console errors, **zero CSP violation reports, zero extra network requests, and no navigation** (final URL still the file after ~3 s; DOM contains no parsed `meta[http-equiv=refresh]` — entity-encoded variants decode at parse time — and no `<base>`) — this browser load is the authoritative self-containment check; CSP alone does not block top-level navigation. Load it once via `web-browser-preview` or agent-browser when available. With untrusted content embedded, the §1.5 fixture renders as text — nothing executes, nothing submits.
 - [ ] All numbers/claims match the source data — the HTML step must not silently rewrite findings.
 

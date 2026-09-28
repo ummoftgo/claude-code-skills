@@ -4,9 +4,8 @@ Read this before running any analysis tool on a diff you would not execute yours
 (`UNTRUSTED_DIFF=1`, or provenance you cannot vouch for). `SKILL.md` owns the gate decision and the
 `READ_ONLY` / `UNTRUSTED_DIFF` export; this file owns the per-tool evidence behind it.
 
-**A second, separate axis: does the tool *execute* the code under review?** Not writing files and
-not running attacker-controlled code are different guarantees, and the read-only flags above
-only buy the first. Measured in this repository:
+Not writing files and not running attacker-controlled code are different guarantees; `READ_ONLY`
+buys only the first. This file answers the second: does the tool *execute* the code under review?
 
 **The test is not the config's file format, and it is not "does it name an extension" either.**
 A declarative config executes code when it *names* code: `.eslintrc.json` is pure JSON, and

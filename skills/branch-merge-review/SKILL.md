@@ -19,9 +19,9 @@ Invoke installed skills by name (`code-quality-review`, `web-security-review`); 
 
 > **Work mode outranks scope.** This skill is the `initial` (first-time discovery) review for a PR, branch, or merge diff. If the request is a recheck of prior findings, a second or final review, a final approval or sign-off decision, or evidence-first verification of specific claims, raw data, or a non-Git directory, stop and use `evidence-first-review` **even though the scope is a PR or branch**: this skill has no recheck or approval mode and would return newly discovered findings instead of the per-finding statuses (`resolved` / `partially resolved` / `unresolved` / `regressed`) and the approval verdict (`approved` / `conditionally approved` / `hold`) the user asked for. A read-only or no-changes constraint changes neither axis; it only constrains how the selected skill runs.
 >
-> **Committed scope only.** Step 1 collects files from `git log "$BASE_REF"..HEAD --no-merges` and diffs against `HEAD`, so staged, unstaged, and untracked work is invisible to this skill and it can abort with "No commits from this branch detected. Nothing to review." A request to review the entire uncommitted working state ("지금 작업 중인 변경 전체를 검토해줘") must therefore not run here. Enumerate the changed paths first with `git status --porcelain=v1 -z --untracked-files=all`, confirm the list with the user, and review those current files with `code-quality-review` or `web-security-review`, whichever matches the subject. These rules keep that list accurate:
+> **Committed scope only.** Step 1 collects files from `git log "$BASE_REF"..HEAD --no-merges` and diffs against `HEAD`, so staged, unstaged, and untracked work is invisible to this skill and it can abort with "No commits from this branch detected. Nothing to review." A request to review the entire uncommitted working state ("지금 작업 중인 변경 전체를 검토해줘") must therefore not run here. Enumerate the changed paths first with `git status --porcelain=v1 -z --untracked-files=all`, confirm the list with the user, and review those current files with `code-quality-review` or `web-security-review`, whichever matches the subject.
 >
-> For the exact status parser, mixed-index/worktree rejection rules, deletion handling, and examples, read [references/uncommitted-routing.md](references/uncommitted-routing.md) only when routing an uncommitted request.
+> For the exact status parser, mixed-index/worktree rejection rules, deletion handling, and examples, read the `code-quality-review` skill's [references/uncommitted-routing.md](../code-quality-review/references/uncommitted-routing.md) only when routing an uncommitted request.
 
 ## Reference Files
 
@@ -127,9 +127,9 @@ try {
   $changedQa = @($allTouched | ForEach-Object {
     git diff --name-only --diff-filter=d $mergeBase HEAD -- $_
   } | Sort-Object -Unique)
-  # Rename pairs, read with `-z` for the reason the collection rule above gives: newline
-  # separated `--name-status` quotes paths with spaces or non-ASCII characters. With `-z` the
-  # records arrive as a flat `status, previous, new` triple sequence and are never quoted. The
+  # Rename pairs, read with `-z`: newline-separated `--name-status` quotes paths with spaces or
+  # non-ASCII characters. With `-z` the records arrive as a flat `status, previous, new` triple
+  # sequence and are never quoted. The
   # **previous** path is what is missing from scope; the new one is already in it.
   $renameRecords = @(((git diff --name-status -z --diff-filter=R -M $mergeBase HEAD) -join '') `
     -split "`0" | Where-Object { $_ -ne '' })
@@ -145,8 +145,8 @@ try {
 **How the file list is determined**:
 - `git log "$BASE_REF"..HEAD --no-merges` collects only the developer's own commits — mid-branch merges from main are excluded, so files that changed only due to an upstream merge never enter the review scope.
 - `MERGE_BASE` is used solely as the diff base when generating patch content (current state vs. divergence point).
-- Quality reviewers (A/C) receive `CHANGED_QA` — `--diff-filter=d` excludes deletions and nothing else, so type changes (`T`) stay in scope.
-- Security reviewer (B) receives `CHANGED_SEC` — no `--diff-filter`, so every changed path is included, deletions among them (a removed security guard is itself a finding).
+- Quality reviewers receive `CHANGED_QA` — `--diff-filter=d` excludes deletions and nothing else, so type changes (`T`) stay in scope.
+- The security reviewer receives `CHANGED_SEC` — no `--diff-filter`, so every changed path is included, deletions among them (a removed security guard is itself a finding).
 - Never replace either filter with an enumerated list such as `ACMR`/`ACMRD`: both drop `T`, so a config file swapped for a symlink disappears from the review while `ALL_TOUCHED` still lists it.
 
 Categorize the file list. **Extension decides the category wherever it can**, because a
@@ -226,9 +226,8 @@ rename in the branch, add the **previous path** to `CHANGED_SEC` and classify it
 extension, so the security reviewer still sees the old contents in the diff:
 
 ```bash
-# Rename pairs, read with `-z` for the reason Step 1 gives: newline-separated `--name-status`
-# quotes and escapes paths containing spaces or non-ASCII characters, so field splitting names
-# paths that do not exist. With `-z` the records arrive as `R100\0previous\0new\0` and are
+# Rename pairs, read with `-z`: newline-separated `--name-status` quotes and escapes paths
+# containing spaces or non-ASCII characters, so field splitting names paths that do not exist. With `-z` the records arrive as `R100\0previous\0new\0` and are
 # never quoted.
 RENAMES=$(git diff --name-status -z --diff-filter=R -M "$MERGE_BASE" HEAD |
   while IFS= read -r -d '' status && IFS= read -r -d '' previous && IFS= read -r -d '' _new; do
@@ -354,8 +353,8 @@ not waive the required quality pass or turn a missing, failed, or unsupported re
 
 In any of those cases the recommendation is `Block merge` or `Merge after fixes`, and the report
 says which language/surface went unreviewed and why. Silence about a missing reviewer reads as a clean
-result, and the risk grows precisely as the roster grows — with one fixed backend reviewer a
-failure was obvious; with one per language it is not.
+result, and the risk grows precisely as the roster grows — with one reviewer per language a
+single missing report is easy to overlook.
 
 > **Languages covered today** — **PHP, Python, Go, Rust, and JS/TS** (server and browser
 > surfaces) have quality and security references. CSS/SCSS is covered by the frontend quality
@@ -378,7 +377,7 @@ failure was obvious; with one per language it is not.
 
 After all required passes finish, consolidate findings once. In direct mode, assess the evidence already gathered; do not rerun a completed check without new evidence or an unresolved concern. In team mode, inspect the returned evidence and resolve disagreements. In either mode, investigate only the implicated paths for unresolved Critical/High claims.
 
-**4a. Normalize quality finding severity** — quality reviewer reports use category-based format, not severity grades. Before cross-validating, assign each quality finding a severity:
+**4a. Normalize quality finding severity** — a `code-quality-review` report groups findings by category. Team-mode reviewers add High/Medium/Low per their prompt; direct-mode passes do not. Before cross-validating, check or assign each quality finding's severity:
 - **High**: N+1 queries, broken auth logic, data corruption risk
 - **Medium**: Eval-order issues, non-trivial duplication, performance anti-patterns in hot paths
 - **Low**: Style inconsistencies, dead code, redundant comments
@@ -412,9 +411,7 @@ For concrete POSIX and PowerShell examples, read [references/cross-validation-pa
 
 **Language**: Write the report in the same language the user used when requesting the review ([OUTPUT_LANGUAGE] from Step 2). Apply this to all sections including findings, recommendations, and the executive summary.
 
-**Translation safety net**: Reviewer agents sometimes return findings in English despite instructions. When consolidating, NEVER copy reviewer prose verbatim into the report if it is not in [OUTPUT_LANGUAGE] — translate finding titles, impact statements, and recommendations into [OUTPUT_LANGUAGE] yourself. Keep code identifiers, file paths, severity grades (Critical/High/Medium/Low), and quoted evidence snippets as-is. The Appendix (raw reviewer reports) is exempt — include it unedited.
-
-Before finalizing, scan the consolidated sections (everything above the Appendix): if any finding title, impact, or recommendation is still in the wrong language, translate it before emitting or handing off the report.
+**Translation**: When consolidating, translate any reviewer prose not in [OUTPUT_LANGUAGE] — finding titles, impact statements, recommendations — instead of copying it; keep code identifiers, file paths, severity grades, and quoted evidence as-is. The Appendix (raw reviewer reports) stays unedited.
 
 **Delivery — inline by default.** Emit the consolidated report in your response. Do **not** create `.tasks/reports/` and do not write a report file: a review request must not change the working tree or add commit candidates.
 

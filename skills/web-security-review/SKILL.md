@@ -6,8 +6,8 @@ description: "Perform security review for application backends and frontends —
 # Web Security Review
 
 Security review skill for web application backends and frontends. References are split by
-**language** (PHP, Node) and by **surface** (HTTP server, browser, native) — load one of each
-that applies.
+**language** (PHP, Node, Python, Go, Rust) and by **surface** (HTTP server, browser, native) —
+load every file the selection table below names.
 
 ## Platform command selection
 
@@ -32,11 +32,9 @@ needs both surface files.
 | Surface | `references/browser-security.md` | DOM sinks, CSP, client storage, framework-specific XSS |
 | Surface | `references/native-security.md` | CLI/daemon: invocation trust, filesystem, temp files, child processes, privilege |
 
-**PHP is a deliberate exception.** `php-backend-security.md` predates this split and carries its
-language rules and HTTP-surface rules together. For a PHP change load that file and **not**
-`http-server-security.md` — loading both double-reports the same findings. Splitting PHP is
-scheduled work, not a precondition: the main stack should not be the first to try an unproven
-structure.
+**PHP is the exception.** `php-backend-security.md` carries PHP language rules and HTTP-surface
+rules together. For a PHP change load that file and **not** `http-server-security.md` — both
+cover the same ground, so loading both double-reports the same findings.
 
 ### Selecting references from the surface
 
@@ -97,19 +95,13 @@ While writing new backend or frontend code, follow all MUST requirements from th
 While editing existing code, notice and mention critical or high-severity violations in touched or nearby code.
 
 ### 3. Active audit (explicit request)
-When the user asks for a security review, scan, or audit:
-1. Determine the language and the surfaces in scope, then load **every reference the selection
-   table above names for them** — one language axis file plus one file per surface. Two files is
-   the common case, not the rule; a Node service that also ships a CLI and a UI loads four.
-2. Systematically check each category against the codebase
-3. Produce a full written report (see Report Format below), naming which references were loaded
-   and any language reported as unreviewed
+When the user asks for a security review, scan, or audit, follow **Workflow for Active Audit** below.
 
 ## Workflow for Active Audit
 
-1. **Identify scope**: What files/features are in scope? Ask if unclear.
-2. **Read references**: Load the language-axis file for each language in scope plus one file per surface, per the selection table above. Record which files you loaded — the report names them.
-3. **Scan codebase**: Search for patterns listed in the reference files. Use Grep for sinks, dangerous functions, and missing protections.
+1. **Identify scope**: What files/features are in scope? Ask if unclear. When the target is uncommitted work (staged, unstaged, untracked), collect and gate the paths with the `code-quality-review` skill's [references/uncommitted-routing.md](../code-quality-review/references/uncommitted-routing.md) first.
+2. **Read references**: Load **every reference the selection table above names** — one language-axis file per language in scope plus one file per surface. Two files is the common case, not the rule; a Node service that also ships a CLI and a UI loads four. Record which files you loaded and any language reported as unreviewed — the report names them.
+3. **Scan codebase**: Check each category of the loaded references against the code. Search for the patterns listed in the reference files — sinks, dangerous functions, and missing protections — using the command from Platform command selection.
 4. **Classify findings**: Assign severity (Critical / High / Medium / Low) per the reference file guidance.
 5. **Produce the report**: Follow the Report Format below. Write in the same language the user used when requesting the review. **When running as a subagent** (e.g., dispatched by branch-merge-review), the invoking prompt's `OUTPUT LANGUAGE` directive takes precedence over the prompt's own language — an English dispatch prompt does NOT mean the report should be in English. Keep code identifiers, file paths, and evidence snippets as-is; write all prose in the designated language.
 6. **Deliver — inline by default**: Emit the report in your response. Do **not** create `.tasks/reports/` and do not write a report file: a review request must not change the working tree or add commit candidates. Then offer to fix.

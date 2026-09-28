@@ -268,7 +268,7 @@ signature.
 | `unwrap`/`expect`/indexing on input-derived data in a service or library | High — it is a remote panic |
 | Blocking call inside `async` on a request path | High |
 | `std::sync::Mutex` guard held across `.await` | High |
-| `unsafe` block with no safety comment | Medium, High when it dereferences a raw pointer from input |
+| `unsafe` block with no safety comment | Medium — a documentation defect whatever the block touches; a demonstrably violated invariant is a separate Critical finding (`rust-security.md` §1) |
 | Allocation-heavy API shape (`String` where `&str` fits) on a hot path | Medium |
 | Collect-then-index instead of a lazy iterator | Medium |
 | clippy `correctness` group | High |

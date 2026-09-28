@@ -96,10 +96,10 @@ scheduled work, not a precondition for using this table.
 | `css-quality.md` | §1 setup · §2 execution · §3–6 manual patterns |
 
 The target: every `references/{language}-quality.md` carries the same seven sections so this
-skill can drive it without knowing the language — the body below never needs editing for a new
-language.
+skill can drive it without knowing the language — beyond a detection row and an execution
+section, the body needs no language-specific logic.
 
-**That does not make it a one-file change.** Registering a language for *this* skill takes three
+**That does not make it a one-file change.** Registering a language for *this* skill takes four
 edits (the reference file, its row in the list above, a detection row in Step 1, and an execution
 section in Step 2); registering it for the whole review system takes more, and
 `branch-merge-review` states the full list. Missing one fails silently: the reference exists and
@@ -177,6 +177,9 @@ working directory. Everything after `--` belongs to the tool.
 
 ## Step 1: Detect Stack and Infer Conventions
 
+When the review target is uncommitted work (staged, unstaged, untracked), collect and gate the
+paths with [references/uncommitted-routing.md](references/uncommitted-routing.md) first.
+
 Inspect the project root to determine languages and frameworks:
 - PHP: `composer.json`, `*.php` files → load `references/php-quality.md`
 - JS/TS: `package.json`, `*.js`, `*.mjs`, `*.cjs`, `*.ts`, `*.mts`, `*.cts`, `*.tsx` → always load `references/js-toolchain.md`, then
@@ -208,7 +211,7 @@ the role `skipped-not-installed`; it does not stop the remaining review.
 ### PHP stack
 
 `references/php-quality.md` is the **single source** for PHP toolchain invocation — runtime
-version resolution (`PHP_CMD`), source-directory derivation (`SRC_DIR`), and the four tool
+version resolution (`PHP_CMD`), source-directory derivation (`SRC_DIRS`), and the four tool
 commands all live there. Follow its §0 for version resolution and §2 for execution.
 
 Duplicating those commands here would drift: two spellings of the same instruction leave the
@@ -283,7 +286,7 @@ The comment must address the specific flagged behavior; a generic nearby comment
 
 ## Step 4: Produce Report
 
-**Language**: Write the report in the same language the user used when requesting the review. If the user wrote in Korean, write the report in Korean. If in English, write in English. **When running as a subagent** (e.g., dispatched by branch-merge-review), the invoking prompt's `OUTPUT LANGUAGE` directive takes precedence over the prompt's own language — an English dispatch prompt does NOT mean the report should be in English. Keep code identifiers, file paths, and evidence snippets as-is; write all prose in the designated language.
+**Language**: Write the report in the same language the user used when requesting the review. **When running as a subagent** (e.g., dispatched by branch-merge-review), the invoking prompt's `OUTPUT LANGUAGE` directive takes precedence over the prompt's own language — an English dispatch prompt does not mean the report should be in English. Keep code identifiers, file paths, and evidence snippets as-is; write all prose in the designated language.
 
 **Delivery — inline by default.** Emit the report in your response. Do **not** create `.tasks/reports/` and do not write a report file: a review request must not change the working tree or add commit candidates.
 

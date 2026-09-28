@@ -34,9 +34,8 @@ Keep the artifact short enough to guide implementation. Ask only for missing inf
 
 ### Resolve ambiguity before planning further
 
-Run this scan once, after the goal is clear and before the specification hardens. It exists
-because the single instruction "pause when a choice would materially change scope" gives no
-way to tell *which* unknowns are worth a question.
+Run this scan once, after the goal is clear and before the specification hardens, to decide
+which unknowns are worth a question.
 
 Score each category **Clear / Partial / Missing**. Keep the map to yourself; show it only when
 you end up asking nothing.
@@ -57,8 +56,7 @@ surface → i18n · async work or an external integration → observability (who
 **Compliance is not a standing scan category here.** Ordinary data lifecycle — retention,
 expiry, deletion — always belongs to category 2 above. What is excluded is the separate
 compliance layer: *legally or contractually mandated* retention periods, deletion requests,
-consent, data residency, and audit trails. Those have not come up in this repository's work, and
-a check that never fires is dead weight in a scan run on every plan. When a task does carry a
+consent, data residency, and audit trails. When a task does carry a
 stated legal or contractual obligation, record it in `Current context` as an external constraint
 and turn it into an acceptance criterion — do not assume the auth and permission category covers
 it, because it does not.
@@ -201,7 +199,7 @@ code drift apart**:
 - the verification strategy for a step.
 
 Re-run the ambiguity scan only for the categories the change touches — a storage change reopens
-§2 and §5 of that table, not all seven. Ask for approval again **only when the changed decision
+categories 2 and 5 of that table, not all seven. Ask for approval again **only when the changed decision
 falls outside existing authority and meets the design checkpoint above**; record and continue
 corrections within the approved or delegated scope.
 
