@@ -205,6 +205,98 @@ try {
         }
     }
 
+    # Rule blocks own only their content and the separator appended during installation.
+    $rule = @(Get-SupportedComponents -Client codex -Platform windows -Kind rule)[0]
+    $ruleSource = Join-Path $root $rule.source
+    $ruleBytes = [IO.File]::ReadAllBytes($ruleSource)
+    $ruleText = [IO.File]::ReadAllText($ruleSource, $utf8)
+    if (-not $ruleText.EndsWith("`n")) { $ruleText += "`n" }
+    $ruleStart = "<!-- claude-code-skills:code-writing -->`n"
+    $ruleEnd = "<!-- /claude-code-skills:code-writing -->`n"
+    $ruleCase = 0
+    foreach ($original in @('', 'user without newline', "user`n", "user`n`n", "user`r`n`r`n", "사용자`r`n<!-- context7 -->`r`nkeep`r`n<!-- /context7 -->`r`n")) {
+        $ruleCase++
+        $ruleRoot = Join-Path $temporaryRoot ("Rule profile $ruleCase")
+        $ruleLayout = Get-InstallLayout -Scope global -Root $ruleRoot
+        New-Item -ItemType Directory -Path (Split-Path -Parent $ruleLayout.CodexInstructions) -Force | Out-Null
+        [IO.File]::WriteAllText($ruleLayout.CodexInstructions, $original, $utf8)
+        Assert-True (Install-Rule -Layout $ruleLayout -Component $rule -Client claude) 'Claude rule installs'
+        $claudeRule = Join-Path $ruleLayout.ClaudeRules 'code-writing.md'
+        Assert-True ([Convert]::ToBase64String([IO.File]::ReadAllBytes($claudeRule)) -eq [Convert]::ToBase64String($ruleBytes)) 'Claude rule matches repository bytes'
+        Assert-True (Install-Rule -Layout $ruleLayout -Component $rule -Client codex) 'Codex rule installs'
+        $installedBytes = [IO.File]::ReadAllBytes($ruleLayout.CodexInstructions)
+        $installed = [IO.File]::ReadAllText($ruleLayout.CodexInstructions, $utf8)
+        Assert-True ($installed.StartsWith($original, [StringComparison]::Ordinal)) 'original user bytes precede rule'
+        Assert-True ($installed.Contains($ruleStart + $ruleText + $ruleEnd)) 'Codex block matches repository content'
+        Assert-True (Install-Rule -Layout $ruleLayout -Component $rule -Client codex) 'Codex rule reinstalls'
+        Assert-True ([Convert]::ToBase64String([IO.File]::ReadAllBytes($ruleLayout.CodexInstructions)) -eq [Convert]::ToBase64String($installedBytes)) 'reinstall is byte-identical without duplicate block'
+        $ruleEntries = Get-Content -LiteralPath $ruleLayout.Manifest -Raw -Encoding UTF8 | ConvertFrom-Json
+        Assert-True (@($ruleEntries.entries | Where-Object { $_.kind -eq 'rule' -and $_.component -eq 'code-writing' }).Count -eq 2) 'both rule ownership records use catalog identity'
+        Assert-True (Remove-Rule -Layout $ruleLayout -Component $rule -Client codex) 'Codex rule removes'
+        Assert-True ([Convert]::ToBase64String([IO.File]::ReadAllBytes($ruleLayout.CodexInstructions)) -eq [Convert]::ToBase64String($utf8.GetBytes($original))) 'remove restores exact original bytes including CRLF'
+        Assert-True (Remove-Rule -Layout $ruleLayout -Component $rule -Client claude) 'Claude rule removes'
+        Assert-True (-not (Test-Path -LiteralPath $claudeRule)) 'Claude rule file removed'
+    }
+
+    $absentRules = Get-InstallLayout -Scope global -Root (Join-Path $temporaryRoot 'Absent rule profile')
+    Assert-True (Install-Rule -Layout $absentRules -Component $rule -Client codex) 'absent AGENTS file created'
+    Assert-True (Remove-Rule -Layout $absentRules -Component $rule -Client codex) 'new AGENTS block removed'
+    Assert-True (([IO.File]::ReadAllBytes($absentRules.CodexInstructions)).Length -eq 0) 'new AGENTS file remains empty'
+
+    $editedRules = Get-InstallLayout -Scope global -Root (Join-Path $temporaryRoot 'Edited rule profile')
+    foreach ($client in @('claude', 'codex')) { Install-Rule -Layout $editedRules -Component $rule -Client $client | Out-Null }
+    $editedClaude = Join-Path $editedRules.ClaudeRules 'code-writing.md'
+    [IO.File]::WriteAllText($editedClaude, 'user rule', $utf8)
+    $edited = [IO.File]::ReadAllText($editedRules.CodexInstructions, $utf8).Replace($ruleStart, $ruleStart + "user edit`n")
+    [IO.File]::WriteAllText($editedRules.CodexInstructions, $edited, $utf8)
+    $ruleWarnings = @()
+    foreach ($client in @('claude', 'codex')) {
+        Assert-True (-not (Install-Rule -Layout $editedRules -Component $rule -Client $client -WarningVariable +ruleWarnings)) 'edited rule survives reinstall'
+        Assert-True (-not (Remove-Rule -Layout $editedRules -Component $rule -Client $client -WarningVariable +ruleWarnings)) 'edited rule survives removal'
+    }
+    Assert-True ($ruleWarnings.Count -ge 4) 'edited rules produce preservation warnings'
+    Assert-True ([IO.File]::ReadAllText($editedRules.CodexInstructions, $utf8) -ceq $edited) 'edited Codex block unchanged'
+    Assert-True ([IO.File]::ReadAllText($editedClaude, $utf8) -ceq 'user rule') 'edited Claude file unchanged'
+
+    $outsideRules = Get-InstallLayout -Scope global -Root (Join-Path $temporaryRoot 'Outside rule edits')
+    Install-Rule -Layout $outsideRules -Component $rule -Client codex | Out-Null
+    $outsideText = "new prefix`r`n" + [IO.File]::ReadAllText($outsideRules.CodexInstructions, $utf8) + "new suffix`r`n"
+    [IO.File]::WriteAllText($outsideRules.CodexInstructions, $outsideText, $utf8)
+    Assert-True (Install-Rule -Layout $outsideRules -Component $rule -Client codex) 'outside edits permit owned block update'
+    Assert-True (Remove-Rule -Layout $outsideRules -Component $rule -Client codex) 'outside edits permit removal'
+    Assert-True ([IO.File]::ReadAllText($outsideRules.CodexInstructions, $utf8) -ceq "new prefix`r`nnew suffix`r`n") 'outside edits survive removal'
+
+    $unverifiedRules = Get-InstallLayout -Scope global -Root (Join-Path $temporaryRoot 'Unverified rule blocks')
+    Install-Rule -Layout $unverifiedRules -Component $rule -Client codex | Out-Null
+    $ownedBlock = [IO.File]::ReadAllText($unverifiedRules.CodexInstructions, $utf8)
+    foreach ($unverified in @(($ownedBlock + $ownedBlock), $ownedBlock.Replace($ruleEnd, "broken marker`n"), "user removed block`n")) {
+        [IO.File]::WriteAllText($unverifiedRules.CodexInstructions, $unverified, $utf8)
+        Assert-True (-not (Install-Rule -Layout $unverifiedRules -Component $rule -Client codex)) 'malformed or missing block survives reinstall'
+        Assert-True (-not (Remove-Rule -Layout $unverifiedRules -Component $rule -Client codex)) 'malformed or missing block survives removal'
+        Assert-True ([IO.File]::ReadAllText($unverifiedRules.CodexInstructions, $utf8) -ceq $unverified) 'unverified bytes unchanged'
+    }
+    Remove-Item -LiteralPath $unverifiedRules.Manifest -Force
+    [IO.File]::WriteAllText($unverifiedRules.CodexInstructions, $ownedBlock, $utf8)
+    Assert-True (-not (Install-Rule -Layout $unverifiedRules -Component $rule -Client codex)) 'unowned block survives reinstall'
+    Assert-True (-not (Remove-Rule -Layout $unverifiedRules -Component $rule -Client codex)) 'unowned block survives removal'
+
+    $ruleFailure = Get-InstallLayout -Scope global -Root (Join-Path $temporaryRoot 'Rule manifest failure')
+    Install-Rule -Layout $ruleFailure -Component $rule -Client codex | Out-Null
+    $beforeRuleBytes = [IO.File]::ReadAllBytes($ruleFailure.CodexInstructions)
+    $ruleManifestLock = [IO.File]::Open($ruleFailure.Manifest, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::Read)
+    $ruleRemoveFailed = $false
+    try { Remove-Rule -Layout $ruleFailure -Component $rule -Client codex | Out-Null } catch { $ruleRemoveFailed = $true }
+    finally { $ruleManifestLock.Dispose() }
+    Assert-True $ruleRemoveFailed 'rule manifest prune failure injected'
+    Assert-True ([Convert]::ToBase64String([IO.File]::ReadAllBytes($ruleFailure.CodexInstructions)) -eq [Convert]::ToBase64String($beforeRuleBytes)) 'failed rule removal restores file'
+    Assert-True (Remove-Rule -Layout $ruleFailure -Component $rule -Client codex) 'rule removal succeeds after manifest unlock'
+
+    $projectRules = Get-InstallLayout -Scope project -Root (Join-Path $temporaryRoot 'Project rules skipped')
+    foreach ($client in @('claude', 'codex')) {
+        Assert-True (-not (Install-Rule -Layout $projectRules -Component $rule -Client $client)) 'project rules skipped'
+    }
+    Assert-True (-not (Test-Path -LiteralPath $projectRules.Root)) 'project rule request changes no files'
+
     # Skill link request either creates a local link or safely falls back to copy.
     $linkRoot = Join-Path $temporaryRoot 'Link permission fallback'
     New-Item -ItemType Directory -Path $linkRoot | Out-Null

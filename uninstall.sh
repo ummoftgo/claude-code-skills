@@ -594,6 +594,29 @@ remove_agents() {
 # 메인
 # =============================================================================
 
+remove_rules() {
+    if [[ "$UNINSTALL_SCOPE" != "global" ]]; then
+        info "rule은 전역 범위에서만 설치합니다."
+        return
+    fi
+    local client name target
+    for client in claude codex; do
+        if ! ask_yn_default_no "${client} 코드 작성 rule을 제거하시겠습니까?"; then
+            skip "${client} rule 유지"
+            continue
+        fi
+        while IFS= read -r name; do
+            if [[ "$client" == "codex" ]]; then
+                python3 "$SCRIPT_DIR/scripts/rule_block.py" remove --target "$HOME/.codex/AGENTS.md" \
+                    --manifest "$MANIFEST_FILE" --name "$name" || return 1
+            else
+                target="$HOME/.claude/rules/$name.md"
+                remove_agent_file "$target" "$name" md
+            fi
+        done < <(catalog_names rule "$client")
+    done
+}
+
 main() {
     echo -e "${BOLD}"
     echo "╔══════════════════════════════════════════════════╗"
@@ -611,6 +634,7 @@ main() {
     remove_codex_skills
     remove_workflow_hook "Codex" "$CODEX_HOOKS_DIR" "$CODEX_HOOKS_FILE"
     remove_agents
+    remove_rules
 
     echo
     echo -e "${BOLD}${GREEN}══════════════════════════════════════════════════${NC}"

@@ -95,6 +95,16 @@ try {
     } else {
         Write-Host 'Project scope installs skills and agents only; Windows hooks are global-only.' -ForegroundColor Yellow
     }
+    if ($scope -eq 'global') {
+        foreach ($client in $clients) {
+            if (-not (Read-YesNo "Install the $client code-writing rule?" $true)) { continue }
+            foreach ($component in Get-SupportedComponents -Client $client -Platform windows -Kind rule) {
+                Install-Rule -Layout $layout -Component $component -Client $client | Out-Null
+            }
+        }
+    } else {
+        Write-Host 'Rules are global-only.' -ForegroundColor Yellow
+    }
 } catch {
     Write-Error "Installation stopped: $($_.Exception.Message)"
     exit 1

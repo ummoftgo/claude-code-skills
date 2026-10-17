@@ -158,7 +158,7 @@ manifest_record_required() {
     manifest_init || return 1
     local client="${type%%-*}" kind="${type#*-}" component
     component="$(basename "$abs")"
-    [[ "$kind" == "agent" ]] && component="${component%.*}"
+    [[ "$kind" == "agent" || "$kind" == "rule" ]] && component="${component%.*}"
     [[ "$kind" == "hook" ]] && component="workflow-reminder"
     python3 "$MANIFEST_TOOL" record --manifest "$MANIFEST_FILE" \
         --platform posix --scope "$INSTALL_SCOPE" --client "$client" --kind "$kind" \
@@ -915,6 +915,38 @@ install_agents() {
 
 }
 
+install_rules() {
+    if [[ "$INSTALL_SCOPE" != "global" ]]; then
+        info "rule은 전역 범위에서만 설치합니다."
+        return
+    fi
+    local client name source target own
+    local clients=(claude)
+    if $USE_CODEX; then clients+=(codex); fi
+    for client in "${clients[@]}"; do
+        if ! ask_yn "${client} 코드 작성 rule을 설치하시겠습니까?"; then
+            skip "${client} rule 건너뜀"
+            continue
+        fi
+        while IFS= read -r name; do
+            source="$SCRIPT_DIR/$(catalog_source rule "$client" "$name")"
+            if [[ "$client" == "codex" ]]; then
+                python3 "$SCRIPT_DIR/scripts/rule_block.py" install --target "$HOME/.codex/AGENTS.md" \
+                    --manifest "$MANIFEST_FILE" --name "$name" --source "$source" || return 1
+            else
+                target="$HOME/.claude/rules/$name.md"
+                own="$(classify_ownership "$target" "$name" rule)"
+                if [[ "$own" != "ours" && "$own" != "none" ]]; then
+                    warn "수정되었거나 소유권을 확인할 수 없는 rule을 보존합니다: $target"
+                    continue
+                fi
+                install_staged_component "$source" "$target" copy claude-rule || return 1
+                ok "${name} → ${target} (복사)"
+            fi
+        done < <(catalog_names rule "$client")
+    done
+}
+
 show_dependency_diagnostics() {
     section "외부 도구 진단 (자동 설치 없음)"
     local name command install_hint
@@ -957,6 +989,7 @@ main() {
     setup_workflow_hook "Claude Code" "$CLAUDE_HOOKS_DIR" "$CLAUDE_SETTINGS_FILE" "claude-hook"
     install_codex_skills
     install_agents
+    install_rules
     show_dependency_diagnostics
 
     echo

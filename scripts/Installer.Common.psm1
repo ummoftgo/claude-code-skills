@@ -22,7 +22,7 @@ function Get-SupportedComponents {
     param(
         [Parameter(Mandatory = $true)][ValidateSet('claude', 'codex')][string]$Client,
         [Parameter(Mandatory = $true)][ValidateSet('posix', 'windows')][string]$Platform,
-        [ValidateSet('skill', 'agent', 'hook')][string]$Kind
+        [ValidateSet('skill', 'agent', 'hook', 'rule')][string]$Kind
     )
     return @(Get-ComponentCatalog | Where-Object {
         $support = $_.support.$Client.$Platform
@@ -61,6 +61,8 @@ function Get-InstallLayout {
         LegacyManifest = Join-Path $resolvedRoot '.claude-code-skills\manifest.tsv'
         ClaudeSkills = Join-Path $resolvedRoot '.claude\skills'
         ClaudeAgents = Join-Path $resolvedRoot '.claude\agents'
+        ClaudeRules = Join-Path $resolvedRoot '.claude\rules'
+        CodexInstructions = Join-Path $resolvedRoot '.codex\AGENTS.md'
         ClaudeHooks = Join-Path $resolvedRoot '.claude\hooks'
         ClaudeSettings = Join-Path $resolvedRoot '.claude\settings.json'
         CodexSkills = Join-Path $resolvedRoot '.agents\skills'
@@ -250,7 +252,8 @@ function Save-ManifestEntry {
         [string]$Hash,
         [string]$ConfigurationKey,
         $ConfigurationBefore,
-        $ConfigurationAfter
+        $ConfigurationAfter,
+        [string]$BlockSeparator
     )
     $data = Read-Manifest -Layout $Layout
     $full = [IO.Path]::GetFullPath($Target)
@@ -266,6 +269,9 @@ function Save-ManifestEntry {
         $entry | Add-Member -NotePropertyName configuration -NotePropertyValue ([pscustomobject][ordered]@{
             key = $ConfigurationKey; before = $ConfigurationBefore; after = $ConfigurationAfter
         })
+    }
+    if ($Kind -eq 'rule' -and $Method -eq 'merge') {
+        $entry | Add-Member -NotePropertyName blockSeparator -NotePropertyValue $BlockSeparator
     }
     $data.entries = @($data.entries) + @($entry)
     Write-Manifest -Layout $Layout -Data $data
@@ -366,6 +372,7 @@ function Install-ManagedComponent {
     )
     $source = Resolve-ComponentSource -Component $Component -Client $Client
     $extension = ''
+    if ($Component.kind -eq 'rule') { $extension = '.md' }
     if ($Component.kind -eq 'agent') { if ($Client -eq 'claude') { $extension = '.md' } else { $extension = '.toml' } }
     $target = Join-Path $TargetDirectory ($Component.name + $extension)
     Assert-SafeTarget -Target $target -Root $Layout.Root
@@ -433,6 +440,7 @@ function Remove-ManagedComponent {
         [Parameter(Mandatory = $true)][string]$TargetDirectory
     )
     $extension = ''
+    if ($Component.kind -eq 'rule') { $extension = '.md' }
     if ($Component.kind -eq 'agent') { if ($Client -eq 'claude') { $extension = '.md' } else { $extension = '.toml' } }
     $target = Join-Path $TargetDirectory ($Component.name + $extension)
     if (-not (Test-Path -LiteralPath $target)) { return $false }
@@ -463,6 +471,105 @@ function Remove-ManagedComponent {
     try { if (Test-Path -LiteralPath $backup) { Remove-Item -LiteralPath $backup -Recurse -Force } } catch { Write-Warning "Component removal is committed, but its backup could not be fully removed: $backup" }
     Write-Host "[REMOVED] $target" -ForegroundColor Yellow
     return $true
+}
+
+function Update-CodexRuleBlock {
+    param($Layout, $Component, [ValidateSet('install', 'remove')][string]$Action)
+    $target = $Layout.CodexInstructions
+    Assert-SafeTarget -Target $target -Root $Layout.Root
+    $snapshot = Get-FileSnapshot -Path $target
+    if ($snapshot.IsLink -or ($snapshot.Exists -and $null -eq $snapshot.Bytes)) {
+        Write-Warning "Preserving rule target that is not a regular file: $target"
+        return $false
+    }
+    # Latin-1 gives each byte one character, so edits cannot normalize user text or line endings.
+    $byteEncoding = [Text.Encoding]::GetEncoding(28591)
+    $original = if ($snapshot.Exists) { $byteEncoding.GetString($snapshot.Bytes) } else { '' }
+    $entry = Get-ManifestEntry -Layout $Layout -Target $target
+    $start = '<!-- claude-code-skills:' + $Component.name + ' -->'
+    $end = '<!-- /claude-code-skills:' + $Component.name + ' -->'
+    $block = [regex]::Match($original, '(?m)^' + [regex]::Escape($start) + '\r?\n(?<content>[\s\S]*?)^' + [regex]::Escape($end) + '(?:\r?\n|$)')
+    $sha = [Security.Cryptography.SHA256]::Create()
+    try {
+        if ($original.Contains($start) -or $original.Contains($end) -or $null -ne $entry) {
+            $currentHash = ([BitConverter]::ToString($sha.ComputeHash($byteEncoding.GetBytes($block.Groups['content'].Value)))).Replace('-', '').ToLowerInvariant()
+            if (-not $block.Success -or [regex]::Matches($original, [regex]::Escape($start)).Count -ne 1 -or
+                [regex]::Matches($original, [regex]::Escape($end)).Count -ne 1 -or
+                $null -eq $entry -or $entry.kind -ne 'rule' -or $entry.hash -ne $currentHash) {
+                Write-Warning "Preserving modified or unverified rule block: $target"
+                return $false
+            }
+        } elseif ($Action -eq 'remove') { return $false }
+
+        $separator = ''
+        if ($null -ne $entry -and $null -ne $entry.PSObject.Properties['blockSeparator']) { $separator = [string]$entry.blockSeparator }
+        if ($Action -eq 'remove') {
+            $left = $block.Index
+            if ($separator.Length -gt 0 -and $original.Substring(0, $left).EndsWith($separator, [StringComparison]::Ordinal)) { $left -= $separator.Length }
+            $updated = $original.Substring(0, $left) + $original.Substring($block.Index + $block.Length)
+        } else {
+            $source = Resolve-ComponentSource -Component $Component -Client codex
+            $content = $byteEncoding.GetString($script:Utf8NoBom.GetBytes([IO.File]::ReadAllText($source, $script:Utf8NoBom)))
+            if (-not $content.EndsWith("`n")) { $content += "`n" }
+            $hash = ([BitConverter]::ToString($sha.ComputeHash($byteEncoding.GetBytes($content)))).Replace('-', '').ToLowerInvariant()
+            if ($block.Success) {
+                $group = $block.Groups['content']
+                $updated = $original.Substring(0, $group.Index) + $content + $original.Substring($group.Index + $group.Length)
+            } else {
+                $newline = if ($original.Contains("`r`n")) { "`r`n" } else { "`n" }
+                if ($original.Length -gt 0 -and $original -notmatch '(?:\r?\n){2}$') { $separator = if ($original.EndsWith("`n")) { $newline } else { $newline + $newline } }
+                $updated = $original + $separator + $start + "`n" + $content + $end + "`n"
+            }
+        }
+    } finally { $sha.Dispose() }
+
+    $parent = Split-Path -Parent $target
+    if (-not (Test-Path -LiteralPath $parent)) { New-Item -ItemType Directory -Path $parent -Force | Out-Null }
+    $staging = Join-Path $parent ('.rule.' + [guid]::NewGuid().ToString('N'))
+    $manifestSnapshot = Get-FileSnapshot -Path $Layout.Manifest
+    try {
+        [IO.File]::WriteAllBytes($staging, $byteEncoding.GetBytes($updated))
+        Move-ItemWithRetry -Source $staging -Destination $target -Force
+        if ($Action -eq 'remove') {
+            Remove-ManifestEntry -Layout $Layout -Target $target
+        } else {
+            Save-ManifestEntry -Layout $Layout -Client codex -Kind rule -Component $Component.name -Target $target -Method merge -Source $source -Hash $hash -BlockSeparator $separator | Out-Null
+        }
+    } catch {
+        $originalError = $_
+        Restore-SnapshotsBestEffort @(
+            [pscustomobject]@{ Path = $target; Snapshot = $snapshot },
+            [pscustomobject]@{ Path = $Layout.Manifest; Snapshot = $manifestSnapshot }
+        )
+        throw $originalError
+    } finally {
+        if (Test-Path -LiteralPath $staging) { Remove-Item -LiteralPath $staging -Force }
+    }
+    Write-Host "[OK] rule ${Action}: $target" -ForegroundColor Green
+    return $true
+}
+
+function Install-Rule {
+    [CmdletBinding()]
+    param($Layout, $Component, [ValidateSet('claude', 'codex')][string]$Client)
+    if ($Layout.Scope -ne 'global') {
+        Write-Host 'Rules are global-only.' -ForegroundColor Yellow
+        return $false
+    }
+    if ($Client -eq 'claude') {
+        return Install-ManagedComponent -Layout $Layout -Component $Component -Client $Client -TargetDirectory $Layout.ClaudeRules -Method copy
+    }
+    return Update-CodexRuleBlock -Layout $Layout -Component $Component -Action install
+}
+
+function Remove-Rule {
+    [CmdletBinding()]
+    param($Layout, $Component, [ValidateSet('claude', 'codex')][string]$Client)
+    if ($Layout.Scope -ne 'global') { return $false }
+    if ($Client -eq 'claude') {
+        return Remove-ManagedComponent -Layout $Layout -Component $Component -Client $Client -TargetDirectory $Layout.ClaudeRules
+    }
+    return Update-CodexRuleBlock -Layout $Layout -Component $Component -Action remove
 }
 
 function Invoke-LegacyCodexSkillMigration {
@@ -954,7 +1061,8 @@ function Get-FileSnapshot {
     if ($null -ne $item) {
         $isLink = ($null -ne $item.PSObject.Properties['LinkType']) -and $item.LinkType -eq 'SymbolicLink'
         $target = if ($isLink) { [string](@($item.Target)[0]) } else { $null }
-        $bytes = if (-not $isLink -and -not $item.PSIsContainer) { [IO.File]::ReadAllBytes($Path) } else { $null }
+        # The comma keeps an empty file's byte[] from unrolling to $null.
+        $bytes = if (-not $isLink -and -not $item.PSIsContainer) { ,[IO.File]::ReadAllBytes($Path) } else { $null }
         return [pscustomobject]@{ Exists = $true; IsLink = $isLink; LinkTarget = $target; Bytes = $bytes }
     }
     return [pscustomobject]@{ Exists = $false; IsLink = $false; LinkTarget = $null; Bytes = $null }
@@ -1114,4 +1222,4 @@ function Show-DependencyDiagnostics {
     else { Write-Host '  [MISSING] Google Chrome - https://www.google.com/chrome/' -ForegroundColor Yellow }
 }
 
-Export-ModuleMember -Function Get-RepositoryRoot, Get-ComponentCatalog, Get-SupportedComponents, Get-InstallLayout, Assert-DefaultConfigDirectories, Test-SymbolicLinkEligible, Install-ManagedComponent, Remove-ManagedComponent, Invoke-LegacyCodexSkillMigration, Test-CodexInlineHooks, Get-CodexHookFeatureState, Install-WorkflowHook, Remove-WorkflowHook, Show-DependencyDiagnostics
+Export-ModuleMember -Function Get-RepositoryRoot, Get-ComponentCatalog, Get-SupportedComponents, Get-InstallLayout, Assert-DefaultConfigDirectories, Test-SymbolicLinkEligible, Install-ManagedComponent, Remove-ManagedComponent, Install-Rule, Remove-Rule, Invoke-LegacyCodexSkillMigration, Test-CodexInlineHooks, Get-CodexHookFeatureState, Install-WorkflowHook, Remove-WorkflowHook, Show-DependencyDiagnostics

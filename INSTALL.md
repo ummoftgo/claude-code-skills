@@ -12,6 +12,8 @@ Windows 설치기는 WSL 경로를 대상으로 하지 않습니다. WSL 모드�
 
 설치 대상은 [`components.json`](./components.json)이 단일 기준입니다. POSIX와 Windows 설치기·제거기는 이 카탈로그에서 각 클라이언트와 플랫폼이 지원하는 컴포넌트를 읽습니다.
 
+스킬·에이전트·워크플로우 훅과 함께 [`rules/code-writing.md`](./rules/code-writing.md)를 제공합니다. 코드 작성 rule은 두 플랫폼 모두 전역 범위에서만 선택하여 설치합니다.
+
 ### 사용자 지정 설정 디렉터리
 
 전역 설치·제거는 기본 설정 경로(`~/.claude`, `~/.codex`)를 관리합니다. 선택한 클라이언트의 `CLAUDE_CONFIG_DIR` 또는 `CODEX_HOME`이 기본 경로와 다르면, 파일·설정·매니페스트 변경 전에 오류로 중단합니다. 잘못된 기본 디렉터리에 설치하거나 그 안의 기존 구성을 제거하지 않기 위한 검사입니다. 빈 변수와 명시적으로 지정한 기본 경로는 허용합니다.
@@ -71,6 +73,7 @@ Set-ExecutionPolicy -Scope Process Bypass
 2. 전역 또는 프로젝트 범위
 3. 스킬 복사 또는 심볼릭 링크
 4. 전역 범위일 때 클라이언트별 워크플로우 훅
+5. 전역 범위일 때 클라이언트별 코드 작성 rule (기본값: 설치)
 
 복사가 기본값입니다. 링크는 저장소와 대상이 모두 로컬 Windows 경로일 때만 제시되며, Developer Mode/권한 부족 등으로 생성이 실패하면 복사로 전환합니다. 에이전트와 훅은 링크하지 않습니다.
 
@@ -80,13 +83,14 @@ Set-ExecutionPolicy -Scope Process Bypass
 |---|---|---|
 | 전역 스킬 | `%USERPROFILE%\.claude\skills` | `%USERPROFILE%\.agents\skills` |
 | 전역 에이전트 | `%USERPROFILE%\.claude\agents` | `%USERPROFILE%\.codex\agents` |
+| 전역 rule | `%USERPROFILE%\.claude\rules\code-writing.md` | `%USERPROFILE%\.codex\AGENTS.md`의 관리 블록 |
 | 전역 훅 | `%USERPROFILE%\.claude\hooks` | `%USERPROFILE%\.codex\hooks` |
 | 훅 설정 | `%USERPROFILE%\.claude\settings.json` | `%USERPROFILE%\.codex\hooks.json` |
 | Codex 기능 설정 | — | `%USERPROFILE%\.codex\config.toml` |
 | 프로젝트 스킬 | `.claude\skills` | `.agents\skills` |
 | 프로젝트 에이전트 | `.claude\agents` | `.codex\agents` |
 
-Windows 프로젝트 설치에는 훅이 포함되지 않습니다.
+Windows 프로젝트 설치에는 훅과 rule이 포함되지 않습니다.
 
 ### 외부 도구 진단
 
@@ -107,6 +111,15 @@ bash install.sh
 ```
 
 Bash 설치기는 해당 POSIX 홈/프로젝트에만 설치합니다. Windows 네이티브 프로필에는 쓰지 않습니다. 설치 대상은 PowerShell 설치기와 같은 `components.json`에서 선택하며 Codex 스킬은 공식 `.agents/skills` 경로를 사용합니다.
+
+| 전역 rule | 경로 |
+|---|---|
+| Claude | `~/.claude/rules/code-writing.md` |
+| Codex | `~/.codex/AGENTS.md`의 `<!-- claude-code-skills:code-writing -->` 관리 블록 |
+
+에이전트 선택 뒤에 클라이언트별 rule 설치 여부를 묻습니다(기본값: 설치). 프로젝트 범위에서는 설치하지 않고 전역 전용 안내를 출력합니다.
+
+Claude rule은 에이전트 복사와 같은 매니페스트·해시 소유권 검사를 따릅니다. Codex는 블록 내용 해시와 설치 시 덧붙인 구분 줄을 기록하며, 블록 밖의 사용자 내용·context7 블록·CRLF/LF는 바이트 단위로 보존합니다. 재설치와 제거는 현재 내용 해시가 기록과 같을 때만 수행하고, 수정되거나 소유권이 불명확한 블록은 경고와 함께 보존합니다. 제거기는 관리 블록과 설치 시 추가한 구분 줄만 지우며, 결과가 빈 `AGENTS.md`라도 파일을 남깁니다.
 
 Codex `config.toml`에서 훅이 비활성화되어 있으면 Bash 설치기는 값을 바꾸지 않고 훅 설치를 건너뜁니다. 설정을 직접 검토해 활성화한 뒤 설치기를 다시 실행하세요.
 
