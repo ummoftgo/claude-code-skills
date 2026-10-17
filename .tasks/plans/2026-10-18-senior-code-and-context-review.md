@@ -75,3 +75,5 @@ A(설치기: `install.sh`, `uninstall.sh`, `scripts/`, `install.ps1`, `uninstall
 - 2단계(A, Herdr 패널 Codex, 워크트리 `wt-rules-installer`, `94c34e0`): rule 종류, `scripts/rule_block.py`, POSIX·PowerShell 설치·제거, 테스트. 메인 검토 중 Windows 실제 실행에서 빈 `AGENTS.md`를 비정상 파일로 판정하는 결함 발견. 원인은 공용 `Get-FileSnapshot`이 빈 byte[]를 `$null`로 풀던 PowerShell 동작이라 그 함수에서 수정. 이후 Windows 통합 테스트 통과, 전체 455 테스트 OK.
 - 5단계: 리뷰봇 변경안 `.tasks/plans/2026-10-18-review-bot-context-trace-proposal.md`. 봇 코드는 수정하지 않음.
 - Codex 계획 대비 검토: 차단 사유 없음. 개선 4건 반영(방어 확인 항목은 지적에서 빼고 Cleared에 "주의"로 통일, 4a 심각도 예시는 JUDGMENT가 우선, FR-005 문구를 보호 분류 한정으로 정정, FR-003 계약 테스트 추가). 전체 테스트 OK.
+- 네이티브 리뷰어 A/B(세 사례 저장소, AGENTS.md 없음/규칙 파일): 둘 다 report.php를 지적하지 않음(이 단순 사례는 기본 리뷰어도 추적). 규칙 있는 쪽은 "(int) 캐스팅이 막는다"고 명시하고 AGENTS.md:11을 인용. 형식 지시는 무시하지만 내용 지침은 반영함 → codex-delegate 문구 정정.
+- 목표 1 참고 실험(1회, 같은 구현 지시, 둘 다 전역 AGENTS.md·ponytail 적용 상태): 둘 다 주석·내부 재검증·실패 먼저 TDD 없음. 차이는 규칙 없는 쪽이 (string) 캐스팅으로 '없음'을 빈 문자열로 덮고(조용한 기본값) PDOStatement 목을 손으로 만들어 바인딩 인자를 검증(구현 고정). 규칙 있는 쪽은 없음을 null로 돌려주고 SQLite 메모리 DB로 동작을 검증. 1회라 증거가 아닌 참고 신호.
