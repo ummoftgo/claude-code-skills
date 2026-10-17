@@ -347,7 +347,7 @@ printf '%s' "$codex_prompt" | codex -a never -s read-only exec - \
   > "$outdir/codex-review.md" 2> "$outdir/codex-review.err.txt"
 ```
 
-Run it with `run_in_background`, and judge progress by the stderr file growing. If stderr stops growing for 10 minutes, or the run passes 30 minutes, kill it by PID and treat the pass as incomplete. Read the result only after a zero exit.
+Run the whole `codex-delegate` block (validated `mktemp`, `trap` cleanup, `cat` of the result on a zero exit) with `run_in_background`. The trap removes the run directory when that shell exits, so read the findings from the background command's output, not from the file. Judge progress by the stderr file growing. If stderr stops growing for 10 minutes, or the run passes 30 minutes, kill it by PID and treat the pass as incomplete.
 
 A failed or incomplete Codex pass does not block the verdict — the Claude passes still decide completeness in Step 3 — but the report must say that the review was single-model.
 
@@ -362,7 +362,7 @@ In team mode, wait until all spawned and queued reviewers have returned their co
 - If an agent does not respond within a reasonable time, note it as `⚠ Reviewer did not complete` in the final report and proceed with partial findings.
 - If an agent returns an error, retry once. If it fails again, mark that reviewer as unavailable.
 - Never block the entire report waiting for one reviewer indefinitely.
-- The Codex reviewer follows Step 2.6's limits instead of a retry; it never holds the report.
+- Before Step 4e, wait for the Codex reviewer within Step 2.6's limits, without a retry. Past those limits, report without it.
 
 **Completion gate — a language whose review did not happen cannot be approved.** Proceeding with
 partial findings is right for *reporting*; it is wrong for the *verdict*. For every language with

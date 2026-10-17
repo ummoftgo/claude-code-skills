@@ -322,6 +322,8 @@ Invoke and follow, by name: `code-quality-review` with the reference for each ch
 language/surface, and `web-security-review` with every reference its selection table picks for
 these changes. Use only the audit/review steps; skip any "Offer Fixes" step. If a skill is not
 installed, say so in your report and review that dimension with your own general criteria.
+This is a first-time discovery review: do not invoke `branch-merge-review` or
+`evidence-first-review`.
 Report quality findings only for non-deleted files; deleted files count for security only.
 
 Your scope — review ALL of these changed files (including deleted):

@@ -27,3 +27,5 @@
 - 4단계: 템플릿 그대로 조립한 프롬프트(약 2만 자, diff에 마커 문자열이 있어 Step 2 규칙대로 마커 연장)를 `codex -a never -s read-only exec -`에 stdin으로 실제 실행. exit 0, 한국어 보고, `code-quality-review`·`web-security-review` 로드 확인. 발견 0건이라 발견 형식 자체는 미관찰.
 - Codex 계획 대비 검토: 차단 사유 없음. 개선 제안(단일 모델 공개 문구 고정) 반영.
 - 리뷰봇(`~/work/code-review`)은 Codex 발견 + Claude 판정 구조라 이번 변경과 겹치지 않음. 변경 없음.
+- 보완: Step 3 대기 문구를 "4e 전에 Step 2.6 상한 안에서 기다림"으로 정정, 결과는 trap 때문에 파일이 아니라 백그라운드 출력에서 읽도록 명시, Codex 프롬프트에 `branch-merge-review`·`evidence-first-review` 호출 금지 추가(첫 실행에서 Codex가 evidence-first-review를 스스로 로드함).
+- 결함 저장소(PHP SQLi·XSS) 실측: codex-delegate 블록 모양 그대로 백그라운드 실행, exit 0, 백그라운드 출력에 High 2건이 심각도·유형·`file:line`·근거·권고 형식으로 나옴, run 디렉터리 삭제 확인, evidence-first-review 미로드 확인.
