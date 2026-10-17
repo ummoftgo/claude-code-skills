@@ -703,6 +703,7 @@ class SkillContractTest(SkillReadingMixin, unittest.TestCase):
         self.assertIn("Never add the Claude reviewers' findings", prompts)
         # A Codex-only finding must not vanish under a Claude lead's judgement.
         self.assertIn("never dropped silently", skill)
+        self.assertIn("the report must say that the review was single-model", skill)
         self.assertIn("- **Source**: Claude + Codex | Claude | Codex", template)
 
     def test_evidence_first_review_defines_modes_and_read_only_contract(self) -> None:

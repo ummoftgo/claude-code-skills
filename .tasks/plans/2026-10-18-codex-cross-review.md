@@ -23,3 +23,7 @@
 4. 검증: 스킬이 지시하는 Codex 명령을 이 브랜치에 실제 실행, 전체 테스트, `git diff --check`, Codex 계획 대비 검토.
 
 ## 진행 기록
+- 1~3단계 완료(`bfe6c04`). 전체 446 테스트 OK, `git diff --check` 통과.
+- 4단계: 템플릿 그대로 조립한 프롬프트(약 2만 자, diff에 마커 문자열이 있어 Step 2 규칙대로 마커 연장)를 `codex -a never -s read-only exec -`에 stdin으로 실제 실행. exit 0, 한국어 보고, `code-quality-review`·`web-security-review` 로드 확인. 발견 0건이라 발견 형식 자체는 미관찰.
+- Codex 계획 대비 검토: 차단 사유 없음. 개선 제안(단일 모델 공개 문구 고정) 반영.
+- 리뷰봇(`~/work/code-review`)은 Codex 발견 + Claude 판정 구조라 이번 변경과 겹치지 않음. 변경 없음.
