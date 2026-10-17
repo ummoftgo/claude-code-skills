@@ -68,3 +68,9 @@ A(설치기: `install.sh`, `uninstall.sh`, `scripts/`, `install.ps1`, `uninstall
 - security-guidance 플러그인 조정: 사용자 판단으로 넘긴다.
 
 ## 진행 기록
+- 1단계: `rules/code-writing.md` 작성(`9757d25`). 이후 "리뷰할 때" 절 추가.
+- 실측(가정 검증): Codex 네이티브 리뷰어는 프로젝트 `AGENTS.md`를 찾아 읽었으나 그 안의 리뷰 지시(첫 줄 표식)는 따르지 않았다. 그래서 `codex-delegate` Mode 1에 머지 판단용 리뷰는 `branch-merge-review`나 Common Instructions를 실은 plain `exec`로 하라는 안내를 넣었다.
+- 3·4단계(B, `20ad2a4`): Common Instructions에 CONTEXT TRACE·JUDGMENT, Step 4 재구성(Codex 병합 → 모든 Critical/High 추적 검증), 리뷰 두 곳의 주석 추가 권고 삭제, 품질 범주 5(과잉 방어·테스트 적합성), plan-and-build TDD 한정, 개발 에이전트 정렬. 계약 테스트 1개 추가.
+- SC-002 실측: 세 사례 저장소(다른 파일의 `(int)` 캐스팅 / 방어 없음 / `trim`뿐인 `sanitize`)에 새 지침으로 Codex 실행. 결과는 각각 Cleared+"주의: 다른 층에서 방어됨"(방어 `routes/report_route.php:3`) / High 유지+경로 / High 유지("trim은 SQL 삽입을 막지 못함"). 기대와 일치.
+- 2단계(A, Herdr 패널 Codex, 워크트리 `wt-rules-installer`, `94c34e0`): rule 종류, `scripts/rule_block.py`, POSIX·PowerShell 설치·제거, 테스트. 메인 검토 중 Windows 실제 실행에서 빈 `AGENTS.md`를 비정상 파일로 판정하는 결함 발견. 원인은 공용 `Get-FileSnapshot`이 빈 byte[]를 `$null`로 풀던 PowerShell 동작이라 그 함수에서 수정. 이후 Windows 통합 테스트 통과, 전체 455 테스트 OK.
+- 5단계: 리뷰봇 변경안 `.tasks/plans/2026-10-18-review-bot-context-trace-proposal.md`. 봇 코드는 수정하지 않음.
