@@ -109,7 +109,7 @@ Trace each requirement or claim to current evidence, test likely failure boundar
 
 ### `recheck`
 
-Create a one-to-one ledger of prior findings. Reproduce the original condition against current artifacts, classify it, and cite what changed. After all prior findings are accounted for, run a bounded pass for new regressions and list those findings separately.
+Create a one-to-one ledger of prior findings. Reproduce the original condition against current artifacts, classify it, and cite what changed. A prior Critical/High that you now find defended on every path, after tracing callers back to the entry point and the value forward to its sink, is `resolved` with the evidence `다른 층에서 방어됨 — file:line`, even though the flagged line is unchanged; a defence named in a comment does not count. After all prior findings are accounted for, run a bounded pass for new regressions and list those findings separately.
 
 ### `final-approval`
 

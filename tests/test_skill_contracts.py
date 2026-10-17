@@ -729,6 +729,8 @@ class SkillContractTest(SkillReadingMixin, unittest.TestCase):
         self.assertIn("Category 5 — Over-Defensive Code and Test Fit", quality)
         # Defended items are a caution, not a finding.
         self.assertIn("Cleared items are not findings and are not counted as findings", prompts)
+        evidence = " ".join(self.read("skills/evidence-first-review/SKILL.md").split())
+        self.assertIn("is `resolved` with the evidence `다른 층에서 방어됨 — file:line`", evidence)
 
     def test_writing_guidance_limits_tdd_and_defensive_code(self) -> None:
         plan = " ".join(self.read("skills/plan-and-build/SKILL.md").split())
