@@ -102,7 +102,11 @@ When the user asks for a security review, scan, or audit, follow **Workflow for 
 1. **Identify scope**: What files/features are in scope? Ask if unclear. When the target is uncommitted work (staged, unstaged, untracked), collect and gate the paths with the `code-quality-review` skill's [references/uncommitted-routing.md](../code-quality-review/references/uncommitted-routing.md) first.
 2. **Read references**: Load **every reference the selection table above names** — one language-axis file per language in scope plus one file per surface. Two files is the common case, not the rule; a Node service that also ships a CLI and a UI loads four. Record which files you loaded and any language reported as unreviewed — the report names them.
 3. **Scan codebase**: Check each category of the loaded references against the code. Search for the patterns listed in the reference files — sinks, dangerous functions, and missing protections — using the command from Platform command selection.
-4. **Classify findings**: Assign severity (Critical / High / Medium / Low) per the reference file guidance.
+4. **Trace context, then classify**: before rating anything Critical or High, follow the value back through every caller to its entry point and forward to its sink, reading the repository rather than only the flagged file. Judge each defence by its implementation and whether it fits the sink (an HTML escape does not stop SQL injection). Then:
+   - undefended on a reachable path → keep the severity and cite the path as `file:line` hops;
+   - defended on every path → Low/Informational marked `주의: 다른 층에서 방어됨`, citing the defence `file:line`;
+   - undecidable (exported API, callers outside the repository, dynamic dispatch) → keep the severity, mark `⚠ 방어 확인 불가`, and say what would settle it.
+   List the cleared candidates in the report's Cleared section. Then assign severity (Critical / High / Medium / Low) per the reference file guidance.
 5. **Produce the report**: Follow the Report Format below. Write in the same language the user used when requesting the review. **When running as a subagent** (e.g., dispatched by branch-merge-review), the invoking prompt's `OUTPUT LANGUAGE` directive takes precedence over the prompt's own language — an English dispatch prompt does NOT mean the report should be in English. Keep code identifiers, file paths, and evidence snippets as-is; write all prose in the designated language.
 6. **Deliver — inline by default**: Emit the report in your response. Do **not** create `.tasks/reports/` and do not write a report file: a review request must not change the working tree or add commit candidates. Then offer to fix.
 
@@ -129,6 +133,7 @@ Write the report in Markdown with this structure:
 ### [C-1] Finding Title
 - **Location**: `path/to/file.php:42`
 - **Evidence**: `[code snippet]`
+- **Context trace**: [entry point → … → sink as `file:line` hops, or `⚠ 방어 확인 불가`]
 - **Impact**: [one sentence: what an attacker can do]
 - **Fix**: [specific code change]
 
@@ -140,6 +145,9 @@ Write the report in Markdown with this structure:
 
 ## Low / Informational
 ### [L-1] ...
+
+## Cleared
+[Critical/High candidates traced and found defended on every path: the candidate and the defence `file:line`]
 
 ## Passed Checks
 [Brief list of security controls that are correctly implemented]
@@ -157,9 +165,9 @@ If a comment at the flagged line or on the enclosing function explicitly acknowl
 - Remote code execution, unsafe deserialization, exploitable file upload
 - Data loss/corruption or irreversible destructive operations (including race/idempotency defects with irreversible effects)
 
-For these, note the comment's existence in the finding ("주석으로 의도가 명시되어 있으나 위험도가 높아 심각도 유지") but keep the original severity.
+For these, note the comment's existence in the finding ("주석으로 의도가 명시되어 있으나 위험도가 높아 심각도 유지") but keep the original severity. A comment is the author's claim; only a defence verified in code on every path (Workflow step 4) can downgrade these classes.
 
-**Comment relevance**: the comment must address the specific flagged risk or behavior. A generic or unrelated nearby comment does not qualify. If behavior looks intentional but has no comment, report at normal severity and recommend adding an explanatory comment.
+**Comment relevance**: the comment must address the specific flagged risk or behavior. A generic or unrelated nearby comment does not qualify. If behavior looks intentional but has no comment, report at normal severity; recommend a code change, not a comment.
 
 ## Fixes
 

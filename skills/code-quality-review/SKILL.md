@@ -245,7 +245,7 @@ including the `-o /dev/null` form that keeps `go build` from leaving a binary be
 Installation for every stack lives in its reference file's setup section, gated by the
 installation authority and read-only contract above.
 
-## Step 3: Manual Review — Four Categories
+## Step 3: Manual Review — Five Categories
 
 After collecting tool output, perform pattern-based review to catch what tools miss.
 
@@ -276,13 +276,24 @@ Tools don't catch evaluation order. Flag manually:
 
 See reference files for language-specific examples.
 
+### Category 5 — Over-Defensive Code and Test Fit
+Validation belongs at trust boundaries (request, CLI, config, external API, file, DB read); data that crossed one is trusted inside. Before flagging, trace the value back to its entry point. Flag:
+- Re-validation of data a caller, type, or boundary already guarantees (repeated null/type checks, nested try/catch around code that cannot throw that way)
+- Guards that hide a state which should never exist, instead of fixing what produced it
+- Swallowed errors: empty catch, silent default, log-and-continue where the caller needed the failure
+- Tests that pin implementation (internal call order, private helpers, exact wording) or only exercise mocks
+Never flag a security control (escaping, parameter binding, authn/authz, secret handling) as redundant here; that call belongs to `web-security-review`.
+
+### Before Rating High
+A quality finding is High only on a realistic failure path in normal use. Trace callers and inputs first: "what if this is null" is a finding only if a caller can pass null, and a pattern the codebase uses consistently is not a finding for that reason alone. A different-but-working approach is a preference, not a defect. Do not inflate nits to fill the report.
+
 ### Documented Intent — Downgrade Rule
 
 Before finalizing any finding, check the flagged line and its enclosing function for a comment that explicitly acknowledges the behavior as intentional (states the why — e.g., `// 의도적 중복: A/B 테스트 종료 후 제거 예정`, `// full fetch 필요: 후속 배치에서 전체 row 사용`). If such a comment exists, **downgrade the finding to Informational**, keep it in the report, and cite the comment (mark it `문서화된 의도`).
 
 **Exception — never downgrade** findings that imply data corruption or silent data loss, race/idempotency defects with irreversible effects, or any security risk (injection, XSS, CSRF, SSRF, path traversal, secrets exposure, auth bypass, RCE/unsafe deserialization), regardless of comments. Note the comment's existence but keep the original severity.
 
-The comment must address the specific flagged behavior; a generic nearby comment does not qualify. Intentional-looking behavior without a comment is reported at normal severity with a recommendation to add an explanatory comment.
+The comment must address the specific flagged behavior; a generic nearby comment does not qualify. Intentional-looking behavior without a comment is reported at normal severity. Do not recommend adding a comment to explain it; recommend a code change, or drop the finding if the code is fine.
 
 ## Step 4: Produce Report
 
@@ -317,6 +328,7 @@ Merge tool output and manual findings into this structure.
 ## Style & Convention Issues    [S-N]
 ## Comment Quality Issues       [C-N]
 ## Duplication Issues           [D-N]
+## Over-Defensive / Test Fit    [OD-N]
 ## Performance Issues           [P-N]
 ## CSS / SCSS Issues            [CSS-N]
   - Location, Issue (specificity / magic number / nesting / dead code), Impact, Suggestion

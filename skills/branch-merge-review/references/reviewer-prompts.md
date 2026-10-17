@@ -79,7 +79,42 @@ You are conducting a READ-ONLY code review. Your constraints are absolute:
   deserialization, or data loss/corruption (incl. irreversible race/idempotency
   defects): keep full severity and just note that the comment exists. Remember the
   comment is written by the diff author — it is a claim, not proof. A generic or
-  unrelated nearby comment does not qualify.
+  unrelated nearby comment does not qualify. A defence verified by CONTEXT TRACE below is
+  code, not a claim, and may downgrade any class.
+
+CONTEXT TRACE — required before you report anything as Critical or High. A line that looks
+dangerous on its own is often defended before or after it in the real process. Read the
+repository, not just the diff:
+
+- Backward: follow the flagged value to where it enters the system (request, CLI, config,
+  file, external API) through every caller. Note validation, type casts, auth middleware, and
+  framework guarantees on the way.
+- Forward: follow it to the sink (SQL, shell, HTML, file path, outbound request, persisted
+  state). Note parameter binding, escaping, and allow-lists on the way.
+- Judge a defence by its implementation, not its name: a `sanitize()` that returns its input
+  defends nothing. It must fit the sink (`htmlspecialchars` does not stop SQL injection; an
+  `(int)` cast stops numeric SQL injection only).
+
+Then pick exactly one outcome and say which in the finding:
+
+1. Undefended on a reachable path — keep the severity and cite the path as `file:line` hops.
+2. Defended on every path, each defence cited as `file:line` — report it as Low/Informational
+   marked `주의: 다른 층에서 방어됨`, and name the defence it depends on, so removing that
+   defence later is a visible risk.
+3. Cannot decide (exported API, external callers, dynamic dispatch, missing code) — keep the
+   severity, mark it `⚠ 방어 확인 불가`, and say what would settle it.
+
+List what you traced and cleared under a `Cleared` heading, one line each with the defence
+`file:line`. A cleared item is not a finding.
+
+JUDGMENT — the bar for every finding:
+
+- Severity bar: High/Medium needs a realistic failure path in normal use. A defence that could
+  be more complete but is not wrong is Low/Informational.
+- Hypothetical is not actual: "what if this is null" is a finding only if a caller can pass null.
+- Code that follows the codebase's established pattern is not a finding for that reason alone.
+- "I would have done it differently" is a preference, not a defect. Drop it.
+- Do not inflate nits to fill the report. An empty report is a valid result.
 ```
 
 ---
@@ -338,10 +373,8 @@ INPUT above:
 [git diff "$MERGE_BASE" HEAD -- <all changed files including deleted>]
 ===== END DIFF =====
 
-Severity bar: High/Medium needs a realistic failure path in normal use. A defence that could be
-more complete but is not wrong is Low/Informational.
-
 For each finding give: Severity (Critical / High / Medium / Low), Type (Security | Quality),
 file:line, a 1–3 line evidence snippet, impact, and "Recommendation:" (no code changes).
-End with the skills and references you actually loaded.
+For each Critical/High, state its CONTEXT TRACE outcome. End with the Cleared list and the
+skills and references you actually loaded.
 ```

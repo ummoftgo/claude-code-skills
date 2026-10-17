@@ -362,7 +362,7 @@ In team mode, wait until all spawned and queued reviewers have returned their co
 - If an agent does not respond within a reasonable time, note it as `⚠ Reviewer did not complete` in the final report and proceed with partial findings.
 - If an agent returns an error, retry once. If it fails again, mark that reviewer as unavailable.
 - Never block the entire report waiting for one reviewer indefinitely.
-- Before Step 4e, wait for the Codex reviewer within Step 2.6's limits, without a retry. Past those limits, report without it.
+- Before Step 4, wait for the Codex reviewer within Step 2.6's limits, without a retry. Past those limits, report without it.
 
 **Completion gate — a language whose review did not happen cannot be approved.** Proceeding with
 partial findings is right for *reporting*; it is wrong for the *verdict*. For every language with
@@ -404,12 +404,26 @@ single missing report is easy to overlook.
 
 After all required passes finish, consolidate findings once. In direct mode, assess the evidence already gathered; do not rerun a completed check without new evidence or an unresolved concern. In team mode, inspect the returned evidence and resolve disagreements. In either mode, investigate only the implicated paths for unresolved Critical/High claims.
 
-**4a. Normalize quality finding severity** — a `code-quality-review` report groups findings by category. Team-mode reviewers add High/Medium/Low per their prompt; direct-mode passes do not. Before cross-validating, check or assign each quality finding's severity:
+**4a. Normalize and merge** — a `code-quality-review` report groups findings by category. Team-mode reviewers add High/Medium/Low per their prompt; direct-mode passes do not. Check or assign each quality finding's severity:
 - **High**: N+1 queries, broken auth logic, data corruption risk
 - **Medium**: Eval-order issues, non-trivial duplication, performance anti-patterns in hot paths
 - **Low**: Style inconsistencies, dead code, redundant comments
 
-**4b. Cross-validate Critical and High findings** — run grep against the implicated file(s) only (not the whole project). For each finding, select the matching pattern family.
+When Step 2.6 completed, merge the Codex findings in now, so each defect is traced once:
+- Two findings match when they name the same defect in the same file, even at different lines or in different words. Merge them into one finding with `Source: Claude + Codex`.
+- Every other finding carries `Source: Claude` or `Source: Codex`.
+- Where one model flags something and the other explicitly says the opposite, decide from the code and record the disagreement.
+
+**4b. Verify the context trace of every Critical and High finding** — each reviewer must state a CONTEXT TRACE outcome (`references/reviewer-prompts.md`, Common Instructions). Agreement between models does not replace it: both reviewers read the same diff, so both can miss the same defence upstream. For each Critical/High:
+
+1. Read the reviewer's trace. If it is missing, or cites a defence by name only, trace it yourself: callers back to the entry point and the value forward to its sink, reading only the implicated paths.
+2. Check the defence's implementation and that it fits the sink; a no-op `sanitize()` or an HTML escape in front of SQL defends nothing. Callers you cannot see (exported API, external clients) make the outcome undecidable, not defended.
+3. Apply the outcome: undefended on a reachable path keeps its severity; defended on every path becomes Low/Informational marked `주의: 다른 층에서 방어됨` with the defence `file:line`; undecidable keeps its severity with `⚠ 방어 확인 불가`.
+4. Record each item you cleared, with its defence `file:line`, for the report's Cleared section.
+
+A Codex-only finding gets the same trace as a Claude one. You are a Claude lead judging another model's work, so never drop a Codex-only finding silently: its trace outcome, or a one-line reason, goes in the report.
+
+To locate the suspicious pattern in the implicated file(s), grep them only (not the whole project), selecting the pattern family by the implicated file's language. A grep hit shows the pattern exists, not that it is reachable or undefended.
 
 **Select the family by the implicated file's language, not by the available examples being the only ones.**
 The patterns shipped here cover PHP, Python, Go, Rust, and the browser surface. When a finding lands in a language
@@ -422,22 +436,16 @@ installs silently behind.
 For concrete POSIX and PowerShell examples, read [references/cross-validation-patterns.md](references/cross-validation-patterns.md) only when a relevant Critical/High finding remains to validate.
 
 **4c. Mark each Critical/High finding**:
-- `✓ Pattern corroborated` — grep confirmed the suspicious pattern in the file
-- `✓ Manually confirmed` — reviewed in context; vulnerability/bug confirmed
-- `⚠ Needs runtime/architectural verification` — grep inconclusive or pattern is absence-based (e.g., missing CSRF check); cannot confirm via static analysis alone
+- `✓ Manually confirmed` — traced in context; undefended on a reachable path
+- `✓ 다른 층에서 방어됨` — defended on every path; moved to Low/Informational with the defence cited
+- `⚠ Needs runtime/architectural verification` — trace inconclusive or pattern is absence-based (e.g., missing CSRF check); cannot confirm via static analysis alone
+- `✓ Pattern corroborated` — grep found the pattern; use only together with one of the above, never as a verdict on its own
 
-**4d. Documented-intent re-check** — for each Critical/High finding, read the flagged line and its enclosing function in the actual file:
+**4d. Documented-intent re-check** — for each remaining Critical/High finding, read the flagged line and its enclosing function in the actual file:
 - If a comment explicitly acknowledges the flagged behavior as intentional (states the why) and the finding is **not** in a non-downgradable class (injection, XSS, CSRF, SSRF, path traversal, secrets/internal-information exposure, auth bypass/privilege escalation, RCE/unsafe deserialization, data loss/corruption incl. irreversible race/idempotency defects), **downgrade it to Low/Informational** and record the reason as `문서화된 의도 — "[comment excerpt]"`. It moves to the Low/Informational section — do not drop it entirely.
-- If the finding **is** in a non-downgradable class, keep the original severity and add a note that an intent comment exists.
+- If the finding **is** in a non-downgradable class, a comment alone does not downgrade it: keep the original severity and note that an intent comment exists. Only a defence verified in 4b can downgrade these classes.
 - Also verify the reverse: if a reviewer downgraded a non-downgradable-class finding because of a comment, restore its original severity.
 - A generic or unrelated nearby comment does not qualify — the comment must address the specific flagged risk.
-
-**4e. Merge the Codex findings** — when Step 2.6 completed, merge its findings with the Claude findings before writing the report:
-
-- Two findings match when they name the same defect in the same file, even at different lines or in different words. Merge them into one finding with `Source: Claude + Codex`; this agreement is the strongest signal in the report.
-- Every other finding carries `Source: Claude` or `Source: Codex`. A Codex-only Critical/High goes through 4b–4d exactly like a Claude one.
-- You are a Claude lead judging another model's work, so a Codex-only finding is never dropped silently. Downgrading or dismissing one requires a one-line reason in the report.
-- Where one model flags something and the other explicitly says the opposite, decide from the code and record the disagreement.
 
 ---
 

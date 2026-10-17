@@ -26,6 +26,12 @@ codex -a never -s read-only exec review --base main < /dev/null       # current 
 codex -a never -s read-only exec review --uncommitted < /dev/null     # staged + unstaged + untracked
 ```
 
+The native reviewer applies its own priority bar (P0–P3) and does not take a custom brief
+with a range flag; it reads `AGENTS.md` but was not observed following review instructions
+from it. For a review that decides a merge, prefer `branch-merge-review`, whose reviewers trace
+defences before and after each flagged line, or a plain read-only `exec` carrying its Common
+Instructions (below).
+
 Pick exactly one of `--commit` / `--base` / `--uncommitted`. Also available:
 `--title <TITLE>`, `-m <MODEL>`, and `--output-schema <FILE>` / `--json` for
 machine-readable output. Current codex-cli also exposes the same reviewer as a

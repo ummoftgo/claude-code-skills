@@ -21,7 +21,7 @@ Structure for the team leader's consolidated output (SKILL.md Step 5). The same 
   ↳ `Ready to merge` requires all applicable quality passes and every security reference selected
     for the actual changes to be reviewed (SKILL.md Step 3, including the browser-assets-only exception).
 **Blocking items**: [CH-1(feature/label), H-2(feature/label), ...] | None
-**Findings**: Critical: N · High: N · Medium: N · Low: N  |  Validated: N · Needs verification: N
+**Findings**: Critical: N · High: N · Medium: N · Low: N  |  Validated: N · Needs verification: N · Cleared: N
 
 ## Review Coverage
 - Files reviewed: [list or count by category]
@@ -39,7 +39,8 @@ Structure for the team leader's consolidated output (SKILL.md Step 5). The same 
 - **Evidence**: `[1–3 lines from diff; mask any secrets]`
 - **Impact**: [one sentence: what can go wrong]
 - **Recommendation**: [specific direction — no code, no modifications]
-- **Validation**: ✓ Pattern corroborated | ✓ Manually confirmed | ⚠ Needs runtime/architectural verification
+- **Context trace**: [entry point → … → sink as `file:line` hops; or `⚠ 방어 확인 불가` and what would settle it]
+- **Validation**: ✓ Manually confirmed | ⚠ Needs runtime/architectural verification (± ✓ Pattern corroborated)
 
 ---
 
@@ -50,6 +51,12 @@ Structure for the team leader's consolidated output (SKILL.md Step 5). The same 
 
 ## Low / Informational
 ### [L-1(feature/label)] ...
+(Omit this section if empty)
+
+---
+
+## Cleared
+[Critical/High candidates traced and found defended on every path, one line each: the candidate and the defence `file:line`. Those reported at Low as `주의: 다른 층에서 방어됨` are listed here too.]
 (Omit this section if empty)
 
 ---

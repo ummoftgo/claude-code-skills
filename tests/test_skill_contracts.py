@@ -702,9 +702,31 @@ class SkillContractTest(SkillReadingMixin, unittest.TestCase):
         self.assertIn("Never put Claude's findings in the prompt", skill)
         self.assertIn("Never add the Claude reviewers' findings", prompts)
         # A Codex-only finding must not vanish under a Claude lead's judgement.
-        self.assertIn("never dropped silently", skill)
+        self.assertIn("never drop a Codex-only finding silently", skill)
         self.assertIn("the report must say that the review was single-model", skill)
         self.assertIn("- **Source**: Claude + Codex | Claude | Codex", template)
+
+    def test_reviews_trace_defences_before_rating_high(self) -> None:
+        prompts = " ".join(
+            self.read("skills/branch-merge-review/references/reviewer-prompts.md").split()
+        )
+        branch = " ".join(self.read("skills/branch-merge-review/SKILL.md").split())
+        security = " ".join(self.read("skills/web-security-review/SKILL.md").split())
+        quality = " ".join(self.read("skills/code-quality-review/SKILL.md").split())
+        self.assertIn("CONTEXT TRACE — required before you report anything as Critical or High", prompts)
+        for outcome in ("주의: 다른 층에서 방어됨", "⚠ 방어 확인 불가"):
+            for document in (prompts, branch, security):
+                self.assertIn(outcome, document)
+        # Model agreement must not stand in for the trace: both read the same diff.
+        self.assertIn("Agreement between models does not replace it", branch)
+        # A comment is a claim; only verified code may downgrade a protected class.
+        self.assertIn("Only a defence verified in 4b can downgrade these classes", branch)
+        self.assertIn("only a defence verified in code on every path", security)
+        # Reviews must stop asking authors to add explanatory comments.
+        for document in (security, quality):
+            self.assertNotIn("recommend adding an explanatory comment", document)
+            self.assertNotIn("recommendation to add an explanatory comment", document)
+        self.assertIn("Category 5 — Over-Defensive Code and Test Fit", quality)
 
     def test_evidence_first_review_defines_modes_and_read_only_contract(self) -> None:
         skill = self.read("skills/evidence-first-review/SKILL.md")

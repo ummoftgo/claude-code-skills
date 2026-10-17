@@ -146,7 +146,7 @@ Choose verification per changed behavior, not once for every file or for the ent
 |---|---|
 | Documentation, wording, formatting, or a reversible low-impact edit | Use relevant existing checks or direct inspection; no new test or TDD cycle by default. A changed executable/configuration contract still needs its relevant checks. |
 | Straightforward wiring or ordinary new behavior | Implement, then use existing tests or a focused runtime/integration check. Add coverage only for a meaningful gap. |
-| Calculations, parsing, authorization, state transitions, or other consequential branching | Add focused behavioral coverage where missing. Prefer TDD when an inexpensive failing test clarifies the contract or guards a likely failure. |
+| Calculations, parsing, authorization, state transitions, or other consequential branching | Add focused behavioral coverage where missing, written alongside the implementation. Do not stage a failing run first unless the user asked for TDD. |
 | Reproduced bug | Reuse the failing test or reproduction. Add a regression test when it provides lasting protection at reasonable cost. |
 | Explicit test-first requirement | Apply TDD within the requested scope. |
 
