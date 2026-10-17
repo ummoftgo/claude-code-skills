@@ -405,6 +405,7 @@ single missing report is easy to overlook.
 After all required passes finish, consolidate findings once. In direct mode, assess the evidence already gathered; do not rerun a completed check without new evidence or an unresolved concern. In team mode, inspect the returned evidence and resolve disagreements. In either mode, investigate only the implicated paths for unresolved Critical/High claims.
 
 **4a. Normalize and merge** — a `code-quality-review` report groups findings by category. Team-mode reviewers add High/Medium/Low per their prompt; direct-mode passes do not. Check or assign each quality finding's severity:
+These are examples, not fixed verdicts: the JUDGMENT severity bar in the Common Instructions decides.
 - **High**: N+1 queries, broken auth logic, data corruption risk
 - **Medium**: Eval-order issues, non-trivial duplication, performance anti-patterns in hot paths
 - **Low**: Style inconsistencies, dead code, redundant comments
@@ -418,8 +419,7 @@ When Step 2.6 completed, merge the Codex findings in now, so each defect is trac
 
 1. Read the reviewer's trace. If it is missing, or cites a defence by name only, trace it yourself: callers back to the entry point and the value forward to its sink, reading only the implicated paths.
 2. Check the defence's implementation and that it fits the sink; a no-op `sanitize()` or an HTML escape in front of SQL defends nothing. Callers you cannot see (exported API, external clients) make the outcome undecidable, not defended.
-3. Apply the outcome: undefended on a reachable path keeps its severity; defended on every path becomes Low/Informational marked `주의: 다른 층에서 방어됨` with the defence `file:line`; undecidable keeps its severity with `⚠ 방어 확인 불가`.
-4. Record each item you cleared, with its defence `file:line`, for the report's Cleared section.
+3. Apply the outcome: undefended on a reachable path keeps its severity; defended on every path leaves the findings and goes to the report's Cleared section marked `주의: 다른 층에서 방어됨` with the defence `file:line`; undecidable keeps its severity with `⚠ 방어 확인 불가`.
 
 A Codex-only finding gets the same trace as a Claude one. You are a Claude lead judging another model's work, so never drop a Codex-only finding silently: its trace outcome, or a one-line reason, goes in the report.
 
@@ -437,7 +437,7 @@ For concrete POSIX and PowerShell examples, read [references/cross-validation-pa
 
 **4c. Mark each Critical/High finding**:
 - `✓ Manually confirmed` — traced in context; undefended on a reachable path
-- `✓ 다른 층에서 방어됨` — defended on every path; moved to Low/Informational with the defence cited
+- `✓ 다른 층에서 방어됨` — defended on every path; moved to Cleared with the defence cited
 - `⚠ Needs runtime/architectural verification` — trace inconclusive or pattern is absence-based (e.g., missing CSRF check); cannot confirm via static analysis alone
 - `✓ Pattern corroborated` — grep found the pattern; use only together with one of the above, never as a verdict on its own
 

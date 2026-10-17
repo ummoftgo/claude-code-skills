@@ -727,6 +727,20 @@ class SkillContractTest(SkillReadingMixin, unittest.TestCase):
             self.assertNotIn("recommend adding an explanatory comment", document)
             self.assertNotIn("recommendation to add an explanatory comment", document)
         self.assertIn("Category 5 — Over-Defensive Code and Test Fit", quality)
+        # Defended items are a caution, not a finding.
+        self.assertIn("Cleared items are not findings and are not counted as findings", prompts)
+
+    def test_writing_guidance_limits_tdd_and_defensive_code(self) -> None:
+        plan = " ".join(self.read("skills/plan-and-build/SKILL.md").split())
+        self.assertIn("Do not stage a failing run first unless the user asked for TDD", plan)
+        self.assertNotIn("Prefer TDD when an inexpensive failing test", plan)
+        for agent in ("php-backend-developer", "frontend-developer"):
+            for source in (f"agents/{agent}/claude.md", f"agents/{agent}/codex.toml"):
+                with self.subTest(source=source):
+                    self.assertIn(
+                        "do not re-check values a caller or type already guarantees",
+                        " ".join(self.read(source).split()),
+                    )
 
     def test_evidence_first_review_defines_modes_and_read_only_contract(self) -> None:
         skill = self.read("skills/evidence-first-review/SKILL.md")

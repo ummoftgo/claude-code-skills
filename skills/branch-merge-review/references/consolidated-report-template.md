@@ -56,7 +56,7 @@ Structure for the team leader's consolidated output (SKILL.md Step 5). The same 
 ---
 
 ## Cleared
-[Critical/High candidates traced and found defended on every path, one line each: the candidate and the defence `file:line`. Those reported at Low as `주의: 다른 층에서 방어됨` are listed here too.]
+[Critical/High candidates traced and found defended on every path, one line each: `주의: 다른 층에서 방어됨`, the candidate, and the defence `file:line` it depends on. Not counted as findings.]
 (Omit this section if empty)
 
 ---

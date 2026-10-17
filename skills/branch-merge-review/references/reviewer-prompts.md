@@ -98,14 +98,14 @@ repository, not just the diff:
 Then pick exactly one outcome and say which in the finding:
 
 1. Undefended on a reachable path — keep the severity and cite the path as `file:line` hops.
-2. Defended on every path, each defence cited as `file:line` — report it as Low/Informational
-   marked `주의: 다른 층에서 방어됨`, and name the defence it depends on, so removing that
+2. Defended on every path, each defence cited as `file:line` — not a finding. List it under
+   Cleared marked `주의: 다른 층에서 방어됨`, naming the defence it depends on, so removing that
    defence later is a visible risk.
 3. Cannot decide (exported API, external callers, dynamic dispatch, missing code) — keep the
    severity, mark it `⚠ 방어 확인 불가`, and say what would settle it.
 
 List what you traced and cleared under a `Cleared` heading, one line each with the defence
-`file:line`. A cleared item is not a finding.
+`file:line`. Cleared items are not findings and are not counted as findings.
 
 JUDGMENT — the bar for every finding:
 

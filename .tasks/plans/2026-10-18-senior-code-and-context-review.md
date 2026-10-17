@@ -26,7 +26,7 @@ FR-001(rules/code-writing): 저장소에 `rules/code-writing.md`(한국어, 짧�
 FR-002(installer/rule-kind): 설치기가 전역 범위에서 FR-001을 Claude `~/.claude/rules/code-writing.md`(파일, 매니페스트 소유 추적)와 Codex `~/.codex/AGENTS.md` 마커 블록(`<!-- claude-code-skills:code-writing -->` … `<!-- /claude-code-skills:code-writing -->`)으로 배포하고, 제거기가 되돌린다. POSIX·PowerShell 모두. 프로젝트 범위는 설치하지 않고 안내한다.
 FR-003(skills/writing-align): `plan-and-build` TDD 문구 한정, 개발 에이전트 2종(Claude·Codex)에 내부 데이터 재검증·나레이션 주석 금지 한 줄.
 FR-004(review/no-comment-advice): 두 리뷰 스킬에서 "설명 주석 추가 권고"를 삭제한다.
-FR-005(review/context-trace): Critical/High 후보마다 진입점 역추적과 싱크 추적을 하고 셋으로 판정한다. 방어 없음→유지, 모든 경로에서 방어 확인(`file:line`)→Low/Info "주의", 판정 불가→유지+⚠. 주석은 심각도를 못 내리지만 확인된 방어 코드는 비하향 분류도 내릴 수 있다. 정리한 항목은 Cleared로 남긴다.
+FR-005(review/context-trace): Critical/High 후보마다 진입점 역추적과 싱크 추적을 하고 셋으로 판정한다. 방어 없음→유지, 모든 경로에서 방어 확인(`file:line`)→지적에서 빼고 Cleared에 "주의"로 남김, 판정 불가→유지+⚠. 비하향 분류(보안 등)는 주석만으로 내릴 수 없고 확인된 방어 코드로만 내린다. 비보호 분류의 문서화된 의도 하향은 기존대로 둔다. 정리한 항목은 Cleared로 남긴다.
 FR-006(review/judgment-filters): 가정 대 실제, 코드베이스와 일관된 패턴, 취향은 결함 아님, 지적 부풀리기 금지를 Common Instructions와 리드 판정에 넣는다. Severity bar를 Common Instructions로 옮긴다.
 FR-007(review/quality-lens): `code-quality-review`가 내부 중복 방어, 삼킨 에러, 구현에 고정된 테스트를 품질 지적으로 잡는다.
 FR-008(review/codex-redesign): Codex 교차 검토에서 합의도 앞뒤 추적을 건너뛰지 않고, Codex 단독 지적은 추적 결과로 판정한다.
@@ -74,3 +74,4 @@ A(설치기: `install.sh`, `uninstall.sh`, `scripts/`, `install.ps1`, `uninstall
 - SC-002 실측: 세 사례 저장소(다른 파일의 `(int)` 캐스팅 / 방어 없음 / `trim`뿐인 `sanitize`)에 새 지침으로 Codex 실행. 결과는 각각 Cleared+"주의: 다른 층에서 방어됨"(방어 `routes/report_route.php:3`) / High 유지+경로 / High 유지("trim은 SQL 삽입을 막지 못함"). 기대와 일치.
 - 2단계(A, Herdr 패널 Codex, 워크트리 `wt-rules-installer`, `94c34e0`): rule 종류, `scripts/rule_block.py`, POSIX·PowerShell 설치·제거, 테스트. 메인 검토 중 Windows 실제 실행에서 빈 `AGENTS.md`를 비정상 파일로 판정하는 결함 발견. 원인은 공용 `Get-FileSnapshot`이 빈 byte[]를 `$null`로 풀던 PowerShell 동작이라 그 함수에서 수정. 이후 Windows 통합 테스트 통과, 전체 455 테스트 OK.
 - 5단계: 리뷰봇 변경안 `.tasks/plans/2026-10-18-review-bot-context-trace-proposal.md`. 봇 코드는 수정하지 않음.
+- Codex 계획 대비 검토: 차단 사유 없음. 개선 4건 반영(방어 확인 항목은 지적에서 빼고 Cleared에 "주의"로 통일, 4a 심각도 예시는 JUDGMENT가 우선, FR-005 문구를 보호 분류 한정으로 정정, FR-003 계약 테스트 추가). 전체 테스트 OK.
