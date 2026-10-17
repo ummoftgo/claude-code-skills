@@ -80,7 +80,7 @@ Windows 프로젝트 범위는 스킬과 에이전트만 설치합니다. Window
 | `web-security-review` | ✓ | ✓ | 언어 축(PHP·Node·Python·Go·Rust) × 표면 축(HTTP 서버·브라우저·네이티브) 보안 검토 |
 | `web-parallel-dispatch` | ✓ | ✓ | 기존 승인을 재사용하는 병렬 구현 분할 |
 | `code-quality-review` | ✓ | ✓ | 언어별 코드 품질·성능 검토 (PHP·Node/TS·Python·Go·Rust·프론트엔드·CSS) |
-| `branch-merge-review` | ✓ | ✓ | 머지 전 다중 리뷰 |
+| `branch-merge-review` | ✓ | ✓ | 머지 전 다중 리뷰, Claude가 리드일 때 Codex 교차 검토 |
 | `web-browser-preview` | ✓ | ✓ | Windows/WSL Chrome CDP 미리보기 |
 | `report-output` | ✓ | ✓ | 리포트 출력 시 md/HTML 포맷 선택과 자체 완결형 HTML 리포트 생성 |
 | `codex-delegate` | ✓ | — | Claude에서 Codex로 위임 |

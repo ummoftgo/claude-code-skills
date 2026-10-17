@@ -11,6 +11,7 @@ Structure for the team leader's consolidated output (SKILL.md Step 5). The same 
 **Changed files reviewed**: N (Backend: X | Frontend: Y | Style: Z | Config: W | Deleted: D)
 **Execution**: Direct review | Team review
 **Reviewers**: [lead or actual child names, with quality/security responsibilities; do not invent independent reviewers]
+**Cross-model**: Codex completed | Codex skipped — [reason] | Codex incomplete — single-model review
 
 ## Executive Summary
 [2–3 sentences: overall quality and security posture, most critical findings]
@@ -34,6 +35,7 @@ Structure for the team leader's consolidated output (SKILL.md Step 5). The same 
 ### [CH-1(feature/label)] Finding Title
 - **Type**: Security | Quality — Backend | Frontend
 - **Location**: `path/to/file.php:42`
+- **Source**: Claude + Codex | Claude | Codex
 - **Evidence**: `[1–3 lines from diff; mask any secrets]`
 - **Impact**: [one sentence: what can go wrong]
 - **Recommendation**: [specific direction — no code, no modifications]
@@ -57,13 +59,18 @@ Structure for the team leader's consolidated output (SKILL.md Step 5). The same 
 
 ---
 
+## Cross-Model Agreement
+[Omit when Codex did not complete. Findings both models raised; findings only one raised, with any downgrade or dismissal reason; explicit disagreements and how they were decided]
+
+---
+
 ## Open Questions / Follow-up
 [For each ⚠ Needs verification finding: one line describing what to verify and how]
 
 ---
 
 ## Appendix: Raw Reviewer Reports
-Omit this appendix in direct mode; no child reports were produced.
+In direct mode, include only the Codex report; no child reports were produced. Omit the appendix when neither exists.
 > The consolidated sections above are authoritative. These are the unedited reviewer outputs for reference.
 
 ### Backend Quality Reviewer
@@ -74,4 +81,7 @@ Omit this appendix in direct mode; no child reports were produced.
 
 ### Frontend Quality Reviewer
 [Frontend quality report — or "Skipped: no frontend files changed"]
+
+### Codex Cross-Model Reviewer
+[Codex report — or the skip/incomplete reason]
 ```

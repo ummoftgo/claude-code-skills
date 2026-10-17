@@ -324,6 +324,32 @@ Before dispatching, decide which agents to spawn:
 | Frontend + Style files == 0 | Skip the frontend quality reviewer; note "No frontend changes" in report |
 | All changed files == 0 | Abort: "No changed files to review" |
 | Security reviewer | Always perform this pass — the lead in direct mode, a child in team mode; reviews all changed files including deleted |
+| Codex cross-model reviewer | Step 2.6 — run when its conditions hold, in either execution mode |
+
+---
+
+## Step 2.6: Codex Cross-Model Reviewer
+
+Reviewers of the same model share blind spots, so a second model family reviewing the same diff against the same criteria is the strongest independent signal this skill can get. Run one Codex reviewer over the whole security scope (`CHANGED_SEC`) when **all** hold:
+
+- the lead is Claude — when the lead already is Codex (including the review bot that drives Codex with this skill's logic), there is no second family to add;
+- `codex` is on `PATH` and the shell is POSIX (WSL/Linux/macOS). Native Windows PowerShell has no verified way to hand Codex a long prompt yet, so skip there;
+- the user did not ask to leave Codex out ("코덱스 없이").
+
+When any condition fails, skip and record why under **Cross-model** in the report. Do not ask first.
+
+**Independence.** Start it in the background at the same time as the Claude passes, with the prompt from `references/reviewer-prompts.md` (Codex Cross-Model Reviewer): the same Common Instructions, `[UNTRUSTED_DIFF]`, scope list, and diff the Claude reviewers get. **Never put Claude's findings in the prompt** — agreement between the two only means something when neither saw the other's answer.
+
+**Invocation.** A range flag and a custom prompt cannot be combined (`codex-delegate`), so use a plain read-only `exec` that reads the prompt from stdin. Follow `codex-delegate` for the run directory, result collection, and failure handling — findings on stdout, diagnosis on stderr, run directory outside the repository and removed either way:
+
+```bash
+printf '%s' "$codex_prompt" | codex -a never -s read-only exec - \
+  > "$outdir/codex-review.md" 2> "$outdir/codex-review.err.txt"
+```
+
+Run it with `run_in_background`, and judge progress by the stderr file growing. If stderr stops growing for 10 minutes, or the run passes 30 minutes, kill it by PID and treat the pass as incomplete. Read the result only after a zero exit.
+
+A failed or incomplete Codex pass does not block the verdict — the Claude passes still decide completeness in Step 3 — but the report must say that the review was single-model.
 
 ---
 
@@ -336,6 +362,7 @@ In team mode, wait until all spawned and queued reviewers have returned their co
 - If an agent does not respond within a reasonable time, note it as `⚠ Reviewer did not complete` in the final report and proceed with partial findings.
 - If an agent returns an error, retry once. If it fails again, mark that reviewer as unavailable.
 - Never block the entire report waiting for one reviewer indefinitely.
+- The Codex reviewer follows Step 2.6's limits instead of a retry; it never holds the report.
 
 **Completion gate — a language whose review did not happen cannot be approved.** Proceeding with
 partial findings is right for *reporting*; it is wrong for the *verdict*. For every language with
@@ -404,6 +431,13 @@ For concrete POSIX and PowerShell examples, read [references/cross-validation-pa
 - If the finding **is** in a non-downgradable class, keep the original severity and add a note that an intent comment exists.
 - Also verify the reverse: if a reviewer downgraded a non-downgradable-class finding because of a comment, restore its original severity.
 - A generic or unrelated nearby comment does not qualify — the comment must address the specific flagged risk.
+
+**4e. Merge the Codex findings** — when Step 2.6 completed, merge its findings with the Claude findings before writing the report:
+
+- Two findings match when they name the same defect in the same file, even at different lines or in different words. Merge them into one finding with `Source: Claude + Codex`; this agreement is the strongest signal in the report.
+- Every other finding carries `Source: Claude` or `Source: Codex`. A Codex-only Critical/High goes through 4b–4d exactly like a Claude one.
+- You are a Claude lead judging another model's work, so a Codex-only finding is never dropped silently. Downgrading or dismissing one requires a one-line reason in the report.
+- Where one model flags something and the other explicitly says the opposite, decide from the code and record the disagreement.
 
 ---
 
