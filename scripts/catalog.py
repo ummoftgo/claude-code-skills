@@ -11,7 +11,7 @@ from pathlib import Path
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("catalog", type=Path)
-    parser.add_argument("--kind", choices=("skill", "agent", "hook"), required=True)
+    parser.add_argument("--kind", choices=("skill", "agent", "hook", "rule"), required=True)
     parser.add_argument("--client", choices=("claude", "codex"), required=True)
     parser.add_argument("--platform", choices=("posix", "windows"), required=True)
     parser.add_argument("--field", choices=("name", "source"), default="name")

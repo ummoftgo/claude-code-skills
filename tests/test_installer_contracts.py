@@ -1,3 +1,5 @@
+import hashlib
+import importlib.util
 import json
 import os
 import shlex
@@ -76,6 +78,10 @@ class ComponentCatalogTest(unittest.TestCase):
         self.assertEqual(catalog_skills, repository_skills)
         self.assertEqual(catalog_agents, repository_agents)
         self.assertEqual(
+            [(item["name"], item["source"]) for item in components if item["kind"] == "rule"],
+            [("code-writing", "rules/code-writing.md")],
+        )
+        self.assertEqual(
             [item["name"] for item in components if item["kind"] == "hook"],
             ["workflow-reminder"],
         )
@@ -121,7 +127,7 @@ class ComponentCatalogTest(unittest.TestCase):
         components = json.loads(CATALOG.read_text(encoding="utf-8"))["components"]
         for client in ("claude", "codex"):
             for platform in ("posix", "windows"):
-                for kind in ("skill", "agent", "hook"):
+                for kind in ("skill", "agent", "hook", "rule"):
                     expected = {
                         item["name"] for item in components
                         if item["kind"] == kind and item["support"][client][platform]
@@ -475,6 +481,175 @@ test "$(cat "$new/SKILL.md")" = new
 '''
         )
         self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+
+
+class PosixRuleTest(unittest.TestCase):
+    start = b"<!-- claude-code-skills:code-writing -->\n"
+    end = b"<!-- /claude-code-skills:code-writing -->\n"
+
+    def setUp(self) -> None:
+        temporary = tempfile.TemporaryDirectory(prefix="rules home ")
+        self.addCleanup(temporary.cleanup)
+        self.home = Path(temporary.name)
+        self.agents = self.home / ".codex" / "AGENTS.md"
+        self.claude = self.home / ".claude" / "rules" / "code-writing.md"
+        self.manifest = self.home / ".claude-code-skills" / "manifest.json"
+        self.env = dict(os.environ, HOME=str(self.home), CODEX_HOME="", CLAUDE_CONFIG_DIR="")
+
+    def run_rules(self, action: str, scope: str = "global", answer: int = 0) -> subprocess.CompletedProcess[str]:
+        installing = action == "install"
+        body = f"""
+source {shlex.quote(str(ROOT / ('install.sh' if installing else 'uninstall.sh')))}
+{'INSTALL_SCOPE' if installing else 'UNINSTALL_SCOPE'}={scope}
+set_manifest_path
+ask_yn() {{ return {answer}; }}
+ask_yn_default_no() {{ return {answer}; }}
+{'install_rules' if installing else 'remove_rules'}
+"""
+        result = subprocess.run(["bash", "-c", body], env=self.env, text=True, capture_output=True, timeout=30)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        return result
+
+    def seed(self, content: bytes) -> None:
+        self.agents.parent.mkdir(parents=True, exist_ok=True)
+        self.agents.write_bytes(content)
+
+    def test_install_reinstall_remove_preserves_outside_bytes(self) -> None:
+        for original in (b"", b"user without newline", b"user\n", b"user\n\n", b"user\r\n\r\n",
+                         "사용자\r\n<!-- context7 -->\r\nkeep\r\n<!-- /context7 -->\r\n".encode()):
+            with self.subTest(original=original):
+                self.seed(original)
+                self.run_rules("install")
+                source = (ROOT / "rules" / "code-writing.md").read_bytes()
+                self.assertEqual(self.claude.read_bytes(), source)
+                installed = self.agents.read_bytes()
+                self.assertTrue(installed.startswith(original))
+                newline = b"\r\n" if b"\r\n" in original else b"\n"
+                separator = b""
+                if original and not original.endswith((b"\n\n", b"\n\r\n")):
+                    separator = newline * (1 if original.endswith(b"\n") else 2)
+                self.assertEqual(installed[:installed.index(self.start)], original + separator)
+                content = installed.split(self.start)[1].split(self.end)[0]
+                self.assertEqual(content, source if source.endswith(b"\n") else source + b"\n")
+                entries = json.loads(self.manifest.read_text())["entries"]
+                for entry in entries:
+                    self.assertEqual(entry["kind"], "rule")
+                    self.assertEqual(entry["component"], "code-writing")
+                    expected = content if entry["client"] == "codex" else source
+                    self.assertEqual(entry["hash"], hashlib.sha256(expected).hexdigest())
+                self.run_rules("install")
+                self.assertEqual(self.agents.read_bytes(), installed)
+                self.assertEqual(installed.count(self.start), 1)
+                self.run_rules("remove")
+                self.assertEqual(self.agents.read_bytes(), original)
+                self.assertFalse(self.claude.exists())
+                self.assertFalse(self.manifest.exists())
+
+    def test_absent_file_is_created_and_left_empty_after_removal(self) -> None:
+        self.run_rules("install")
+        self.assertTrue(self.agents.exists())
+        self.run_rules("remove")
+        self.assertEqual(self.agents.read_bytes(), b"")
+
+    def test_user_edits_to_both_rules_are_preserved_with_warning(self) -> None:
+        self.run_rules("install")
+        changed = self.agents.read_bytes().replace(self.start, self.start + b"user change\n")
+        self.agents.write_bytes(changed)
+        self.claude.write_bytes(b"user rule\n")
+        manifest_before = self.manifest.read_bytes()
+        for action in ("install", "remove"):
+            result = self.run_rules(action)
+            self.assertIn("[WARN]", result.stdout)
+            self.assertEqual(self.agents.read_bytes(), changed)
+            self.assertEqual(self.claude.read_bytes(), b"user rule\n")
+            self.assertEqual(self.manifest.read_bytes(), manifest_before)
+
+    def test_outside_edits_do_not_prevent_owned_block_removal(self) -> None:
+        self.seed(b"original\r\n")
+        self.run_rules("install")
+        self.agents.write_bytes(b"new prefix\r\n" + self.agents.read_bytes() + b"new suffix\r\n")
+        self.run_rules("install")
+        self.run_rules("remove")
+        self.assertEqual(self.agents.read_bytes(), b"new prefix\r\noriginal\r\nnew suffix\r\n")
+
+    def test_source_update_replaces_only_block_content(self) -> None:
+        self.seed(b"user\r\n<!-- context7 -->\r\nkeep\r\n<!-- /context7 -->\r\n")
+        self.run_rules("install")
+        source = (ROOT / "rules" / "code-writing.md").read_bytes()
+        replacement = source + b"\nupdated source\n"
+        changed_source = self.home / "updated-rule.md"
+        changed_source.write_bytes(replacement)
+        installed = self.agents.read_bytes().replace(self.start, self.start.replace(b"\n", b"\r\n"))
+        self.agents.write_bytes(installed)
+        result = subprocess.run(
+            [sys.executable, str(ROOT / "scripts" / "rule_block.py"), "install", "--target", str(self.agents),
+             "--manifest", str(self.manifest), "--name", "code-writing", "--source", str(changed_source)],
+            env=self.env, capture_output=True, text=True, timeout=30,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        old_content = source if source.endswith(b"\n") else source + b"\n"
+        self.assertEqual(self.agents.read_bytes(), installed.replace(old_content, replacement, 1))
+
+    def test_unowned_missing_duplicate_and_malformed_blocks_are_preserved(self) -> None:
+        self.run_rules("install")
+        owned = self.agents.read_bytes()
+        for changed in (owned + owned, owned.replace(self.end, b"broken closing marker\n"), b"user removed block\n"):
+            with self.subTest(changed=changed):
+                self.agents.write_bytes(changed)
+                for action in ("install", "remove"):
+                    self.assertIn("[WARN]", self.run_rules(action).stdout)
+                    self.assertEqual(self.agents.read_bytes(), changed)
+        self.manifest.unlink()
+        self.agents.write_bytes(owned)
+        for action in ("install", "remove"):
+            self.assertIn("[WARN]", self.run_rules(action).stdout)
+            self.assertEqual(self.agents.read_bytes(), owned)
+
+    def test_project_scope_and_declined_prompts_do_not_install_rules(self) -> None:
+        self.assertIn("rule은 전역 범위에서만 설치", self.run_rules("install", scope="project").stdout)
+        self.run_rules("remove", scope="project")
+        self.run_rules("install", answer=1)
+        self.assertFalse(self.claude.exists())
+        self.assertFalse(self.agents.exists())
+
+    def test_rule_manifest_failure_restores_target_and_record(self) -> None:
+        sys.path.insert(0, str(ROOT / "scripts"))
+        self.addCleanup(sys.path.remove, str(ROOT / "scripts"))
+        spec = importlib.util.spec_from_file_location("rule_block", ROOT / "scripts" / "rule_block.py")
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        self.seed(b"original\r\n")
+        args = type("Args", (), dict(action="install", target=self.agents, manifest=self.manifest,
+                                    source=ROOT / "rules" / "code-writing.md", name="code-writing"))()
+        from unittest.mock import patch
+        with patch.object(module.manifest, "_write", side_effect=OSError("injected manifest write failure")):
+            with self.assertRaisesRegex(OSError, "injected"):
+                module.update(args)
+        self.assertEqual(self.agents.read_bytes(), b"original\r\n")
+        self.assertFalse(self.manifest.exists())
+        self.run_rules("install")
+        args.action = "remove"
+        before = self.agents.read_bytes(), self.manifest.read_bytes()
+        with patch.object(module.manifest, "prune", side_effect=OSError("injected manifest prune failure")):
+            with self.assertRaisesRegex(OSError, "injected"):
+                module.update(args)
+        self.assertEqual((self.agents.read_bytes(), self.manifest.read_bytes()), before)
+
+    def test_posix_main_dispatches_rules_after_existing_questions(self) -> None:
+        for action in ("install", "uninstall"):
+            functions = ("ask_skill_install_mode create_skill_links setup_workflow_hook install_codex_skills install_agents show_dependency_diagnostics"
+                         if action == "install" else "remove_claude_skills remove_workflow_hook remove_codex_skills remove_agents")
+            stubs = "\n".join(f"{name}() {{ :; }}" for name in functions.split())
+            body = f"""
+source {shlex.quote(str(ROOT / (action + '.sh')))}
+ask_{action}_scope() {{ :; }}
+{stubs}
+main
+"""
+            done = subprocess.run(["bash", "-c", body], input="\n\n" if action == "install" else "y\ny\n",
+                                  env=self.env, capture_output=True, text=True, timeout=30)
+            self.assertEqual(done.returncode, 0, done.stdout + done.stderr)
+            self.assertEqual(self.claude.exists(), action == "install")
 
 
 class WindowsInstallerStaticContractTest(unittest.TestCase):

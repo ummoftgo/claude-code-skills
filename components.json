@@ -98,6 +98,12 @@
       "support": {"claude": {"posix": true, "windows": true}, "codex": {"posix": true, "windows": true}}
     },
     {
+      "kind": "rule",
+      "name": "code-writing",
+      "source": "rules/code-writing.md",
+      "support": {"claude": {"posix": true, "windows": true}, "codex": {"posix": true, "windows": true}}
+    },
+    {
       "kind": "hook",
       "name": "workflow-reminder",
       "source": {"posix": "hooks/workflow-reminder.py", "windows": "hooks/workflow-reminder.ps1"},

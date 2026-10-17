@@ -66,6 +66,11 @@ try {
         if ($scope -eq 'global' -and (Read-YesNo "Remove the managed $client workflow hook?" $false)) {
             Remove-WorkflowHook -Layout $layout -Client $client
         }
+        if ($scope -eq 'global' -and (Read-YesNo "Remove the managed $client code-writing rule?" $false)) {
+            foreach ($component in Get-SupportedComponents -Client $client -Platform windows -Kind rule) {
+                Remove-Rule -Layout $layout -Component $component -Client $client | Out-Null
+            }
+        }
     }
 } catch {
     Write-Error "Uninstall stopped: $($_.Exception.Message)"

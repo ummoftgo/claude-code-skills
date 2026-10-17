@@ -11,7 +11,7 @@ Claude Desktop Code와 Codex 앱/CLI에서 함께 사용하는 스킬, 에이전
 
 Windows 앱이 WSL 배포판을 작업 환경으로 사용한다면 Windows 설치기를 섞지 말고 배포판 안에서 `bash install.sh`를 실행하세요. 반대로 Windows 네이티브 앱·CLI에는 `.\install.ps1`을 사용합니다.
 
-설치기는 저장소의 스킬·에이전트·훅만 관리합니다. Claude 플러그인, Node.js, PHP, Codex CLI, Context7, agent-browser 같은 외부 도구는 자동 설치하지 않고 감지 결과와 설치 명령만 보여 줍니다.
+설치기는 저장소의 스킬·에이전트·훅·rule만 관리합니다. Claude 플러그인, Node.js, PHP, Codex CLI, Context7, agent-browser 같은 외부 도구는 자동 설치하지 않고 감지 결과와 설치 명령만 보여 줍니다.
 
 ## 빠른 시작
 
@@ -28,6 +28,7 @@ Set-ExecutionPolicy -Scope Process Bypass
 - 전역 또는 프로젝트 범위
 - 스킬 복사 또는 심볼릭 링크
 - 전역 범위의 워크플로우 훅
+- 전역 범위의 코드 작성 rule (기본값: 설치)
 
 스킬 기본값은 복사입니다. 심볼릭 링크는 저장소와 대상이 모두 Windows 로컬 경로일 때만 선택할 수 있으며, 권한 문제로 링크 생성이 실패하면 복사로 안전하게 전환합니다. 에이전트와 훅은 항상 복사합니다.
 
@@ -55,6 +56,7 @@ bash uninstall.sh
 |---|---|---|
 | Windows/POSIX 전역 스킬 | `~/.claude/skills/` | `~/.agents/skills/` |
 | 전역 에이전트 | `~/.claude/agents/*.md` | `~/.codex/agents/*.toml` |
+| 전역 rule | `~/.claude/rules/code-writing.md` | `~/.codex/AGENTS.md`의 관리 블록 |
 | 전역 훅 파일 | `~/.claude/hooks/` | `~/.codex/hooks/` |
 | 전역 훅 설정 | `~/.claude/settings.json` | `~/.codex/hooks.json` |
 | 프로젝트 스킬 | `<project>/.claude/skills/` | `<project>/.agents/skills/` |
@@ -62,11 +64,15 @@ bash uninstall.sh
 
 Windows 프로젝트 범위는 스킬과 에이전트만 설치합니다. Windows 훅은 전역 범위에서만 설치합니다.
 
+rule은 두 플랫폼 모두 전역 범위에서만 설치합니다. Codex의 기존 `AGENTS.md`와 다른 도구의 블록은 바이트 단위로 보존합니다. 재설치·제거 시 사용자가 수정한 rule은 경고와 함께 보존하며, 제거로 `AGENTS.md`가 비어도 파일은 남깁니다.
+
 전역 설치·제거는 기본 설정 경로를 관리합니다. `CODEX_HOME` 또는 `CLAUDE_CONFIG_DIR`가 다른 위치를 가리키면 변경 전에 중단합니다. 사용자 지정 경로는 [설치 가이드](INSTALL.md#사용자-지정-설정-디렉터리)를 참고하세요.
 
 기존 Codex 스킬 경로 `~/.codex/skills/local/`은 설치기가 안전하게 이전합니다. 저장소 링크 대상 또는 매니페스트 해시로 소유가 확인되고 새 `.agents/skills/` 대상에 충돌이 없을 때만 복사 후 이전 항목을 제거합니다. 수정됨·미확인·충돌 항목은 그대로 보존합니다.
 
 ## 제공 컴포넌트
+
+전역 코드 작성 규칙 [`rules/code-writing.md`](./rules/code-writing.md)는 Claude에는 파일로 복사하고, Codex에는 `<!-- claude-code-skills:code-writing -->` 마커 블록으로 설치합니다. 매니페스트에 파일 또는 블록 내용의 해시를 기록하여 소유권을 추적합니다.
 
 ### 스킬
 
